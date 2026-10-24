@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        dialog { border-radius: 8px; border: none; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,.2); }
+        /* ::backdrop 是 showModal() 自带的背景遮罩 —— 原生提供,不用手写 */
+        dialog::backdrop { background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(2px); }
+    </style>
+</head>
+<body>
+    <button id="open">删除文件</button>
+
+    <dialog id="confirm">
+        <form method="dialog">  <!-- method="dialog":提交即关闭,无需 JS -->
+            <h3>确认删除?</h3>
+            <p>此操作不可撤销。</p>
+            <menu>
+                <button value="cancel">取消</button>
+                <button value="confirm" autofocus>确认删除</button>
+            </menu>
+        </form>
+    </dialog>
+
+    <script>
+        const dlg = document.getElementById('confirm');
+        document.getElementById('open').onclick = () => dlg.showModal(); // showModal = 模态
+
+        dlg.addEventListener('close', () => {
+            // returnValue 来自 form 提交的 button value
+            if (dlg.returnValue === 'confirm') {
+                console.log('执行删除...');
+            }
+        });
+        // ✅ showModal 自动提供:top-layer 置顶、背景遮罩、Esc 关闭、焦点陷阱(Tab 不逃出)
+        // ❌ 反例:用 div + position:fixed 模拟 modal → 缺焦点陷阱,Tab 跑到背后表单
+    </script>
+</body>
+</html>

@@ -1,0 +1,402 @@
+[
+  {
+    "title": "事件循环判定",
+    "refs": [
+      {
+        "slug": "01-javascript-advanced",
+        "anchor": "_1-5-异步编程与事件循环",
+        "num": "1.5"
+      }
+    ]
+  },
+  {
+    "title": "防抖 vs 节流",
+    "refs": [
+      {
+        "slug": "01-javascript-advanced",
+        "anchor": "_1-8-手写高频工具函数",
+        "num": "1.8"
+      }
+    ]
+  },
+  {
+    "title": "缓存决策",
+    "refs": [
+      {
+        "slug": "06-network",
+        "anchor": "_6-2-缓存策略详解",
+        "num": "6.2"
+      },
+      {
+        "slug": "10-browser-rendering",
+        "anchor": "_10-6-service-worker-与-pwa",
+        "num": "10.6"
+      }
+    ]
+  },
+  {
+    "title": "竞态处理三招（优先级从高到低）",
+    "refs": [
+      {
+        "slug": "06-network",
+        "anchor": "_6-5-竞态处理与请求取消",
+        "num": "6.5"
+      }
+    ]
+  },
+  {
+    "title": "请求层标配（生产 checklist）",
+    "refs": [
+      {
+        "slug": "06-network",
+        "anchor": "_6-4-请求层封装实战",
+        "num": "6.4"
+      },
+      {
+        "slug": "07-security",
+        "anchor": "_7-5-认证与会话体系",
+        "num": "7.5"
+      }
+    ]
+  },
+  {
+    "title": "状态管理选型",
+    "refs": [
+      {
+        "slug": "05-state-management",
+        "anchor": "_5-6-状态管理选型对比",
+        "num": "5.6"
+      }
+    ]
+  },
+  {
+    "title": "渲染性能三板斧",
+    "refs": [
+      {
+        "slug": "10-browser-rendering",
+        "anchor": "_10-2-渲染流程与重排重绘",
+        "num": "10.2"
+      },
+      {
+        "slug": "10-browser-rendering",
+        "anchor": "_10-2-渲染流程与重排重绘",
+        "num": "10.2"
+      },
+      {
+        "slug": "12-css-engineering",
+        "anchor": "_12-4-css-性能优化",
+        "num": "12.4"
+      },
+      {
+        "slug": "10-browser-rendering",
+        "anchor": "_10-4-高性能虚拟列表",
+        "num": "10.4"
+      },
+      {
+        "slug": "04-frameworks",
+        "anchor": "_4-3-react-性能优化与新特性",
+        "num": "4.3"
+      }
+    ]
+  },
+  {
+    "title": "首屏加载 checklist",
+    "refs": [
+      {
+        "slug": "03-engineering",
+        "anchor": "_3-5-性能优化体系",
+        "num": "3.5"
+      }
+    ]
+  },
+  {
+    "title": "安全底线",
+    "refs": [
+      {
+        "slug": "07-security",
+        "anchor": "_7-4-前端安全清单",
+        "num": "7.4"
+      }
+    ]
+  },
+  {
+    "title": "TypeScript 三件套",
+    "refs": [
+      {
+        "slug": "02-typescript",
+        "anchor": "_2-5-手写常用工具类型",
+        "num": "2.5"
+      }
+    ]
+  },
+  {
+    "title": "框架渲染优化对照",
+    "refs": [
+      {
+        "slug": "04-frameworks",
+        "anchor": "_4-3-react-性能优化与新特性",
+        "num": "4.3"
+      },
+      {
+        "slug": "04-frameworks",
+        "anchor": "_4-5-vue-组合式-api-与性能优化",
+        "num": "4.5"
+      }
+    ]
+  },
+  {
+    "title": "Node 部署速查",
+    "refs": [
+      {
+        "slug": "16-node-server",
+        "anchor": "_16-4-部署与运行",
+        "num": "16.4"
+      }
+    ]
+  },
+  {
+    "title": "可视化选型决策",
+    "refs": [
+      {
+        "slug": "17-web-platform",
+        "anchor": "_17-2-可视化技术选型",
+        "num": "17.2"
+      }
+    ]
+  },
+  {
+    "title": "浏览器新能力速查（17.1）",
+    "refs": [
+      {
+        "slug": "17-web-platform",
+        "anchor": "_17-1-浏览器新能力速查",
+        "num": "17.1"
+      },
+      {
+        "slug": "17-web-platform",
+        "anchor": "_17-3-web-components",
+        "num": "17.3"
+      }
+    ]
+  },
+  {
+    "title": "大数据可视化优化（17.2）",
+    "refs": [
+      {
+        "slug": "17-web-platform",
+        "anchor": "_17-2-可视化技术选型",
+        "num": "17.2"
+      }
+    ]
+  },
+  {
+    "title": "Web Components 三件套速查（17.3）",
+    "refs": [
+      {
+        "slug": "17-web-platform",
+        "anchor": "_17-3-web-components",
+        "num": "17.3"
+      }
+    ]
+  },
+  {
+    "title": "WASM 适用边界（17.4）",
+    "refs": [
+      {
+        "slug": "17-web-platform",
+        "anchor": "_17-4-webassembly-适用边界",
+        "num": "17.4"
+      }
+    ]
+  },
+  {
+    "title": "Worker 三兄弟选型",
+    "refs": [
+      {
+        "slug": "18-worker-messaging",
+        "anchor": "模块二-dedicatedworker-web-worker-详解",
+        "num": ""
+      },
+      {
+        "slug": "18-worker-messaging",
+        "anchor": "模块三-sharedworker-共享线程详解",
+        "num": ""
+      },
+      {
+        "slug": "10-browser-rendering",
+        "anchor": "_10-5-web-worker-计算卸载",
+        "num": "10.5"
+      }
+    ]
+  },
+  {
+    "title": "Service Worker 一页纸",
+    "refs": [
+      {
+        "slug": "18-worker-messaging",
+        "anchor": "模块五-serviceworker-详解",
+        "num": ""
+      },
+      {
+        "slug": "10-browser-rendering",
+        "anchor": "_10-6-service-worker-与-pwa",
+        "num": "10.6"
+      }
+    ]
+  },
+  {
+    "title": "跨 Tab 通信选型",
+    "refs": [
+      {
+        "slug": "18-worker-messaging",
+        "anchor": "模块四-messagechannel-messageport-端口通信",
+        "num": ""
+      },
+      {
+        "slug": "18-worker-messaging",
+        "anchor": "模块六-跨-tab-窗口通信全方案",
+        "num": ""
+      },
+      {
+        "slug": "18-worker-messaging",
+        "anchor": "模块十-坑点速查、调试与自测",
+        "num": ""
+      }
+    ]
+  },
+  {
+    "title": "模式识别与架构速查",
+    "refs": [
+      {
+        "slug": "11-patterns-architecture",
+        "anchor": "_11-2-前端监控与错误上报",
+        "num": "11.2"
+      },
+      {
+        "slug": "11-patterns-architecture",
+        "anchor": "_11-3-微前端概览",
+        "num": "11.3"
+      },
+      {
+        "slug": "11-patterns-architecture",
+        "anchor": "_11-4-前端架构设计方法",
+        "num": "11.4"
+      }
+    ]
+  },
+  {
+    "title": "测试金字塔与选型速查",
+    "refs": [
+      {
+        "slug": "09-testing",
+        "anchor": "_9-1-测试金字塔与整体策略",
+        "num": "9.1"
+      }
+    ]
+  },
+  {
+    "title": "Testing Library 查询优先级",
+    "refs": [
+      {
+        "slug": "09-testing",
+        "anchor": "_9-3-组件测试与-testing-library",
+        "num": "9.3"
+      }
+    ]
+  },
+  {
+    "title": "Vitest 假定时器与 Mock 速查",
+    "refs": [
+      {
+        "slug": "09-testing",
+        "anchor": "_9-2-单元测试与-vitest",
+        "num": "9.2"
+      },
+      {
+        "slug": "09-testing",
+        "anchor": "_9-5-mock-策略与-msw",
+        "num": "9.5"
+      }
+    ]
+  },
+  {
+    "title": "Mock 三层级",
+    "refs": [
+      {
+        "slug": "09-testing",
+        "anchor": "_9-5-mock-策略与-msw",
+        "num": "9.5"
+      }
+    ]
+  },
+  {
+    "title": "Playwright E2E 速查",
+    "refs": [
+      {
+        "slug": "09-testing",
+        "anchor": "_9-4-e2e-测试与-playwright",
+        "num": "9.4"
+      }
+    ]
+  },
+  {
+    "title": "CI 质量门禁分层",
+    "refs": [
+      {
+        "slug": "09-testing",
+        "anchor": "_9-9-ci-集成与质量门禁",
+        "num": "9.9"
+      }
+    ]
+  },
+  {
+    "title": "对象封闭三档",
+    "refs": [
+      {
+        "slug": "01-javascript-advanced",
+        "anchor": "_1-9-属性描述符与对象封闭",
+        "num": "1.9"
+      }
+    ]
+  },
+  {
+    "title": "ES2022–ES2027 速查",
+    "refs": [
+      {
+        "slug": "01-javascript-advanced",
+        "anchor": "_1-12-es-版本特性演进-2022–2027",
+        "num": "1.12"
+      }
+    ]
+  },
+  {
+    "title": "Set / Map / Weak 选型",
+    "refs": [
+      {
+        "slug": "01-javascript-advanced",
+        "anchor": "_1-11-symbol-与集合类型",
+        "num": "1.11"
+      }
+    ]
+  },
+  {
+    "title": "迭代协议与惰性管线",
+    "refs": [
+      {
+        "slug": "01-javascript-advanced",
+        "anchor": "_1-14-iterator、generator-与惰性管线",
+        "num": "1.14"
+      }
+    ]
+  },
+  {
+    "title": "正则高级用法速查",
+    "refs": [
+      {
+        "slug": "01-javascript-advanced",
+        "anchor": "_1-15-正则高级用法",
+        "num": "1.15"
+      }
+    ]
+  }
+]

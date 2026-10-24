@@ -1,0 +1,4612 @@
+{
+  "generatedAt": "2026-10-24",
+  "stats": {
+    "parts": 59,
+    "sections": 527,
+    "quiz": 420,
+    "quizByLevel": {
+      "基础": 113,
+      "进阶": 193,
+      "挑战": 114,
+      "未分级": 0
+    },
+    "examples": 285,
+    "episodes": 58,
+    "backlinks": 52
+  },
+  "parts": [
+    {
+      "file": "01-javascript-advanced.md",
+      "slug": "01-javascript-advanced",
+      "title": "第一部分：JavaScript 高级特性",
+      "sections": [
+        {
+          "text": "1.1 执行上下文与作用域",
+          "anchor": "_1-1-执行上下文与作用域",
+          "backlinks": []
+        },
+        {
+          "text": "1.2 闭包",
+          "anchor": "_1-2-闭包",
+          "backlinks": []
+        },
+        {
+          "text": "1.3 原型链与继承",
+          "anchor": "_1-3-原型链与继承",
+          "backlinks": []
+        },
+        {
+          "text": "1.4 this 指向与函数绑定",
+          "anchor": "_1-4-this-指向与函数绑定",
+          "backlinks": []
+        },
+        {
+          "text": "1.5 异步编程与事件循环",
+          "anchor": "_1-5-异步编程与事件循环",
+          "backlinks": []
+        },
+        {
+          "text": "1.6 内存管理与垃圾回收",
+          "anchor": "_1-6-内存管理与垃圾回收",
+          "backlinks": []
+        },
+        {
+          "text": "1.7 函数式编程",
+          "anchor": "_1-7-函数式编程",
+          "backlinks": []
+        },
+        {
+          "text": "1.8 手写高频工具函数",
+          "anchor": "_1-8-手写高频工具函数",
+          "backlinks": [
+            {
+              "file": "14-frontend-ai.md",
+              "text": "14.5 成本、稳定性与安全",
+              "anchor": "_14-5-成本、稳定性与安全"
+            }
+          ]
+        },
+        {
+          "text": "1.9 属性描述符与对象封闭",
+          "anchor": "_1-9-属性描述符与对象封闭",
+          "backlinks": []
+        },
+        {
+          "text": "1.10 继承方案演进与多态",
+          "anchor": "_1-10-继承方案演进与多态",
+          "backlinks": []
+        },
+        {
+          "text": "1.11 Symbol 与集合类型",
+          "anchor": "_1-11-symbol-与集合类型",
+          "backlinks": []
+        },
+        {
+          "text": "1.12 ES 版本特性演进（2022–2027）",
+          "anchor": "_1-12-es-版本特性演进-2022–2027",
+          "backlinks": []
+        },
+        {
+          "text": "1.13 Proxy 与 Reflect",
+          "anchor": "_1-13-proxy-与-reflect",
+          "backlinks": []
+        },
+        {
+          "text": "1.14 Iterator、Generator 与惰性管线",
+          "anchor": "_1-14-iterator、generator-与惰性管线",
+          "backlinks": []
+        },
+        {
+          "text": "1.15 正则高级用法",
+          "anchor": "_1-15-正则高级用法",
+          "backlinks": []
+        },
+        {
+          "text": "1.16 错误处理体系",
+          "anchor": "_1-16-错误处理体系",
+          "backlinks": []
+        },
+        {
+          "text": "1.17 JSON 序列化深入",
+          "anchor": "_1-17-json-序列化深入",
+          "backlinks": [
+            {
+              "file": "05-state-management.md",
+              "text": "5.7 状态持久化与版本迁移",
+              "anchor": "_5-7-状态持久化与版本迁移"
+            }
+          ]
+        },
+        {
+          "text": "1.18 自测题",
+          "anchor": "_1-18-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "1.19 本章避坑清单",
+          "anchor": "_1-19-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 22,
+      "quizByLevel": {
+        "基础": 4,
+        "进阶": 13,
+        "挑战": 5,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/01-25-engine-pipeline.js",
+        "examples/01-01-hoisting.ts",
+        "examples/01-02-tdz.js",
+        "examples/01-34-classic-traps.ts",
+        "examples/01-03-closure-wallet.ts",
+        "examples/01-04-closure-loop.ts",
+        "examples/01-05-closure-once.ts",
+        "examples/01-06-prototype-chain.ts",
+        "examples/01-07-inherit-es5.ts",
+        "examples/01-08-class.ts",
+        "examples/01-09-instanceof.ts",
+        "examples/01-10-this.ts",
+        "examples/01-11-mybind.ts",
+        "examples/01-12-event-loop.js",
+        "examples/01-13-promise-patterns.ts",
+        "examples/01-14-my-promise.ts",
+        "examples/01-15-async-pool.ts",
+        "examples/01-35-promise-eventloop-traps.ts",
+        "examples/01-16-memory-leak.ts",
+        "examples/01-18-fp-basics.ts",
+        "examples/01-19-curry-compose.ts",
+        "examples/01-20-debounce-throttle.ts",
+        "examples/01-21-deep-clone.ts",
+        "examples/01-22-event-bus.ts",
+        "examples/01-23-lru-cache.ts",
+        "examples/01-24-retry-timeout.ts",
+        "examples/01-26-property-descriptors.ts",
+        "examples/01-27-inheritance-evolution.ts",
+        "examples/01-28-symbol-collections.ts",
+        "examples/01-29-es2022-2027-features.ts",
+        "examples/01-36-es2026-2027-compat.ts",
+        "examples/01-30-proxy-reflect.ts",
+        "examples/01-31-iterator-generator.ts",
+        "examples/01-38-generator-advanced.ts",
+        "examples/01-37-regex-advanced.ts",
+        "examples/01-32-error-handling.ts",
+        "examples/01-33-json-deep.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 1,
+          "title": "闭包与事件循环",
+          "slug": "EP.01-closure-and-event-loop"
+        },
+        {
+          "ep": 33,
+          "title": "描述符·Proxy 与现代 ES",
+          "slug": "EP.33-descriptor-proxy-iterator"
+        },
+        {
+          "ep": 35,
+          "title": "正则高级用法通关",
+          "slug": "EP.35-regex-advanced"
+        },
+        {
+          "ep": 36,
+          "title": "生成器高阶模式",
+          "slug": "EP.36-generator-advanced"
+        }
+      ],
+      "lines": 2612
+    },
+    {
+      "file": "02-typescript.md",
+      "slug": "02-typescript",
+      "title": "第二部分：TypeScript 高级应用",
+      "sections": [
+        {
+          "text": "2.1 类型系统核心与类型收窄",
+          "anchor": "_2-1-类型系统核心与类型收窄",
+          "backlinks": []
+        },
+        {
+          "text": "2.2 泛型深入",
+          "anchor": "_2-2-泛型深入",
+          "backlinks": []
+        },
+        {
+          "text": "2.3 条件类型与 infer",
+          "anchor": "_2-3-条件类型与-infer",
+          "backlinks": []
+        },
+        {
+          "text": "2.4 映射类型与模板字面量类型",
+          "anchor": "_2-4-映射类型与模板字面量类型",
+          "backlinks": []
+        },
+        {
+          "text": "2.5 手写常用工具类型",
+          "anchor": "_2-5-手写常用工具类型",
+          "backlinks": []
+        },
+        {
+          "text": "2.6 类型体操实战",
+          "anchor": "_2-6-类型体操实战",
+          "backlinks": []
+        },
+        {
+          "text": "2.7 装饰器",
+          "anchor": "_2-7-装饰器",
+          "backlinks": [
+            {
+              "file": "11-patterns-architecture.md",
+              "text": "11.1 前端常用设计模式",
+              "anchor": "_11-1-前端常用设计模式"
+            }
+          ]
+        },
+        {
+          "text": "2.8 工程配置与类型声明文件",
+          "anchor": "_2-8-工程配置与类型声明文件",
+          "backlinks": []
+        },
+        {
+          "text": "2.9 自测题",
+          "anchor": "_2-9-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "2.10 本章避坑清单",
+          "anchor": "_2-10-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 4,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 2,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/02-01-narrowing.ts",
+        "examples/02-02-generics.ts",
+        "examples/02-03-typed-api.ts",
+        "examples/02-04-conditional-infer.ts",
+        "examples/02-05-mapped-template.ts",
+        "examples/02-06-utility-types.ts",
+        "examples/02-07-type-challenges.ts",
+        "examples/02-08-decorators.ts",
+        "examples/tsconfig.js"
+      ],
+      "episodes": [
+        {
+          "ep": 2,
+          "title": "TypeScript 类型体操",
+          "slug": "EP.02-type-gymnastics"
+        }
+      ],
+      "lines": 824
+    },
+    {
+      "file": "03-engineering.md",
+      "slug": "03-engineering",
+      "title": "第三部分：前端工程化",
+      "sections": [
+        {
+          "text": "3.1 模块化方案演进",
+          "anchor": "_3-1-模块化方案演进",
+          "backlinks": []
+        },
+        {
+          "text": "3.2 包管理与依赖治理",
+          "anchor": "_3-2-包管理与依赖治理",
+          "backlinks": []
+        },
+        {
+          "text": "3.3 构建工具原理与实践",
+          "anchor": "_3-3-构建工具原理与实践",
+          "backlinks": []
+        },
+        {
+          "text": "3.4 代码分割与 Tree Shaking",
+          "anchor": "_3-4-代码分割与-tree-shaking",
+          "backlinks": [
+            {
+              "file": "01-javascript-advanced.md",
+              "text": "1.1 执行上下文与作用域",
+              "anchor": "_1-1-执行上下文与作用域"
+            }
+          ]
+        },
+        {
+          "text": "3.5 性能优化体系",
+          "anchor": "_3-5-性能优化体系",
+          "backlinks": [
+            {
+              "file": "06-network.md",
+              "text": "6.9 本章避坑清单",
+              "anchor": "_6-9-本章避坑清单"
+            },
+            {
+              "file": "09-testing.md",
+              "text": "9.7 性能测试与基准",
+              "anchor": "_9-7-性能测试与基准"
+            },
+            {
+              "file": "12-css-engineering.md",
+              "text": "12.1 现代布局体系",
+              "anchor": "_12-1-现代布局体系"
+            },
+            {
+              "file": "59-monitoring-observability.md",
+              "text": "第五十九部分 · 前端监控与可观测性闭环",
+              "anchor": null
+            }
+          ]
+        },
+        {
+          "text": "3.6 Monorepo 实践",
+          "anchor": "_3-6-monorepo-实践",
+          "backlinks": [
+            {
+              "file": "11-patterns-architecture.md",
+              "text": "11.3 微前端概览",
+              "anchor": "_11-3-微前端概览"
+            },
+            {
+              "file": "11-patterns-architecture.md",
+              "text": "11.4 前端架构设计方法",
+              "anchor": "_11-4-前端架构设计方法"
+            }
+          ]
+        },
+        {
+          "text": "3.7 CI/CD 与质量工具链",
+          "anchor": "_3-7-ci-cd-与质量工具链",
+          "backlinks": [
+            {
+              "file": "02-typescript.md",
+              "text": "2.8 工程配置与类型声明文件",
+              "anchor": "_2-8-工程配置与类型声明文件"
+            },
+            {
+              "file": "02-typescript.md",
+              "text": "2.10 本章避坑清单",
+              "anchor": "_2-10-本章避坑清单"
+            }
+          ]
+        },
+        {
+          "text": "3.8 自测题",
+          "anchor": "_3-8-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "3.9 本章避坑清单",
+          "anchor": "_3-9-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 6,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 4,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/03-01-modules/esm/counter.ts",
+        "examples/03-01-modules/esm/main.ts",
+        "examples/03-02-tree-shaking.ts",
+        "examples/03-03-web-vitals.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 3,
+          "title": "工程化与摇树优化",
+          "slug": "EP.03-tree-shaking-build"
+        }
+      ],
+      "lines": 795
+    },
+    {
+      "file": "04-frameworks.md",
+      "slug": "04-frameworks",
+      "title": "第四部分：框架深入理解",
+      "sections": [
+        {
+          "text": "4.1 React 架构与 Fiber 原理",
+          "anchor": "_4-1-react-架构与-fiber-原理",
+          "backlinks": []
+        },
+        {
+          "text": "4.2 Hooks 原理与自定义 Hook",
+          "anchor": "_4-2-hooks-原理与自定义-hook",
+          "backlinks": [
+            {
+              "file": "01-javascript-advanced.md",
+              "text": "1.2 闭包",
+              "anchor": "_1-2-闭包"
+            }
+          ]
+        },
+        {
+          "text": "4.3 React 性能优化与新特性",
+          "anchor": "_4-3-react-性能优化与新特性",
+          "backlinks": []
+        },
+        {
+          "text": "4.4 Vue 响应式系统原理",
+          "anchor": "_4-4-vue-响应式系统原理",
+          "backlinks": []
+        },
+        {
+          "text": "4.5 Vue 组合式 API 与性能优化",
+          "anchor": "_4-5-vue-组合式-api-与性能优化",
+          "backlinks": []
+        },
+        {
+          "text": "4.6 Angular 核心概念速览",
+          "anchor": "_4-6-angular-核心概念速览",
+          "backlinks": [
+            {
+              "file": "02-typescript.md",
+              "text": "2.7 装饰器",
+              "anchor": "_2-7-装饰器"
+            }
+          ]
+        },
+        {
+          "text": "4.7 React 与 Vue 原理对照",
+          "anchor": "_4-7-react-与-vue-原理对照",
+          "backlinks": []
+        },
+        {
+          "text": "4.8 框架对比与选型",
+          "anchor": "_4-8-框架对比与选型",
+          "backlinks": []
+        },
+        {
+          "text": "4.9 自测题",
+          "anchor": "_4-9-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "4.10 本章避坑清单",
+          "anchor": "_4-10-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 6,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 2,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/04-01-use-state-mechanism.ts",
+        "examples/04-02-mini-reactivity.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 4,
+          "title": "React Fiber 与 Vue 响应式",
+          "slug": "EP.04-fiber-and-reactivity"
+        }
+      ],
+      "lines": 1217
+    },
+    {
+      "file": "05-state-management.md",
+      "slug": "05-state-management",
+      "title": "第五部分：状态管理方案",
+      "sections": [
+        {
+          "text": "5.1 状态管理设计思想",
+          "anchor": "_5-1-状态管理设计思想",
+          "backlinks": []
+        },
+        {
+          "text": "5.2 Redux 思想与 RTK",
+          "anchor": "_5-2-redux-思想与-rtk",
+          "backlinks": []
+        },
+        {
+          "text": "5.3 Zustand 轻量方案",
+          "anchor": "_5-3-zustand-轻量方案",
+          "backlinks": []
+        },
+        {
+          "text": "5.4 Pinia 与 Vue3",
+          "anchor": "_5-4-pinia-与-vue3",
+          "backlinks": []
+        },
+        {
+          "text": "5.5 服务端状态管理 TanStack Query",
+          "anchor": "_5-5-服务端状态管理-tanstack-query",
+          "backlinks": [
+            {
+              "file": "11-patterns-architecture.md",
+              "text": "11.4 前端架构设计方法",
+              "anchor": "_11-4-前端架构设计方法"
+            }
+          ]
+        },
+        {
+          "text": "5.6 状态管理选型对比",
+          "anchor": "_5-6-状态管理选型对比",
+          "backlinks": []
+        },
+        {
+          "text": "5.7 状态持久化与版本迁移",
+          "anchor": "_5-7-状态持久化与版本迁移",
+          "backlinks": []
+        },
+        {
+          "text": "5.8 自测题",
+          "anchor": "_5-8-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "5.9 本章避坑清单",
+          "anchor": "_5-9-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 6,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 4,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/05-01-mini-redux.ts",
+        "examples/05-02-persist-migrate.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 5,
+          "title": "状态管理思想",
+          "slug": "EP.05-state-management"
+        }
+      ],
+      "lines": 606
+    },
+    {
+      "file": "06-network.md",
+      "slug": "06-network",
+      "title": "第六部分：网络请求优化",
+      "sections": [
+        {
+          "text": "6.1 HTTP 协议演进与优化要点",
+          "anchor": "_6-1-http-协议演进与优化要点",
+          "backlinks": []
+        },
+        {
+          "text": "6.2 缓存策略详解",
+          "anchor": "_6-2-缓存策略详解",
+          "backlinks": [
+            {
+              "file": "03-engineering.md",
+              "text": "3.3 构建工具原理与实践",
+              "anchor": "_3-3-构建工具原理与实践"
+            },
+            {
+              "file": "03-engineering.md",
+              "text": "3.5 性能优化体系",
+              "anchor": "_3-5-性能优化体系"
+            },
+            {
+              "file": "10-browser-rendering.md",
+              "text": "10.6 Service Worker 与 PWA",
+              "anchor": "_10-6-service-worker-与-pwa"
+            }
+          ]
+        },
+        {
+          "text": "6.3 跨域与 CORS",
+          "anchor": "_6-3-跨域与-cors",
+          "backlinks": []
+        },
+        {
+          "text": "6.4 请求层封装实战",
+          "anchor": "_6-4-请求层封装实战",
+          "backlinks": [
+            {
+              "file": "09-testing.md",
+              "text": "9.8 类型测试与契约测试",
+              "anchor": "_9-8-类型测试与契约测试"
+            },
+            {
+              "file": "11-patterns-architecture.md",
+              "text": "11.4 前端架构设计方法",
+              "anchor": "_11-4-前端架构设计方法"
+            },
+            {
+              "file": "46-error-handling.md",
+              "text": "46.3 异步错误：Promise 链与 async/await 的捕获规则",
+              "anchor": "_46-3-异步错误-promise-链与-async-await-的捕获规则"
+            }
+          ]
+        },
+        {
+          "text": "6.5 竞态处理与请求取消",
+          "anchor": "_6-5-竞态处理与请求取消",
+          "backlinks": [
+            {
+              "file": "11-patterns-architecture.md",
+              "text": "11.1 前端常用设计模式",
+              "anchor": "_11-1-前端常用设计模式"
+            },
+            {
+              "file": "46-error-handling.md",
+              "text": "46.4 多个异步任务的错误编排：短路、汇总与补偿",
+              "anchor": "_46-4-多个异步任务的错误编排-短路、汇总与补偿"
+            }
+          ]
+        },
+        {
+          "text": "6.6 实时通信技术",
+          "anchor": "_6-6-实时通信技术",
+          "backlinks": [
+            {
+              "file": "14-frontend-ai.md",
+              "text": "14.1 LLM 应用的前端架构总览",
+              "anchor": "_14-1-llm-应用的前端架构总览"
+            },
+            {
+              "file": "21-frontend-ai-interview.md",
+              "text": "第二十一部分：前端 AI 技术与面试通关",
+              "anchor": null
+            }
+          ]
+        },
+        {
+          "text": "6.7 大文件上传方案",
+          "anchor": "_6-7-大文件上传方案",
+          "backlinks": []
+        },
+        {
+          "text": "6.8 自测题",
+          "anchor": "_6-8-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "6.9 本章避坑清单",
+          "anchor": "_6-9-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 4,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 2,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/06-01-cache-strategy.ts",
+        "examples/06-02-cors-front.ts",
+        "examples/06-03-sse.ts",
+        "examples/06-04-websocket-manager.ts",
+        "examples/06-05-chunk-upload.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 6,
+          "title": "HTTP 缓存与竞态",
+          "slug": "EP.06-http-cache-and-race"
+        }
+      ],
+      "lines": 793
+    },
+    {
+      "file": "07-security.md",
+      "slug": "07-security",
+      "title": "第七部分：前端安全",
+      "sections": [
+        {
+          "text": "7.1 XSS 跨站脚本攻击",
+          "anchor": "_7-1-xss-跨站脚本攻击",
+          "backlinks": [
+            {
+              "file": "06-network.md",
+              "text": "6.4 请求层封装实战",
+              "anchor": "_6-4-请求层封装实战"
+            },
+            {
+              "file": "21-frontend-ai-interview.md",
+              "text": "第二十一部分：前端 AI 技术与面试通关",
+              "anchor": null
+            },
+            {
+              "file": "21-frontend-ai-interview.md",
+              "text": "21.5 Markdown 增量渲染",
+              "anchor": "_21-5-markdown-增量渲染"
+            }
+          ]
+        },
+        {
+          "text": "7.2 CSRF 跨站请求伪造",
+          "anchor": "_7-2-csrf-跨站请求伪造",
+          "backlinks": []
+        },
+        {
+          "text": "7.3 其他常见攻击与防御",
+          "anchor": "_7-3-其他常见攻击与防御",
+          "backlinks": []
+        },
+        {
+          "text": "7.4 前端安全清单",
+          "anchor": "_7-4-前端安全清单",
+          "backlinks": []
+        },
+        {
+          "text": "7.5 认证与会话体系",
+          "anchor": "_7-5-认证与会话体系",
+          "backlinks": []
+        },
+        {
+          "text": "7.6 自测题",
+          "anchor": "_7-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "7.7 本章避坑清单",
+          "anchor": "_7-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 4,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 2,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/07-01-xss-defense.ts",
+        "examples/07-02-csrf-defense.ts",
+        "examples/07-03-other-attacks.ts",
+        "examples/07-04-auth-manager.ts",
+        "examples/07-05-qr-login.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 7,
+          "title": "XSS 与 CSRF 攻防",
+          "slug": "EP.07-xss-csrf-defense"
+        }
+      ],
+      "lines": 539
+    },
+    {
+      "file": "08-cross-platform.md",
+      "slug": "08-cross-platform",
+      "title": "第八部分：跨端开发",
+      "sections": [
+        {
+          "text": "8.1 跨端技术全景与选型",
+          "anchor": "_8-1-跨端技术全景与选型",
+          "backlinks": []
+        },
+        {
+          "text": "8.2 小程序与 Taro",
+          "anchor": "_8-2-小程序与-taro",
+          "backlinks": []
+        },
+        {
+          "text": "8.3 React Native",
+          "anchor": "_8-3-react-native",
+          "backlinks": []
+        },
+        {
+          "text": "8.4 Electron 桌面应用",
+          "anchor": "_8-4-electron-桌面应用",
+          "backlinks": []
+        },
+        {
+          "text": "8.5 Hybrid 与 JSBridge 原理",
+          "anchor": "_8-5-hybrid-与-jsbridge-原理",
+          "backlinks": []
+        },
+        {
+          "text": "8.6 Flutter 与其他方案",
+          "anchor": "_8-6-flutter-与其他方案",
+          "backlinks": []
+        },
+        {
+          "text": "8.7 路由与页面栈差异",
+          "anchor": "_8-7-路由与页面栈差异",
+          "backlinks": []
+        },
+        {
+          "text": "8.8 自测题",
+          "anchor": "_8-8-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "8.9 本章避坑清单",
+          "anchor": "_8-9-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 6,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 5,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/08-01-jsbridge.ts",
+        "examples/08-02-page-stack.ts",
+        "examples/08-03-pointer-events-unify.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 8,
+          "title": "JSBridge 与跨端",
+          "slug": "EP.08-jsbridge-hybrid"
+        }
+      ],
+      "lines": 677
+    },
+    {
+      "file": "09-testing.md",
+      "slug": "09-testing",
+      "title": "第九部分：测试策略",
+      "sections": [
+        {
+          "text": "9.1 测试金字塔与整体策略",
+          "anchor": "_9-1-测试金字塔与整体策略",
+          "backlinks": []
+        },
+        {
+          "text": "9.2 单元测试与 Vitest",
+          "anchor": "_9-2-单元测试与-vitest",
+          "backlinks": []
+        },
+        {
+          "text": "9.3 组件测试与 Testing Library",
+          "anchor": "_9-3-组件测试与-testing-library",
+          "backlinks": []
+        },
+        {
+          "text": "9.4 E2E 测试与 Playwright",
+          "anchor": "_9-4-e2e-测试与-playwright",
+          "backlinks": []
+        },
+        {
+          "text": "9.5 Mock 策略与 MSW",
+          "anchor": "_9-5-mock-策略与-msw",
+          "backlinks": []
+        },
+        {
+          "text": "9.6 视觉回归与快照测试",
+          "anchor": "_9-6-视觉回归与快照测试",
+          "backlinks": []
+        },
+        {
+          "text": "9.7 性能测试与基准",
+          "anchor": "_9-7-性能测试与基准",
+          "backlinks": []
+        },
+        {
+          "text": "9.8 类型测试与契约测试",
+          "anchor": "_9-8-类型测试与契约测试",
+          "backlinks": []
+        },
+        {
+          "text": "9.9 CI 集成与质量门禁",
+          "anchor": "_9-9-ci-集成与质量门禁",
+          "backlinks": []
+        },
+        {
+          "text": "9.10 自测题",
+          "anchor": "_9-10-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "9.11 本章避坑清单",
+          "anchor": "_9-11-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 12,
+      "quizByLevel": {
+        "基础": 3,
+        "进阶": 6,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/09-02-money.test.ts",
+        "examples/09-01-vitest-config.ts",
+        "examples/09-08-bench.ts",
+        "examples/09-04-counter.test.tsx",
+        "examples/09-05-msw-handlers.ts",
+        "examples/09-06-visual-regression.ts",
+        "examples/09-09-type-tests.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 9,
+          "title": "测试金字塔",
+          "slug": "EP.09-testing-pyramid"
+        }
+      ],
+      "lines": 1700
+    },
+    {
+      "file": "10-browser-rendering.md",
+      "slug": "10-browser-rendering",
+      "title": "第十部分：浏览器原理与渲染性能",
+      "sections": [
+        {
+          "text": "10.1 从输入 URL 到页面呈现",
+          "anchor": "_10-1-从输入-url-到页面呈现",
+          "backlinks": [
+            {
+              "file": "11-patterns-architecture.md",
+              "text": "11.2 前端监控与错误上报",
+              "anchor": "_11-2-前端监控与错误上报"
+            }
+          ]
+        },
+        {
+          "text": "10.2 渲染流程与重排重绘",
+          "anchor": "_10-2-渲染流程与重排重绘",
+          "backlinks": [
+            {
+              "file": "12-css-engineering.md",
+              "text": "12.4 CSS 性能优化",
+              "anchor": "_12-4-css-性能优化"
+            }
+          ]
+        },
+        {
+          "text": "10.3 渲染性能优化实战",
+          "anchor": "_10-3-渲染性能优化实战",
+          "backlinks": [
+            {
+              "file": "12-css-engineering.md",
+              "text": "12.4 CSS 性能优化",
+              "anchor": "_12-4-css-性能优化"
+            },
+            {
+              "file": "21-frontend-ai-interview.md",
+              "text": "第二十一部分：前端 AI 技术与面试通关",
+              "anchor": null
+            }
+          ]
+        },
+        {
+          "text": "10.4 高性能虚拟列表",
+          "anchor": "_10-4-高性能虚拟列表",
+          "backlinks": [
+            {
+              "file": "04-frameworks.md",
+              "text": "4.5 Vue 组合式 API 与性能优化",
+              "anchor": "_4-5-vue-组合式-api-与性能优化"
+            },
+            {
+              "file": "12-css-engineering.md",
+              "text": "12.4 CSS 性能优化",
+              "anchor": "_12-4-css-性能优化"
+            },
+            {
+              "file": "12-css-engineering.md",
+              "text": "12.6 本章避坑清单",
+              "anchor": "_12-6-本章避坑清单"
+            },
+            {
+              "file": "21-frontend-ai-interview.md",
+              "text": "21.7 通用面试方法论与评分标准",
+              "anchor": "_21-7-通用面试方法论与评分标准"
+            }
+          ]
+        },
+        {
+          "text": "10.5 Web Worker 计算卸载",
+          "anchor": "_10-5-web-worker-计算卸载",
+          "backlinks": [
+            {
+              "file": "16-node-server.md",
+              "text": "16.1 Node 运行时要点",
+              "anchor": "_16-1-node-运行时要点"
+            }
+          ]
+        },
+        {
+          "text": "10.6 Service Worker 与 PWA",
+          "anchor": "_10-6-service-worker-与-pwa",
+          "backlinks": [
+            {
+              "file": "56-offline-cache.md",
+              "text": "56.2 PWA 离线：壳缓存与数据缓存分工",
+              "anchor": "_56-2-pwa-离线-壳缓存与数据缓存分工"
+            }
+          ]
+        },
+        {
+          "text": "10.7 自测题",
+          "anchor": "_10-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "10.8 本章避坑清单",
+          "anchor": "_10-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 4,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 2,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/10-01-layout-thrashing.js",
+        "examples/10-02-raf-scroll.ts",
+        "examples/10-03-sw.js",
+        "examples/10-04-sw-register.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 10,
+          "title": "浏览器渲染流水线",
+          "slug": "EP.10-render-pipeline"
+        }
+      ],
+      "lines": 577
+    },
+    {
+      "file": "11-patterns-architecture.md",
+      "slug": "11-patterns-architecture",
+      "title": "第十一部分：设计模式与架构",
+      "sections": [
+        {
+          "text": "11.1 前端常用设计模式",
+          "anchor": "_11-1-前端常用设计模式",
+          "backlinks": []
+        },
+        {
+          "text": "11.2 前端监控与错误上报",
+          "anchor": "_11-2-前端监控与错误上报",
+          "backlinks": [
+            {
+              "file": "03-engineering.md",
+              "text": "3.5 性能优化体系",
+              "anchor": "_3-5-性能优化体系"
+            },
+            {
+              "file": "46-error-handling.md",
+              "text": "46.1 错误分类与捕获全景",
+              "anchor": "_46-1-错误分类与捕获全景"
+            },
+            {
+              "file": "59-monitoring-observability.md",
+              "text": "第五十九部分 · 前端监控与可观测性闭环",
+              "anchor": null
+            }
+          ]
+        },
+        {
+          "text": "11.3 微前端概览",
+          "anchor": "_11-3-微前端概览",
+          "backlinks": [
+            {
+              "file": "34-architect-roadmap.md",
+              "text": "34.2 技术决策方法论：trade-off 矩阵与 ADR",
+              "anchor": "_34-2-技术决策方法论-trade-off-矩阵与-adr"
+            }
+          ]
+        },
+        {
+          "text": "11.4 前端架构设计方法",
+          "anchor": "_11-4-前端架构设计方法",
+          "backlinks": [
+            {
+              "file": "34-architect-roadmap.md",
+              "text": "34.3 架构设计实战：从 0 到 1 与从 1 到 100",
+              "anchor": "_34-3-架构设计实战-从-0-到-1-与从-1-到-100"
+            }
+          ]
+        },
+        {
+          "text": "11.5 自测题",
+          "anchor": "_11-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "11.6 本章避坑清单",
+          "anchor": "_11-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 10,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 5,
+        "挑战": 4,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/11-01-patterns.ts",
+        "examples/11-04-eventbus.ts",
+        "examples/11-05-command-undo.ts",
+        "examples/11-06-state-machine.ts",
+        "examples/11-07-adapter-pay.ts",
+        "examples/11-08-react-use-event.tsx",
+        "examples/11-02-monitor.ts",
+        "examples/11-10-monitor-queue.ts",
+        "examples/11-11-monitor-trace.ts",
+        "examples/11-03-sandbox.ts",
+        "examples/11-12-qiankun-main.ts",
+        "examples/11-13-qiankun-sub.ts",
+        "examples/11-14-qiankun-communicate.ts",
+        "examples/11-15-module-federation.js",
+        "examples/11-16-headless-use-list.ts",
+        "examples/11-17-di-composition-root.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 11,
+          "title": "设计模式实战",
+          "slug": "EP.11-design-patterns"
+        }
+      ],
+      "lines": 1310
+    },
+    {
+      "file": "12-css-engineering.md",
+      "slug": "12-css-engineering",
+      "title": "第十二部分：CSS 工程化与现代 CSS",
+      "sections": [
+        {
+          "text": "12.1 现代布局体系",
+          "anchor": "_12-1-现代布局体系",
+          "backlinks": [
+            {
+              "file": "15-accessibility-i18n.md",
+              "text": "15.4 国际化工程与 Intl API",
+              "anchor": "_15-4-国际化工程与-intl-api"
+            }
+          ]
+        },
+        {
+          "text": "12.2 样式方案选型",
+          "anchor": "_12-2-样式方案选型",
+          "backlinks": []
+        },
+        {
+          "text": "12.3 设计令牌与主题系统",
+          "anchor": "_12-3-设计令牌与主题系统",
+          "backlinks": [
+            {
+              "file": "17-web-platform.md",
+              "text": "17.3 Web Components",
+              "anchor": "_17-3-web-components"
+            }
+          ]
+        },
+        {
+          "text": "12.4 CSS 性能优化",
+          "anchor": "_12-4-css-性能优化",
+          "backlinks": []
+        },
+        {
+          "text": "12.5 自测题",
+          "anchor": "_12-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "12.6 本章避坑清单",
+          "anchor": "_12-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 5,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 4,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/12-04-css-modules.tsx",
+        "examples/12-05-atomic-css.tsx",
+        "examples/12-08-typed-tokens.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 12,
+          "title": "CSS 工程化",
+          "slug": "EP.12-css-engineering"
+        }
+      ],
+      "lines": 486
+    },
+    {
+      "file": "13-ssr-meta-frameworks.md",
+      "slug": "13-ssr-meta-frameworks",
+      "title": "第十三部分：SSR 与元框架",
+      "sections": [
+        {
+          "text": "13.1 渲染模式全景",
+          "anchor": "_13-1-渲染模式全景",
+          "backlinks": []
+        },
+        {
+          "text": "13.2 Hydration 原理与疑难排查",
+          "anchor": "_13-2-hydration-原理与疑难排查",
+          "backlinks": []
+        },
+        {
+          "text": "13.3 React Server Components 与 App Router",
+          "anchor": "_13-3-react-server-components-与-app-router",
+          "backlinks": []
+        },
+        {
+          "text": "13.4 SSR 性能优化",
+          "anchor": "_13-4-ssr-性能优化",
+          "backlinks": [
+            {
+              "file": "10-browser-rendering.md",
+              "text": "10.1 从输入 URL 到页面呈现",
+              "anchor": "_10-1-从输入-url-到页面呈现"
+            }
+          ]
+        },
+        {
+          "text": "13.5 自测题",
+          "anchor": "_13-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "13.6 本章避坑清单",
+          "anchor": "_13-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 5,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 2,
+        "挑战": 2,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/13-01-ssr-manual.ts",
+        "examples/13-02-hydration-safe.tsx",
+        "examples/13-03-selective-hydration.ts",
+        "examples/13-04-app-router-demo/app/posts/page.tsx",
+        "examples/13-04-app-router-demo/app/posts/PostCard.tsx",
+        "examples/13-04-app-router-demo/app/posts/actions.ts",
+        "examples/13-04-app-router-demo/app/posts/new/page.tsx",
+        "examples/13-05-waterfall.tsx",
+        "examples/13-06-cache-tags.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 13,
+          "title": "SSR 与水合",
+          "slug": "EP.13-ssr-hydration"
+        }
+      ],
+      "lines": 370
+    },
+    {
+      "file": "14-frontend-ai.md",
+      "slug": "14-frontend-ai",
+      "title": "第十四部分：前端 AI 工程",
+      "sections": [
+        {
+          "text": "14.1 LLM 应用的前端架构总览",
+          "anchor": "_14-1-llm-应用的前端架构总览",
+          "backlinks": []
+        },
+        {
+          "text": "14.2 流式输出与打字机 UI 实战",
+          "anchor": "_14-2-流式输出与打字机-ui-实战",
+          "backlinks": []
+        },
+        {
+          "text": "14.3 Tool Calling 的前端呈现",
+          "anchor": "_14-3-tool-calling-的前端呈现",
+          "backlinks": []
+        },
+        {
+          "text": "14.4 AI SDK 的 useChat 抽象模式",
+          "anchor": "_14-4-ai-sdk-的-usechat-抽象模式",
+          "backlinks": []
+        },
+        {
+          "text": "14.5 成本、稳定性与安全",
+          "anchor": "_14-5-成本、稳定性与安全",
+          "backlinks": []
+        },
+        {
+          "text": "14.6 自测题",
+          "anchor": "_14-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "14.7 本章避坑清单",
+          "anchor": "_14-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 5,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 3,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/14-01-sse-parser.ts",
+        "examples/14-02-stream-chat.tsx",
+        "examples/14-03-tool-ui.tsx",
+        "examples/14-04-use-chat.tsx",
+        "examples/14-05-context-budget.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 14,
+          "title": "AI 流式 UI",
+          "slug": "EP.14-ai-streaming-ui"
+        }
+      ],
+      "lines": 431
+    },
+    {
+      "file": "15-accessibility-i18n.md",
+      "slug": "15-accessibility-i18n",
+      "title": "第十五部分：可访问性与国际化",
+      "sections": [
+        {
+          "text": "15.1 可访问性基础：语义化优先",
+          "anchor": "_15-1-可访问性基础-语义化优先",
+          "backlinks": []
+        },
+        {
+          "text": "15.2 键盘可达与焦点管理",
+          "anchor": "_15-2-键盘可达与焦点管理",
+          "backlinks": []
+        },
+        {
+          "text": "15.3 ARIA 实战模式",
+          "anchor": "_15-3-aria-实战模式",
+          "backlinks": []
+        },
+        {
+          "text": "15.4 国际化工程与 Intl API",
+          "anchor": "_15-4-国际化工程与-intl-api",
+          "backlinks": []
+        },
+        {
+          "text": "15.5 自动化检测与测试",
+          "anchor": "_15-5-自动化检测与测试",
+          "backlinks": []
+        },
+        {
+          "text": "15.6 自测题",
+          "anchor": "_15-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "15.7 本章避坑清单",
+          "anchor": "_15-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 5,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 3,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/15-02-native-vs-aria.tsx",
+        "examples/15-03-focus-trap.tsx",
+        "examples/15-05-aria-patterns.tsx",
+        "examples/15-06-intl.ts",
+        "examples/15-07-i18n-component.tsx"
+      ],
+      "episodes": [
+        {
+          "ep": 15,
+          "title": "可访问性与语义化",
+          "slug": "EP.15-a11y-semantic"
+        }
+      ],
+      "lines": 436
+    },
+    {
+      "file": "16-node-server.md",
+      "slug": "16-node-server",
+      "title": "第十六部分：Node.js 与服务端基础",
+      "sections": [
+        {
+          "text": "16.1 Node 运行时要点",
+          "anchor": "_16-1-node-运行时要点",
+          "backlinks": []
+        },
+        {
+          "text": "16.2 Stream 与背压",
+          "anchor": "_16-2-stream-与背压",
+          "backlinks": []
+        },
+        {
+          "text": "16.3 BFF 层实战",
+          "anchor": "_16-3-bff-层实战",
+          "backlinks": []
+        },
+        {
+          "text": "16.4 部署与运行",
+          "anchor": "_16-4-部署与运行",
+          "backlinks": []
+        },
+        {
+          "text": "16.5 优雅重启与信号处理",
+          "anchor": "_16-5-优雅重启与信号处理",
+          "backlinks": []
+        },
+        {
+          "text": "16.6 自测题",
+          "anchor": "_16-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "16.7 本章避坑清单",
+          "anchor": "_16-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 5,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 3,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/16-01-node-event-loop.ts",
+        "examples/16-02-esm-meta.ts",
+        "examples/16-03-stream-pipeline.ts",
+        "examples/16-04-bff-aggregator.ts",
+        "examples/16-05-nestjs-overview.ts",
+        "examples/16-08-graceful-shutdown.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 16,
+          "title": "Node 流与背压",
+          "slug": "EP.16-node-stream-backpressure"
+        }
+      ],
+      "lines": 467
+    },
+    {
+      "file": "17-web-platform.md",
+      "slug": "17-web-platform",
+      "title": "第十七部分：Web 新能力与可视化",
+      "sections": [
+        {
+          "text": "17.1 浏览器新能力速查",
+          "anchor": "_17-1-浏览器新能力速查",
+          "backlinks": []
+        },
+        {
+          "text": "17.2 可视化技术选型",
+          "anchor": "_17-2-可视化技术选型",
+          "backlinks": []
+        },
+        {
+          "text": "17.3 Web Components",
+          "anchor": "_17-3-web-components",
+          "backlinks": []
+        },
+        {
+          "text": "17.4 WebAssembly 适用边界",
+          "anchor": "_17-4-webassembly-适用边界",
+          "backlinks": []
+        },
+        {
+          "text": "17.5 自测题",
+          "anchor": "_17-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "17.6 本章避坑清单",
+          "anchor": "_17-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 12,
+      "quizByLevel": {
+        "基础": 4,
+        "进阶": 5,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/17-02-view-transition.ts",
+        "examples/17-08-new-apis.ts",
+        "examples/17-04-echarts-best-practice.ts",
+        "examples/17-09-offscreen-canvas.ts",
+        "examples/17-09-canvas-worker.ts",
+        "examples/17-10-echarts-large-data.ts",
+        "examples/17-11-three-react.tsx",
+        "examples/17-13-custom-element-events.ts",
+        "examples/17-15-lit-toggle.ts",
+        "examples/17-06-wasm-boundary.ts",
+        "examples/17-16-wasm-worker.ts",
+        "examples/17-16-wasm-worker-side.ts",
+        "examples/17-17-assemblyscript.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 17,
+          "title": "Web 新能力",
+          "slug": "EP.17-web-platform"
+        }
+      ],
+      "lines": 1280
+    },
+    {
+      "file": "18-worker-messaging.md",
+      "slug": "18-worker-messaging",
+      "title": "第十八部分：Worker 家族与跨标签页通信",
+      "sections": [
+        {
+          "text": "1.1 浏览器的多进程架构",
+          "anchor": "_1-1-浏览器的多进程架构",
+          "backlinks": []
+        },
+        {
+          "text": "1.2 \"JS 单线程\"的准确含义",
+          "anchor": "_1-2-js-单线程-的准确含义",
+          "backlinks": []
+        },
+        {
+          "text": "1.3 事件循环回顾（Worker 也有自己的事件循环）",
+          "anchor": "_1-3-事件循环回顾-worker-也有自己的事件循环",
+          "backlinks": []
+        },
+        {
+          "text": "1.4 Worker 家族全景对比",
+          "anchor": "_1-4-worker-家族全景对比",
+          "backlinks": []
+        },
+        {
+          "text": "2.1 创建与双向通信",
+          "anchor": "_2-1-创建与双向通信",
+          "backlinks": []
+        },
+        {
+          "text": "2.2 Worker 内可用 / 不可用 API",
+          "anchor": "_2-2-worker-内可用-不可用-api",
+          "backlinks": []
+        },
+        {
+          "text": "2.3 Module Worker 与经典 Worker",
+          "anchor": "_2-3-module-worker-与经典-worker",
+          "backlinks": []
+        },
+        {
+          "text": "2.4 数据传递的三种方式",
+          "anchor": "_2-4-数据传递的三种方式",
+          "backlinks": []
+        },
+        {
+          "text": "2.5 错误处理全景",
+          "anchor": "_2-5-错误处理全景",
+          "backlinks": []
+        },
+        {
+          "text": "2.6 内联 Worker（Blob URL）",
+          "anchor": "_2-6-内联-worker-blob-url",
+          "backlinks": []
+        },
+        {
+          "text": "2.7 任务超时与可取消的 RPC 封装",
+          "anchor": "_2-7-任务超时与可取消的-rpc-封装",
+          "backlinks": []
+        },
+        {
+          "text": "2.8 Worker 池（Pool）",
+          "anchor": "_2-8-worker-池-pool",
+          "backlinks": []
+        },
+        {
+          "text": "2.9 适用场景与反模式",
+          "anchor": "_2-9-适用场景与反模式",
+          "backlinks": []
+        },
+        {
+          "text": "2.10 OffscreenCanvas：把渲染搬进 Worker",
+          "anchor": "_2-10-offscreencanvas-把渲染搬进-worker",
+          "backlinks": [
+            {
+              "file": "17-web-platform.md",
+              "text": "17.2 可视化技术选型",
+              "anchor": "_17-2-可视化技术选型"
+            }
+          ]
+        },
+        {
+          "text": "3.1 核心模型：一个实例 + 多个 MessagePort",
+          "anchor": "_3-1-核心模型-一个实例-多个-messageport",
+          "backlinks": []
+        },
+        {
+          "text": "3.2 完整示例：跨 Tab 共享计数器",
+          "anchor": "_3-2-完整示例-跨-tab-共享计数器",
+          "backlinks": []
+        },
+        {
+          "text": "3.3 杀手级场景：全浏览器只维持一条 WebSocket",
+          "anchor": "_3-3-杀手级场景-全浏览器只维持一条-websocket",
+          "backlinks": []
+        },
+        {
+          "text": "3.4 端口生命周期与\"僵尸连接\"问题",
+          "anchor": "_3-4-端口生命周期与-僵尸连接-问题",
+          "backlinks": []
+        },
+        {
+          "text": "3.5 调试与兼容性",
+          "anchor": "_3-5-调试与兼容性",
+          "backlinks": []
+        },
+        {
+          "text": "4.1 基本模型",
+          "anchor": "_4-1-基本模型",
+          "backlinks": []
+        },
+        {
+          "text": "4.2 关键规则：start() 语义",
+          "anchor": "_4-2-关键规则-start-语义",
+          "backlinks": []
+        },
+        {
+          "text": "4.3 场景一：主线程牵线，两个 Worker 直连",
+          "anchor": "_4-3-场景一-主线程牵线-两个-worker-直连",
+          "backlinks": []
+        },
+        {
+          "text": "4.4 场景二：ServiceWorker ↔ 页面的长连接通道",
+          "anchor": "_4-4-场景二-serviceworker-↔-页面的长连接通道",
+          "backlinks": []
+        },
+        {
+          "text": "4.5 场景三：跨窗口直连",
+          "anchor": "_4-5-场景三-跨窗口直连",
+          "backlinks": []
+        },
+        {
+          "text": "4.6 场景四：主线程当 hub，构建点对点消息总线",
+          "anchor": "_4-6-场景四-主线程当-hub-构建点对点消息总线",
+          "backlinks": []
+        },
+        {
+          "text": "4.7 端口转移规则与常见陷阱",
+          "anchor": "_4-7-端口转移规则与常见陷阱",
+          "backlinks": []
+        },
+        {
+          "text": "5.1 核心特性与限制",
+          "anchor": "_5-1-核心特性与限制",
+          "backlinks": []
+        },
+        {
+          "text": "5.2 注册与作用域",
+          "anchor": "_5-2-注册与作用域",
+          "backlinks": []
+        },
+        {
+          "text": "5.3 生命周期（重点中的重点）",
+          "anchor": "_5-3-生命周期-重点中的重点",
+          "backlinks": []
+        },
+        {
+          "text": "5.4 拦截请求：五种缓存策略",
+          "anchor": "_5-4-拦截请求-五种缓存策略",
+          "backlinks": []
+        },
+        {
+          "text": "5.5 离线判据与导航兜底",
+          "anchor": "_5-5-离线判据与导航兜底",
+          "backlinks": []
+        },
+        {
+          "text": "5.6 更新机制（版本化最佳实践）",
+          "anchor": "_5-6-更新机制-版本化最佳实践",
+          "backlinks": []
+        },
+        {
+          "text": "5.7 SW ↔ 页面双向通信",
+          "anchor": "_5-7-sw-↔-页面双向通信",
+          "backlinks": []
+        },
+        {
+          "text": "5.8 后台同步与推送通知",
+          "anchor": "_5-8-后台同步与推送通知",
+          "backlinks": []
+        },
+        {
+          "text": "5.9 ServiceWorker 避坑清单",
+          "anchor": "_5-9-serviceworker-避坑清单",
+          "backlinks": []
+        },
+        {
+          "text": "6.1 方案总览",
+          "anchor": "_6-1-方案总览",
+          "backlinks": []
+        },
+        {
+          "text": "6.2 BroadcastChannel（同源广播首选）",
+          "anchor": "_6-2-broadcastchannel-同源广播首选",
+          "backlinks": []
+        },
+        {
+          "text": "6.3 localStorage + storage 事件（兼容性之王）",
+          "anchor": "_6-3-localstorage-storage-事件-兼容性之王",
+          "backlinks": []
+        },
+        {
+          "text": "6.4 window.postMessage（弹窗 / iframe 双向通信）",
+          "anchor": "_6-4-window-postmessage-弹窗-iframe-双向通信",
+          "backlinks": []
+        },
+        {
+          "text": "6.5 SharedWorker 作为消息总线",
+          "anchor": "_6-5-sharedworker-作为消息总线",
+          "backlinks": []
+        },
+        {
+          "text": "6.6 ServiceWorker 作为中继",
+          "anchor": "_6-6-serviceworker-作为中继",
+          "backlinks": []
+        },
+        {
+          "text": "6.7 IndexedDB + Web Locks：大数据共享与 Leader 选举",
+          "anchor": "_6-7-indexeddb-web-locks-大数据共享与-leader-选举",
+          "backlinks": []
+        },
+        {
+          "text": "6.8 服务端中转：WebSocket / SSE（唯一能跨设备的方案）",
+          "anchor": "_6-8-服务端中转-websocket-sse-唯一能跨设备的方案",
+          "backlinks": []
+        },
+        {
+          "text": "6.9 其他非主流方案（了解即可）",
+          "anchor": "_6-9-其他非主流方案-了解即可",
+          "backlinks": []
+        },
+        {
+          "text": "6.10 选型决策树",
+          "anchor": "_6-10-选型决策树",
+          "backlinks": []
+        },
+        {
+          "text": "7.1 跨 Tab 登录态同步（登出一处，处处登出）",
+          "anchor": "_7-1-跨-tab-登录态同步-登出一处-处处登出",
+          "backlinks": []
+        },
+        {
+          "text": "7.2 跨 Tab 主题同步（BroadcastChannel + 持久化最简版）",
+          "anchor": "_7-2-跨-tab-主题同步-broadcastchannel-持久化最简版",
+          "backlinks": []
+        },
+        {
+          "text": "7.3 Leader 选举 + 单连接扇出（生产级实现）",
+          "anchor": "_7-3-leader-选举-单连接扇出-生产级实现",
+          "backlinks": []
+        },
+        {
+          "text": "7.4 大数据计算卸载（Worker + 进度回调 + 可取消）",
+          "anchor": "_7-4-大数据计算卸载-worker-进度回调-可取消",
+          "backlinks": []
+        },
+        {
+          "text": "7.5 PWA 离线壳 + SW 更新提示（最小闭环）",
+          "anchor": "_7-5-pwa-离线壳-sw-更新提示-最小闭环",
+          "backlinks": []
+        },
+        {
+          "text": "8.1 Worklet 与 Worker 的本质区别",
+          "anchor": "_8-1-worklet-与-worker-的本质区别",
+          "backlinks": []
+        },
+        {
+          "text": "8.2 CSS Painting API（PaintWorklet）",
+          "anchor": "_8-2-css-painting-api-paintworklet",
+          "backlinks": []
+        },
+        {
+          "text": "8.3 AnimationWorklet 与滚动驱动动画",
+          "anchor": "_8-3-animationworklet-与滚动驱动动画",
+          "backlinks": []
+        },
+        {
+          "text": "8.4 AudioWorklet（低延迟音频处理）",
+          "anchor": "_8-4-audioworklet-低延迟音频处理",
+          "backlinks": []
+        },
+        {
+          "text": "8.5 其他 Worklet 与兼容性",
+          "anchor": "_8-5-其他-worklet-与兼容性",
+          "backlinks": []
+        },
+        {
+          "text": "9.1 Vite 中的 Worker",
+          "anchor": "_9-1-vite-中的-worker",
+          "backlinks": []
+        },
+        {
+          "text": "9.2 Webpack 5 / Rspack 中的 Worker",
+          "anchor": "_9-2-webpack-5-rspack-中的-worker",
+          "backlinks": []
+        },
+        {
+          "text": "9.3 React Hooks 完整示例",
+          "anchor": "_9-3-react-hooks-完整示例",
+          "backlinks": []
+        },
+        {
+          "text": "9.4 Vue 3 组合式 API 完整示例",
+          "anchor": "_9-4-vue-3-组合式-api-完整示例",
+          "backlinks": []
+        },
+        {
+          "text": "9.5 ServiceWorker 与框架：Workbox / vite-plugin-pwa",
+          "anchor": "_9-5-serviceworker-与框架-workbox-vite-plugin-pwa",
+          "backlinks": [
+            {
+              "file": "56-offline-cache.md",
+              "text": "56.2 PWA 离线：壳缓存与数据缓存分工",
+              "anchor": "_56-2-pwa-离线-壳缓存与数据缓存分工"
+            }
+          ]
+        },
+        {
+          "text": "9.6 测试策略",
+          "anchor": "_9-6-测试策略",
+          "backlinks": []
+        },
+        {
+          "text": "9.7 本文配套可运行示例",
+          "anchor": "_9-7-本文配套可运行示例",
+          "backlinks": []
+        },
+        {
+          "text": "10.1 高频坑点速查表",
+          "anchor": "_10-1-高频坑点速查表",
+          "backlinks": []
+        },
+        {
+          "text": "10.2 调试手段速查",
+          "anchor": "_10-2-调试手段速查",
+          "backlinks": []
+        },
+        {
+          "text": "10.3 兼容性兜底策略（渐进增强）",
+          "anchor": "_10-3-兼容性兜底策略-渐进增强",
+          "backlinks": []
+        },
+        {
+          "text": "10.4 自测题",
+          "anchor": "_10-4-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "10.5 延伸阅读",
+          "anchor": "_10-5-延伸阅读",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 20,
+      "quizByLevel": {
+        "基础": 4,
+        "进阶": 12,
+        "挑战": 4,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/18-08-message-channel.ts",
+        "examples/18-09-broadcast-channel.ts",
+        "examples/18-05-worklet/paint-worklet.js",
+        "examples/18-05-worklet/vumeter-processor.js",
+        "examples/18-05-worklet/audio-main.js",
+        "examples/18-10-cross-tab-bus.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 18,
+          "title": "Worker 家族与跨 Tab",
+          "slug": "EP.18-worker-family"
+        }
+      ],
+      "lines": 2670
+    },
+    {
+      "file": "19-business-snippets.md",
+      "slug": "19-business-snippets",
+      "title": "第十九部分：常用业务功能代码片段",
+      "sections": [
+        {
+          "text": "19.1 表单校验与声明式规则",
+          "anchor": "_19-1-表单校验与声明式规则",
+          "backlinks": [
+            {
+              "file": "01-javascript-advanced.md",
+              "text": "1.15 正则高级用法",
+              "anchor": "_1-15-正则高级用法"
+            }
+          ]
+        },
+        {
+          "text": "19.2 输入格式化、提交锁与倒计时",
+          "anchor": "_19-2-输入格式化、提交锁与倒计时",
+          "backlinks": []
+        },
+        {
+          "text": "19.3 列表查询状态与 URL 同步",
+          "anchor": "_19-3-列表查询状态与-url-同步",
+          "backlinks": []
+        },
+        {
+          "text": "19.4 类型安全的本地存储封装",
+          "anchor": "_19-4-类型安全的本地存储封装",
+          "backlinks": []
+        },
+        {
+          "text": "19.5 树结构数据处理",
+          "anchor": "_19-5-树结构数据处理",
+          "backlinks": [
+            {
+              "file": "22-frontend-data-structures.md",
+              "text": "第二十二部分：前端常用数据结构与算法",
+              "anchor": null
+            },
+            {
+              "file": "22-frontend-data-structures.md",
+              "text": "22.5 树与二叉搜索树：层级之美",
+              "anchor": "_22-5-树与二叉搜索树-层级之美"
+            }
+          ]
+        },
+        {
+          "text": "19.6 文件校验、下载与剪贴板",
+          "anchor": "_19-6-文件校验、下载与剪贴板",
+          "backlinks": []
+        },
+        {
+          "text": "19.7 前端埋点与曝光监听",
+          "anchor": "_19-7-前端埋点与曝光监听",
+          "backlinks": []
+        },
+        {
+          "text": "19.8 按钮级权限与路由守卫",
+          "anchor": "_19-8-按钮级权限与路由守卫",
+          "backlinks": [
+            {
+              "file": "35-admin-system-auth.md",
+              "text": "第三十五部分 · 后台管理系统权限方案",
+              "anchor": null
+            }
+          ]
+        },
+        {
+          "text": "19.9 IndexedDB 结构化仓储",
+          "anchor": "_19-9-indexeddb-结构化仓储",
+          "backlinks": []
+        },
+        {
+          "text": "19.10 自测题",
+          "anchor": "_19-10-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "19.11 本章避坑清单",
+          "anchor": "_19-11-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 9,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 3,
+        "挑战": 5,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/19-01-form-validation.ts",
+        "examples/19-02-input-and-submit.ts",
+        "examples/19-03-table-query.ts",
+        "examples/19-04-storage.ts",
+        "examples/19-05-tree-utils.ts",
+        "examples/19-06-file-utils.ts",
+        "examples/19-07-tracking.ts",
+        "examples/19-08-permission.ts",
+        "examples/19-09-indexeddb.html"
+      ],
+      "episodes": [
+        {
+          "ep": 19,
+          "title": "业务片段百宝箱",
+          "slug": "EP.19-business-snippets"
+        }
+      ],
+      "lines": 1581
+    },
+    {
+      "file": "21-frontend-ai-interview.md",
+      "slug": "21-frontend-ai-interview",
+      "title": "第二十一部分：前端 AI 技术与面试通关",
+      "sections": [
+        {
+          "text": "21.1 SSE 流技术：AI 流式响应的地基",
+          "anchor": "_21-1-sse-流技术-ai-流式响应的地基",
+          "backlinks": []
+        },
+        {
+          "text": "21.2 打字机效果：从「能用」到「流畅」",
+          "anchor": "_21-2-打字机效果-从「能用」到「流畅」",
+          "backlinks": []
+        },
+        {
+          "text": "21.3 AI 客服系统：端到端系统设计",
+          "anchor": "_21-3-ai-客服系统-端到端系统设计",
+          "backlinks": []
+        },
+        {
+          "text": "21.4 MCP：模型上下文协议",
+          "anchor": "_21-4-mcp-模型上下文协议",
+          "backlinks": []
+        },
+        {
+          "text": "21.5 Markdown 增量渲染",
+          "anchor": "_21-5-markdown-增量渲染",
+          "backlinks": []
+        },
+        {
+          "text": "21.6 WebSocket 与实时渲染",
+          "anchor": "_21-6-websocket-与实时渲染",
+          "backlinks": []
+        },
+        {
+          "text": "21.7 通用面试方法论与评分标准",
+          "anchor": "_21-7-通用面试方法论与评分标准",
+          "backlinks": []
+        },
+        {
+          "text": "21.8 本章避坑清单",
+          "anchor": "_21-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/ai-interview/sse-fetch-client.ts",
+        "examples/ai-interview/sse-server-node.mjs",
+        "examples/ai-interview/use-typewriter.ts",
+        "examples/ai-interview/mcp-tool-schema.ts",
+        "examples/ai-interview/mcp-retry.ts",
+        "examples/ai-interview/markdown-stream.tsx",
+        "examples/ai-interview/ws-resilient.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 20,
+          "title": "SSE 流式传输",
+          "slug": "EP.20-sse-streaming"
+        },
+        {
+          "ep": 21,
+          "title": "打字机渲染",
+          "slug": "EP.21-typewriter-render"
+        },
+        {
+          "ep": 22,
+          "title": "AI 客服系统",
+          "slug": "EP.22-ai-cs-system"
+        },
+        {
+          "ep": 23,
+          "title": "MCP 协议",
+          "slug": "EP.23-mcp-protocol"
+        },
+        {
+          "ep": 24,
+          "title": "Markdown 增量渲染",
+          "slug": "EP.24-markdown-incremental"
+        },
+        {
+          "ep": 25,
+          "title": "WebSocket 实时渲染",
+          "slug": "EP.25-websocket-render"
+        }
+      ],
+      "lines": 1267
+    },
+    {
+      "file": "22-frontend-data-structures.md",
+      "slug": "22-frontend-data-structures",
+      "title": "第二十二部分：前端常用数据结构与算法",
+      "sections": [
+        {
+          "text": "22.1 复杂度分析：前端的第一性原理",
+          "anchor": "_22-1-复杂度分析-前端的第一性原理",
+          "backlinks": []
+        },
+        {
+          "text": "22.2 栈与队列：LIFO 与 FIFO",
+          "anchor": "_22-2-栈与队列-lifo-与-fifo",
+          "backlinks": []
+        },
+        {
+          "text": "22.3 链表：指针编织的结构",
+          "anchor": "_22-3-链表-指针编织的结构",
+          "backlinks": []
+        },
+        {
+          "text": "22.4 哈希表：O(1) 的魔法",
+          "anchor": "_22-4-哈希表-o-1-的魔法",
+          "backlinks": []
+        },
+        {
+          "text": "22.5 树与二叉搜索树：层级之美",
+          "anchor": "_22-5-树与二叉搜索树-层级之美",
+          "backlinks": []
+        },
+        {
+          "text": "22.6 堆与优先级队列",
+          "anchor": "_22-6-堆与优先级队列",
+          "backlinks": []
+        },
+        {
+          "text": "22.7 图：依赖与关系的世界",
+          "anchor": "_22-7-图-依赖与关系的世界",
+          "backlinks": []
+        },
+        {
+          "text": "22.8 排序算法：十大排序全景",
+          "anchor": "_22-8-排序算法-十大排序全景",
+          "backlinks": []
+        },
+        {
+          "text": "22.9 动态规划：把算过的记住",
+          "anchor": "_22-9-动态规划-把算过的记住",
+          "backlinks": []
+        },
+        {
+          "text": "22.10 高频面试题通关与自测",
+          "anchor": "_22-10-高频面试题通关与自测",
+          "backlinks": []
+        },
+        {
+          "text": "22.11 本章避坑清单",
+          "anchor": "_22-11-本章避坑清单",
+          "backlinks": []
+        },
+        {
+          "text": "22.12 交互实验室",
+          "anchor": "_22-12-交互实验室",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 12,
+      "quizByLevel": {
+        "基础": 4,
+        "进阶": 7,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/22-11-sort-visualization.ts",
+        "examples/22-12-bst-visualization.ts",
+        "examples/22-13-graph-visualization.ts",
+        "examples/22-14-dp-visualization.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 26,
+          "title": "栈与队列",
+          "slug": "EP.26-ds-stack-queue"
+        },
+        {
+          "ep": 27,
+          "title": "链表指针舞",
+          "slug": "EP.27-ds-linked-list"
+        },
+        {
+          "ep": 28,
+          "title": "哈希表一秒定位",
+          "slug": "EP.28-ds-hash-table"
+        },
+        {
+          "ep": 29,
+          "title": "二叉搜索树",
+          "slug": "EP.29-ds-tree"
+        },
+        {
+          "ep": 30,
+          "title": "图与堆",
+          "slug": "EP.30-ds-graph-heap"
+        },
+        {
+          "ep": 31,
+          "title": "排序大比武",
+          "slug": "EP.31-ds-sorting"
+        },
+        {
+          "ep": 32,
+          "title": "动态规划五步法",
+          "slug": "EP.32-ds-dp"
+        }
+      ],
+      "lines": 2653
+    },
+    {
+      "file": "23-js-high-frequency-interview.md",
+      "slug": "23-js-high-frequency-interview",
+      "title": "第二十三部分：JavaScript 高频面试题通关",
+      "sections": [
+        {
+          "text": "23.1 事件循环、浏览器渲染与页面加载（重点章）",
+          "anchor": "_23-1-事件循环、浏览器渲染与页面加载-重点章",
+          "backlinks": []
+        },
+        {
+          "text": "23.2 作用域、闭包与提升",
+          "anchor": "_23-2-作用域、闭包与提升",
+          "backlinks": []
+        },
+        {
+          "text": "23.3 this 指向",
+          "anchor": "_23-3-this-指向",
+          "backlinks": []
+        },
+        {
+          "text": "23.4 原型与继承",
+          "anchor": "_23-4-原型与继承",
+          "backlinks": []
+        },
+        {
+          "text": "23.5 类型系统与隐式转换",
+          "anchor": "_23-5-类型系统与隐式转换",
+          "backlinks": []
+        },
+        {
+          "text": "23.6 异步编程",
+          "anchor": "_23-6-异步编程",
+          "backlinks": []
+        },
+        {
+          "text": "23.7 深浅拷贝",
+          "anchor": "_23-7-深浅拷贝",
+          "backlinks": []
+        },
+        {
+          "text": "23.8 防抖节流与高频手写",
+          "anchor": "_23-8-防抖节流与高频手写",
+          "backlinks": []
+        },
+        {
+          "text": "23.9 数组与对象操作",
+          "anchor": "_23-9-数组与对象操作",
+          "backlinks": []
+        },
+        {
+          "text": "23.10 ES6+ 特性",
+          "anchor": "_23-10-es6-特性",
+          "backlinks": []
+        },
+        {
+          "text": "23.11 内存与垃圾回收",
+          "anchor": "_23-11-内存与垃圾回收",
+          "backlinks": []
+        },
+        {
+          "text": "23.12 综合手写题",
+          "anchor": "_23-12-综合手写题",
+          "backlinks": []
+        },
+        {
+          "text": "23.13 自测清单",
+          "anchor": "_23-13-自测清单",
+          "backlinks": []
+        },
+        {
+          "text": "23.14 本章避坑清单",
+          "anchor": "_23-14-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 10,
+      "quizByLevel": {
+        "基础": 4,
+        "进阶": 4,
+        "挑战": 2,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/23-01-promise-all.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 34,
+          "title": "JS 高频面试题通关",
+          "slug": "EP.34-js-high-frequency-interview"
+        }
+      ],
+      "lines": 813
+    },
+    {
+      "file": "24-ai-collaboration.md",
+      "slug": "24-ai-collaboration",
+      "title": "第二十四部分：AI 协作工程化",
+      "sections": [
+        {
+          "text": "24.1 范式转变：从\"写代码\"到\"管代码\"",
+          "anchor": "_24-1-范式转变-从-写代码-到-管代码",
+          "backlinks": []
+        },
+        {
+          "text": "24.2 四阶段工作流总览",
+          "anchor": "_24-2-四阶段工作流总览",
+          "backlinks": []
+        },
+        {
+          "text": "24.3 第一阶段：契约定义",
+          "anchor": "_24-3-第一阶段-契约定义",
+          "backlinks": []
+        },
+        {
+          "text": "24.4 第二阶段：AI 生成",
+          "anchor": "_24-4-第二阶段-ai-生成",
+          "backlinks": []
+        },
+        {
+          "text": "24.5 第三阶段：迭代修复",
+          "anchor": "_24-5-第三阶段-迭代修复",
+          "backlinks": []
+        },
+        {
+          "text": "24.6 第四阶段：质量验收与三级门禁",
+          "anchor": "_24-6-第四阶段-质量验收与三级门禁",
+          "backlinks": []
+        },
+        {
+          "text": "24.7 上下文管理与规则文件",
+          "anchor": "_24-7-上下文管理与规则文件",
+          "backlinks": []
+        },
+        {
+          "text": "24.8 自测题",
+          "anchor": "_24-8-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "24.9 本章避坑清单",
+          "anchor": "_24-9-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 3,
+        "进阶": 4,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/24-01-ai-collab-contract.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 37,
+          "title": "AI 协作工程化",
+          "slug": "EP.37-ai-collaboration"
+        }
+      ],
+      "lines": 312
+    },
+    {
+      "file": "25-prod-ready-web-apis.md",
+      "slug": "25-prod-ready-web-apis",
+      "title": "第二十五部分：生产可用 Web API 手册",
+      "sections": [
+        {
+          "text": "25.1 选型标准与兼容性基线",
+          "anchor": "_25-1-选型标准与兼容性基线",
+          "backlinks": []
+        },
+        {
+          "text": "25.2 观察者家族",
+          "anchor": "_25-2-观察者家族",
+          "backlinks": []
+        },
+        {
+          "text": "25.3 中断与取消",
+          "anchor": "_25-3-中断与取消",
+          "backlinks": []
+        },
+        {
+          "text": "25.4 结构化复制与深拷贝",
+          "anchor": "_25-4-结构化复制与深拷贝",
+          "backlinks": []
+        },
+        {
+          "text": "25.5 URL 与查询参数",
+          "anchor": "_25-5-url-与查询参数",
+          "backlinks": []
+        },
+        {
+          "text": "25.6 跨上下文通信",
+          "anchor": "_25-6-跨上下文通信",
+          "backlinks": []
+        },
+        {
+          "text": "25.7 微任务与调度",
+          "anchor": "_25-7-微任务与调度",
+          "backlinks": []
+        },
+        {
+          "text": "25.8 国际化格式化 Intl",
+          "anchor": "_25-8-国际化格式化-intl",
+          "backlinks": []
+        },
+        {
+          "text": "25.9 性能度量",
+          "anchor": "_25-9-性能度量",
+          "backlinks": []
+        },
+        {
+          "text": "25.10 浏览器专属高频 API 速览",
+          "anchor": "_25-10-浏览器专属高频-api-速览",
+          "backlinks": []
+        },
+        {
+          "text": "25.11 踩坑速查表",
+          "anchor": "_25-11-踩坑速查表",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 25,
+      "quizByLevel": {
+        "基础": 7,
+        "进阶": 10,
+        "挑战": 8,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/25-01-feature-detect.ts",
+        "examples/25-02-observer-contract.ts",
+        "examples/25-03-abort-controller.ts",
+        "examples/25-04-structured-clone.ts",
+        "examples/25-05-url-pitfalls.ts",
+        "examples/25-06-broadcast-channel.ts",
+        "examples/25-07-task-ordering.ts",
+        "examples/25-08-intl-format.ts",
+        "examples/25-09-perf-measure.ts"
+      ],
+      "episodes": [],
+      "lines": 610
+    },
+    {
+      "file": "26-mini-network-stack.md",
+      "slug": "26-mini-network-stack",
+      "title": "第二十六部分 · 手写网络栈",
+      "sections": [
+        {
+          "text": "26.1 mini-http-parser：HTTP 报文怎么读",
+          "anchor": "_26-1-mini-http-parser-http-报文怎么读",
+          "backlinks": []
+        },
+        {
+          "text": "26.2 mini-fetch：请求层怎么写",
+          "anchor": "_26-2-mini-fetch-请求层怎么写",
+          "backlinks": []
+        },
+        {
+          "text": "26.3 mini-sse：Server-Sent Events 客户端",
+          "anchor": "_26-3-mini-sse-server-sent-events-客户端",
+          "backlinks": []
+        },
+        {
+          "text": "26.4 mini-websocket：握手 + 帧解析",
+          "anchor": "_26-4-mini-websocket-握手-帧解析",
+          "backlinks": []
+        },
+        {
+          "text": "26.5 mini-http-cache：强缓存 + 协商缓存",
+          "anchor": "_26-5-mini-http-cache-强缓存-协商缓存",
+          "backlinks": []
+        },
+        {
+          "text": "26.6 自测题",
+          "anchor": "_26-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "26.7 本章避坑清单",
+          "anchor": "_26-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/26-01-http-parser.ts",
+        "examples/26-02-mini-fetch.ts",
+        "examples/26-03-mini-sse.ts",
+        "examples/26-04-mini-websocket.ts",
+        "examples/26-05-mini-cache.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 44,
+          "title": "HTTP 报文那七行字",
+          "slug": "EP.44-http-parser"
+        },
+        {
+          "ep": 45,
+          "title": "fetch 背后那个 URL 对象",
+          "slug": "EP.45-mini-fetch"
+        },
+        {
+          "ep": 46,
+          "title": "SSE 那三种冒号",
+          "slug": "EP.46-mini-sse"
+        }
+      ],
+      "lines": 1258
+    },
+    {
+      "file": "27-mini-framework.md",
+      "slug": "27-mini-framework",
+      "title": "第二十七部分 · 手写前端框架",
+      "sections": [
+        {
+          "text": "27.1 mini-vdom：虚拟 DOM 怎么 diff",
+          "anchor": "_27-1-mini-vdom-虚拟-dom-怎么-diff",
+          "backlinks": []
+        },
+        {
+          "text": "27.2 mini-reactivity：依赖收集怎么玩",
+          "anchor": "_27-2-mini-reactivity-依赖收集怎么玩",
+          "backlinks": []
+        },
+        {
+          "text": "27.3 mini-scheduler：事件循环的调度器",
+          "anchor": "_27-3-mini-scheduler-事件循环的调度器",
+          "backlinks": []
+        },
+        {
+          "text": "27.4 mini-fiber：为啥要长这样",
+          "anchor": "_27-4-mini-fiber-为啥要长这样",
+          "backlinks": []
+        },
+        {
+          "text": "27.5 mini-bundler：AST 里藏了什么",
+          "anchor": "_27-5-mini-bundler-ast-里藏了什么",
+          "backlinks": []
+        },
+        {
+          "text": "27.6 自测题",
+          "anchor": "_27-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "27.7 本章避坑清单",
+          "anchor": "_27-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [],
+      "episodes": [
+        {
+          "ep": 38,
+          "title": "vdom diff 里的 key 魔法",
+          "slug": "EP.38-vdom-diff-key"
+        },
+        {
+          "ep": 39,
+          "title": "Proxy 里偷偷收集依赖",
+          "slug": "EP.39-proxy-reactivity"
+        },
+        {
+          "ep": 40,
+          "title": "Fiber 为啥长这样",
+          "slug": "EP.40-fiber"
+        },
+        {
+          "ep": 41,
+          "title": "AST 里藏了啥",
+          "slug": "EP.41-ast-mini-bundler"
+        }
+      ],
+      "lines": 819
+    },
+    {
+      "file": "28-mini-browser-engine.md",
+      "slug": "28-mini-browser-engine",
+      "title": "第二十八部分 · 手写浏览器内核",
+      "sections": [
+        {
+          "text": "28.1 mini-css-parser：CSS 字符串变盒子",
+          "anchor": "_28-1-mini-css-parser-css-字符串变盒子",
+          "backlinks": []
+        },
+        {
+          "text": "28.2 mini-selector：selector 匹配从哪一头开始",
+          "anchor": "_28-2-mini-selector-selector-匹配从哪一头开始",
+          "backlinks": []
+        },
+        {
+          "text": "28.3 mini-flex-layout：flex 主轴交叉轴",
+          "anchor": "_28-3-mini-flex-layout-flex-主轴交叉轴",
+          "backlinks": []
+        },
+        {
+          "text": "28.4 mini-cascade：specificity 与层叠",
+          "anchor": "_28-4-mini-cascade-specificity-与层叠",
+          "backlinks": []
+        },
+        {
+          "text": "28.5 mini-box-model：盒模型与 block flow",
+          "anchor": "_28-5-mini-box-model-盒模型与-block-flow",
+          "backlinks": []
+        },
+        {
+          "text": "28.6 自测题",
+          "anchor": "_28-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "28.7 本章避坑清单",
+          "anchor": "_28-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/28-01-css-parser.ts",
+        "examples/28-02-selector.ts",
+        "examples/28-03-flex-layout.ts",
+        "examples/28-04-cascade.ts",
+        "examples/28-05-box-model.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 47,
+          "title": "CSS 字符串变盒子",
+          "slug": "EP.47-mini-css-parser"
+        },
+        {
+          "ep": 48,
+          "title": ".a .b 为啥慢",
+          "slug": "EP.48-mini-selector"
+        },
+        {
+          "ep": 49,
+          "title": "flex 主轴交叉轴那点事",
+          "slug": "EP.49-mini-flex-layout"
+        }
+      ],
+      "lines": 455
+    },
+    {
+      "file": "29-rxjs.md",
+      "slug": "29-rxjs",
+      "title": "第二十九部分：RxJS 响应式编程——从入门到精通",
+      "sections": [
+        {
+          "text": "29.1 心智模型与学习路线",
+          "anchor": "_29-1-心智模型与学习路线",
+          "backlinks": []
+        },
+        {
+          "text": "29.2 入门",
+          "anchor": "_29-2-入门",
+          "backlinks": []
+        },
+        {
+          "text": "29.3 进阶",
+          "anchor": "_29-3-进阶",
+          "backlinks": []
+        },
+        {
+          "text": "29.4 精通",
+          "anchor": "_29-4-精通",
+          "backlinks": []
+        },
+        {
+          "text": "29.5 实战",
+          "anchor": "_29-5-实战",
+          "backlinks": []
+        },
+        {
+          "text": "29.6 综合自测题",
+          "anchor": "_29-6-综合自测题",
+          "backlinks": []
+        },
+        {
+          "text": "29.7 本章避坑清单",
+          "anchor": "_29-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 20,
+      "quizByLevel": {
+        "基础": 6,
+        "进阶": 7,
+        "挑战": 7,
+        "未分级": 0
+      },
+      "examples": [],
+      "episodes": [
+        {
+          "ep": 50,
+          "title": "响应式的流思维",
+          "slug": "EP.50-rxjs-stream"
+        }
+      ],
+      "lines": 984
+    },
+    {
+      "file": "30-lodash.md",
+      "slug": "30-lodash",
+      "title": "第三十部分：Lodash 工具库实战——从 API 到工程治理",
+      "sections": [
+        {
+          "text": "30.1 定位、版本与学习路线",
+          "anchor": "_30-1-定位、版本与学习路线",
+          "backlinks": []
+        },
+        {
+          "text": "30.2 入门：高频 API 与 iteratee",
+          "anchor": "_30-2-入门-高频-api-与-iteratee",
+          "backlinks": []
+        },
+        {
+          "text": "30.3 进阶：安全边界与异步控制",
+          "anchor": "_30-3-进阶-安全边界与异步控制",
+          "backlinks": []
+        },
+        {
+          "text": "30.4 精通：FP、性能与体积治理",
+          "anchor": "_30-4-精通-fp、性能与体积治理",
+          "backlinks": []
+        },
+        {
+          "text": "30.5 实战：订单看板工具箱",
+          "anchor": "_30-5-实战-订单看板工具箱",
+          "backlinks": []
+        },
+        {
+          "text": "30.6 综合自测题",
+          "anchor": "_30-6-综合自测题",
+          "backlinks": []
+        },
+        {
+          "text": "30.7 本章避坑清单",
+          "anchor": "_30-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 20,
+      "quizByLevel": {
+        "基础": 5,
+        "进阶": 7,
+        "挑战": 8,
+        "未分级": 0
+      },
+      "examples": [],
+      "episodes": [
+        {
+          "ep": 51,
+          "title": "数据变换瑞士军刀",
+          "slug": "EP.51-lodash-toolbelt"
+        }
+      ],
+      "lines": 718
+    },
+    {
+      "file": "31-xlsx.md",
+      "slug": "31-xlsx",
+      "title": "第三十一部分：XLSX 表格工程——导入、导出与大数据量处理",
+      "sections": [
+        {
+          "text": "31.1 心智模型与选型",
+          "anchor": "_31-1-心智模型与选型",
+          "backlinks": []
+        },
+        {
+          "text": "31.2 入门",
+          "anchor": "_31-2-入门",
+          "backlinks": []
+        },
+        {
+          "text": "31.3 进阶",
+          "anchor": "_31-3-进阶",
+          "backlinks": []
+        },
+        {
+          "text": "31.4 精通",
+          "anchor": "_31-4-精通",
+          "backlinks": []
+        },
+        {
+          "text": "31.5 实战",
+          "anchor": "_31-5-实战",
+          "backlinks": []
+        },
+        {
+          "text": "31.6 综合自测题",
+          "anchor": "_31-6-综合自测题",
+          "backlinks": []
+        },
+        {
+          "text": "31.7 本章避坑清单",
+          "anchor": "_31-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 19,
+      "quizByLevel": {
+        "基础": 5,
+        "进阶": 9,
+        "挑战": 5,
+        "未分级": 0
+      },
+      "examples": [],
+      "episodes": [
+        {
+          "ep": 52,
+          "title": "表格那三层模型",
+          "slug": "EP.52-xlsx-table-io"
+        }
+      ],
+      "lines": 789
+    },
+    {
+      "file": "32-dayjs.md",
+      "slug": "32-dayjs",
+      "title": "第三十二部分：Day.js 日期工程——从格式化到跨时区",
+      "sections": [
+        {
+          "text": "32.1 心智模型与学习路线",
+          "anchor": "_32-1-心智模型与学习路线",
+          "backlinks": []
+        },
+        {
+          "text": "32.2 入门：解析、格式化与边界加减",
+          "anchor": "_32-2-入门-解析、格式化与边界加减",
+          "backlinks": []
+        },
+        {
+          "text": "32.3 进阶：比较、插件与周体系",
+          "anchor": "_32-3-进阶-比较、插件与周体系",
+          "backlinks": []
+        },
+        {
+          "text": "32.4 精通：时区、DST、本地化与包体",
+          "anchor": "_32-4-精通-时区、dst、本地化与包体",
+          "backlinks": []
+        },
+        {
+          "text": "32.5 实战：把日期能力封装成确定性函数",
+          "anchor": "_32-5-实战-把日期能力封装成确定性函数",
+          "backlinks": []
+        },
+        {
+          "text": "32.6 综合自测题",
+          "anchor": "_32-6-综合自测题",
+          "backlinks": []
+        },
+        {
+          "text": "32.7 本章避坑清单",
+          "anchor": "_32-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 19,
+      "quizByLevel": {
+        "基础": 7,
+        "进阶": 7,
+        "挑战": 5,
+        "未分级": 0
+      },
+      "examples": [],
+      "episodes": [
+        {
+          "ep": 53,
+          "title": "日期那点不精确的事",
+          "slug": "EP.53-dayjs-date"
+        }
+      ],
+      "lines": 729
+    },
+    {
+      "file": "33-zod.md",
+      "slug": "33-zod",
+      "title": "第三十三部分：Zod 运行时校验——类型安全的边界",
+      "sections": [
+        {
+          "text": "33.1 为什么需要运行时校验与学习路线",
+          "anchor": "_33-1-为什么需要运行时校验与学习路线",
+          "backlinks": []
+        },
+        {
+          "text": "33.2 入门",
+          "anchor": "_33-2-入门",
+          "backlinks": []
+        },
+        {
+          "text": "33.3 进阶",
+          "anchor": "_33-3-进阶",
+          "backlinks": []
+        },
+        {
+          "text": "33.4 精通",
+          "anchor": "_33-4-精通",
+          "backlinks": []
+        },
+        {
+          "text": "33.5 实战",
+          "anchor": "_33-5-实战",
+          "backlinks": []
+        },
+        {
+          "text": "33.6 综合自测题",
+          "anchor": "_33-6-综合自测题",
+          "backlinks": []
+        },
+        {
+          "text": "33.7 本章避坑清单",
+          "anchor": "_33-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 18,
+      "quizByLevel": {
+        "基础": 3,
+        "进阶": 9,
+        "挑战": 6,
+        "未分级": 0
+      },
+      "examples": [],
+      "episodes": [
+        {
+          "ep": 54,
+          "title": "运行时那道边界墙",
+          "slug": "EP.54-zod-boundary"
+        }
+      ],
+      "lines": 739
+    },
+    {
+      "file": "34-architect-roadmap.md",
+      "slug": "34-architect-roadmap",
+      "title": "第三十四部分：架构师成长路线——从高级工程师到技术决策者",
+      "sections": [
+        {
+          "text": "34.1 能力模型：架构师的三级跃迁",
+          "anchor": "_34-1-能力模型-架构师的三级跃迁",
+          "backlinks": []
+        },
+        {
+          "text": "34.2 技术决策方法论：trade-off 矩阵与 ADR",
+          "anchor": "_34-2-技术决策方法论-trade-off-矩阵与-adr",
+          "backlinks": []
+        },
+        {
+          "text": "34.3 架构设计实战：从 0 到 1 与从 1 到 100",
+          "anchor": "_34-3-架构设计实战-从-0-到-1-与从-1-到-100",
+          "backlinks": []
+        },
+        {
+          "text": "34.4 工程赋能：让架构约束自动生效",
+          "anchor": "_34-4-工程赋能-让架构约束自动生效",
+          "backlinks": []
+        },
+        {
+          "text": "34.5 软素养：技术写作、评审与推动",
+          "anchor": "_34-5-软素养-技术写作、评审与推动",
+          "backlinks": []
+        },
+        {
+          "text": "34.6 成长路径图：十二个月行动计划",
+          "anchor": "_34-6-成长路径图-十二个月行动计划",
+          "backlinks": []
+        },
+        {
+          "text": "34.7 本章避坑清单",
+          "anchor": "_34-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 14,
+      "quizByLevel": {
+        "基础": 7,
+        "进阶": 4,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/34-01-capability-radar.ts",
+        "examples/34-02-tradeoff-matrix.ts",
+        "examples/34-03-adr.ts",
+        "examples/34-04-dep-audit.ts",
+        "examples/34-05-rollout.ts"
+      ],
+      "episodes": [],
+      "lines": 649
+    },
+    {
+      "file": "35-admin-system-auth.md",
+      "slug": "35-admin-system-auth",
+      "title": "第三十五部分 · 后台管理系统权限方案",
+      "sections": [
+        {
+          "text": "35.1 RBAC 权限模型：用户 → 角色 → 权限码",
+          "anchor": "_35-1-rbac-权限模型-用户-→-角色-→-权限码",
+          "backlinks": []
+        },
+        {
+          "text": "35.2 动态菜单：按权限码过滤菜单树",
+          "anchor": "_35-2-动态菜单-按权限码过滤菜单树",
+          "backlinks": []
+        },
+        {
+          "text": "35.3 动态路由与路由守卫",
+          "anchor": "_35-3-动态路由与路由守卫",
+          "backlinks": []
+        },
+        {
+          "text": "35.4 按钮级权限指令（v-permission）",
+          "anchor": "_35-4-按钮级权限指令-v-permission",
+          "backlinks": []
+        },
+        {
+          "text": "35.5 超级管理员与数据权限范围",
+          "anchor": "_35-5-超级管理员与数据权限范围",
+          "backlinks": []
+        },
+        {
+          "text": "35.6 前后端权限约定与防越权",
+          "anchor": "_35-6-前后端权限约定与防越权",
+          "backlinks": []
+        },
+        {
+          "text": "35.7 自测题",
+          "anchor": "_35-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "35.8 本章避坑清单",
+          "anchor": "_35-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 5,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 2,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/35-01-rbac-model.ts",
+        "examples/35-02-dynamic-menu.ts",
+        "examples/35-03-dynamic-route.ts",
+        "examples/35-04-permission-directive.ts",
+        "examples/35-05-data-scope.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 55,
+          "title": "角色不是权限",
+          "slug": "EP.55-rbac-model"
+        },
+        {
+          "ep": 56,
+          "title": "路由那道门卫",
+          "slug": "EP.56-dynamic-route"
+        },
+        {
+          "ep": 57,
+          "title": "销毁还是隐藏",
+          "slug": "EP.57-permission-directive"
+        }
+      ],
+      "lines": 694
+    },
+    {
+      "file": "36-auth-system.md",
+      "slug": "36-auth-system",
+      "title": "第三十六部分 · 认证体系全景",
+      "sections": [
+        {
+          "text": "36.1 认证与授权：一体两面",
+          "anchor": "_36-1-认证与授权-一体两面",
+          "backlinks": []
+        },
+        {
+          "text": "36.2 Session-Cookie：有状态会话",
+          "anchor": "_36-2-session-cookie-有状态会话",
+          "backlinks": []
+        },
+        {
+          "text": "36.3 JWT：无状态令牌",
+          "anchor": "_36-3-jwt-无状态令牌",
+          "backlinks": []
+        },
+        {
+          "text": "36.4 Refresh Token 与静默续期",
+          "anchor": "_36-4-refresh-token-与静默续期",
+          "backlinks": []
+        },
+        {
+          "text": "36.5 OAuth2 授权码流程与第三方登录",
+          "anchor": "_36-5-oauth2-授权码流程与第三方登录",
+          "backlinks": []
+        },
+        {
+          "text": "36.6 SSO 单点登录",
+          "anchor": "_36-6-sso-单点登录",
+          "backlinks": []
+        },
+        {
+          "text": "36.7 多租户登录态",
+          "anchor": "_36-7-多租户登录态",
+          "backlinks": []
+        },
+        {
+          "text": "36.8 Token 存储与前端工程实践",
+          "anchor": "_36-8-token-存储与前端工程实践",
+          "backlinks": []
+        },
+        {
+          "text": "36.9 自测题",
+          "anchor": "_36-9-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "36.10 本章避坑清单",
+          "anchor": "_36-10-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/36-01-authn-authz.ts",
+        "examples/36-02-session-auth.ts",
+        "examples/36-03-jwt-sign-verify.ts",
+        "examples/36-04-refresh-token.ts",
+        "examples/36-05-oauth-code-flow.ts"
+      ],
+      "episodes": [],
+      "lines": 408
+    },
+    {
+      "file": "37-abac-policy-engine.md",
+      "slug": "37-abac-policy-engine",
+      "title": "第三十七部分 · ABAC 与策略引擎",
+      "sections": [
+        {
+          "text": "37.1 RBAC 的天花板：为什么需要 ABAC",
+          "anchor": "_37-1-rbac-的天花板-为什么需要-abac",
+          "backlinks": []
+        },
+        {
+          "text": "37.2 ABAC 模型：主体 / 客体 / 动作 / 环境",
+          "anchor": "_37-2-abac-模型-主体-客体-动作-环境",
+          "backlinks": []
+        },
+        {
+          "text": "37.3 策略 JSON DSL：让规则变成数据",
+          "anchor": "_37-3-策略-json-dsl-让规则变成数据",
+          "backlinks": []
+        },
+        {
+          "text": "37.4 casl 风格 can() 判定器",
+          "anchor": "_37-4-casl-风格-can-判定器",
+          "backlinks": []
+        },
+        {
+          "text": "37.5 字段级权限与数据脱敏",
+          "anchor": "_37-5-字段级权限与数据脱敏",
+          "backlinks": []
+        },
+        {
+          "text": "37.6 策略下发、缓存与前后端分工",
+          "anchor": "_37-6-策略下发、缓存与前后端分工",
+          "backlinks": []
+        },
+        {
+          "text": "37.7 自测题",
+          "anchor": "_37-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "37.8 本章避坑清单",
+          "anchor": "_37-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/37-01-rbac-limits.ts",
+        "examples/37-02-abac-model.ts",
+        "examples/37-03-policy-dsl.ts",
+        "examples/37-04-can-checker.ts",
+        "examples/37-05-field-masking.ts"
+      ],
+      "episodes": [],
+      "lines": 332
+    },
+    {
+      "file": "38-lowcode-form-engine.md",
+      "slug": "38-lowcode-form-engine",
+      "title": "第三十八部分 · 低代码表单引擎",
+      "sections": [
+        {
+          "text": "38.1 表单 Schema：一份 JSON 描述一张表单",
+          "anchor": "_38-1-表单-schema-一份-json-描述一张表单",
+          "backlinks": []
+        },
+        {
+          "text": "38.2 渲染器：Schema → 组件树",
+          "anchor": "_38-2-渲染器-schema-→-组件树",
+          "backlinks": []
+        },
+        {
+          "text": "38.3 联动引擎：显隐 / 禁用 / 值联动",
+          "anchor": "_38-3-联动引擎-显隐-禁用-值联动",
+          "backlinks": []
+        },
+        {
+          "text": "38.4 校验引擎：内置规则与自定义注册表",
+          "anchor": "_38-4-校验引擎-内置规则与自定义注册表",
+          "backlinks": []
+        },
+        {
+          "text": "38.5 提交管道：裁剪 → 校验 → 脏检查 → 草稿",
+          "anchor": "_38-5-提交管道-裁剪-→-校验-→-脏检查-→-草稿",
+          "backlinks": []
+        },
+        {
+          "text": "38.6 物料协议与平台化",
+          "anchor": "_38-6-物料协议与平台化",
+          "backlinks": []
+        },
+        {
+          "text": "38.7 自测题",
+          "anchor": "_38-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "38.8 本章避坑清单",
+          "anchor": "_38-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/38-01-form-schema.ts",
+        "examples/38-02-form-renderer.ts",
+        "examples/38-03-form-linkage.ts",
+        "examples/38-04-form-validation.ts",
+        "examples/38-05-form-submit.ts"
+      ],
+      "episodes": [],
+      "lines": 300
+    },
+    {
+      "file": "39-im-messaging.md",
+      "slug": "39-im-messaging",
+      "title": "第三十九部分 · IM 实时通信系统",
+      "sections": [
+        {
+          "text": "39.1 消息模型：状态机与 ID 设计",
+          "anchor": "_39-1-消息模型-状态机与-id-设计",
+          "backlinks": []
+        },
+        {
+          "text": "39.2 可靠投递：ACK / 超时重发 / 幂等去重",
+          "anchor": "_39-2-可靠投递-ack-超时重发-幂等去重",
+          "backlinks": []
+        },
+        {
+          "text": "39.3 会话列表与未读数",
+          "anchor": "_39-3-会话列表与未读数",
+          "backlinks": []
+        },
+        {
+          "text": "39.4 多端同步与离线消息：seq 游标",
+          "anchor": "_39-4-多端同步与离线消息-seq-游标",
+          "backlinks": []
+        },
+        {
+          "text": "39.5 群聊消息扩散：写扩散 vs 读扩散",
+          "anchor": "_39-5-群聊消息扩散-写扩散-vs-读扩散",
+          "backlinks": []
+        },
+        {
+          "text": "39.6 前端渲染与连接治理",
+          "anchor": "_39-6-前端渲染与连接治理",
+          "backlinks": []
+        },
+        {
+          "text": "39.7 自测题",
+          "anchor": "_39-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "39.8 本章避坑清单",
+          "anchor": "_39-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/39-01-message-model.ts",
+        "examples/39-02-reliable-delivery.ts",
+        "examples/39-03-conversation-list.ts",
+        "examples/39-04-multi-device-sync.ts",
+        "examples/39-05-fanout-strategy.ts"
+      ],
+      "episodes": [],
+      "lines": 328
+    },
+    {
+      "file": "40-file-drive.md",
+      "slug": "40-file-drive",
+      "title": "第四十部分 · 文件网盘系统",
+      "sections": [
+        {
+          "text": "40.1 分片上传：切片 + 并发窗口 + 重试",
+          "anchor": "_40-1-分片上传-切片-并发窗口-重试",
+          "backlinks": []
+        },
+        {
+          "text": "40.2 秒传与断点续传：hash 的角色",
+          "anchor": "_40-2-秒传与断点续传-hash-的角色",
+          "backlinks": []
+        },
+        {
+          "text": "40.3 上传队列：暂停 / 恢复 / 取消 / 进度聚合",
+          "anchor": "_40-3-上传队列-暂停-恢复-取消-进度聚合",
+          "backlinks": []
+        },
+        {
+          "text": "40.4 分块下载：Range 请求与合并",
+          "anchor": "_40-4-分块下载-range-请求与合并",
+          "backlinks": []
+        },
+        {
+          "text": "40.5 文件树与回收站：路径、冲突、软删除",
+          "anchor": "_40-5-文件树与回收站-路径、冲突、软删除",
+          "backlinks": []
+        },
+        {
+          "text": "40.6 安全与体验细节",
+          "anchor": "_40-6-安全与体验细节",
+          "backlinks": []
+        },
+        {
+          "text": "40.7 自测题",
+          "anchor": "_40-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "40.8 本章避坑清单",
+          "anchor": "_40-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/40-01-chunk-upload.ts",
+        "examples/40-02-instant-upload.ts",
+        "examples/40-03-upload-queue.ts",
+        "examples/40-04-ranged-download.ts",
+        "examples/40-05-file-tree-recycle.ts"
+      ],
+      "episodes": [],
+      "lines": 305
+    },
+    {
+      "file": "41-dashboard-visualization.md",
+      "slug": "41-dashboard-visualization",
+      "title": "第四十一部分 · 数据可视化大屏",
+      "sections": [
+        {
+          "text": "41.1 大屏适配：等比缩放方案",
+          "anchor": "_41-1-大屏适配-等比缩放方案",
+          "backlinks": []
+        },
+        {
+          "text": "41.2 比例尺：数据域到像素域的映射",
+          "anchor": "_41-2-比例尺-数据域到像素域的映射",
+          "backlinks": []
+        },
+        {
+          "text": "41.3 大数据量优化：LTTB 降采样",
+          "anchor": "_41-3-大数据量优化-lttb-降采样",
+          "backlinks": []
+        },
+        {
+          "text": "41.4 渲染选型：SVG vs Canvas 的决策模型",
+          "anchor": "_41-4-渲染选型-svg-vs-canvas-的决策模型",
+          "backlinks": []
+        },
+        {
+          "text": "41.5 实时数据管道：竞态防护与数值插值",
+          "anchor": "_41-5-实时数据管道-竞态防护与数值插值",
+          "backlinks": []
+        },
+        {
+          "text": "41.6 大屏工程实践",
+          "anchor": "_41-6-大屏工程实践",
+          "backlinks": []
+        },
+        {
+          "text": "41.7 自测题",
+          "anchor": "_41-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "41.8 本章避坑清单",
+          "anchor": "_41-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/41-01-screen-fit.ts",
+        "examples/41-02-scales.ts",
+        "examples/41-03-downsample.ts",
+        "examples/41-04-render-budget.ts",
+        "examples/41-05-realtime-pipeline.ts"
+      ],
+      "episodes": [],
+      "lines": 283
+    },
+    {
+      "file": "42-workflow-approval.md",
+      "slug": "42-workflow-approval",
+      "title": "第四十二部分 · 工作流与审批引擎",
+      "sections": [
+        {
+          "text": "42.1 审批单状态机：迁移守卫与审计轨迹",
+          "anchor": "_42-1-审批单状态机-迁移守卫与审计轨迹",
+          "backlinks": []
+        },
+        {
+          "text": "42.2 会签、或签、权重票与条件路由",
+          "anchor": "_42-2-会签、或签、权重票与条件路由",
+          "backlinks": []
+        },
+        {
+          "text": "42.3 撤回、驳回与加签",
+          "anchor": "_42-3-撤回、驳回与加签",
+          "backlinks": []
+        },
+        {
+          "text": "42.4 流程定义：JSON 校验与模拟执行",
+          "anchor": "_42-4-流程定义-json-校验与模拟执行",
+          "backlinks": []
+        },
+        {
+          "text": "42.5 节点表单权限与流程变量",
+          "anchor": "_42-5-节点表单权限与流程变量",
+          "backlinks": []
+        },
+        {
+          "text": "42.6 工程实践",
+          "anchor": "_42-6-工程实践",
+          "backlinks": []
+        },
+        {
+          "text": "42.7 自测题",
+          "anchor": "_42-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "42.8 本章避坑清单",
+          "anchor": "_42-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/42-01-approval-state-machine.ts",
+        "examples/42-02-countersign-routing.ts",
+        "examples/42-03-withdraw-return-addsign.ts",
+        "examples/42-04-flow-definition.ts",
+        "examples/42-05-form-perm-variables.ts"
+      ],
+      "episodes": [],
+      "lines": 300
+    },
+    {
+      "file": "43-business-scenes.md",
+      "slug": "43-business-scenes",
+      "title": "第四十三部分 · 高频业务场景集",
+      "sections": [
+        {
+          "text": "43.1 SKU 选择器：组合置灰的判定算法",
+          "anchor": "_43-1-sku-选择器-组合置灰的判定算法",
+          "backlinks": []
+        },
+        {
+          "text": "43.2 购物车：价格计算管道",
+          "anchor": "_43-2-购物车-价格计算管道",
+          "backlinks": []
+        },
+        {
+          "text": "43.3 秒杀：按钮状态机与请求治理",
+          "anchor": "_43-3-秒杀-按钮状态机与请求治理",
+          "backlinks": []
+        },
+        {
+          "text": "43.4 曝光埋点：可见性判定与批量上报",
+          "anchor": "_43-4-曝光埋点-可见性判定与批量上报",
+          "backlinks": []
+        },
+        {
+          "text": "43.5 A/B 实验：稳定分桶与正交性",
+          "anchor": "_43-5-a-b-实验-稳定分桶与正交性",
+          "backlinks": []
+        },
+        {
+          "text": "43.6 协同编辑入门与 H5 营销实践",
+          "anchor": "_43-6-协同编辑入门与-h5-营销实践",
+          "backlinks": []
+        },
+        {
+          "text": "43.7 自测题",
+          "anchor": "_43-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "43.8 本章避坑清单",
+          "anchor": "_43-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/43-01-sku-selector.ts",
+        "examples/43-02-cart-pipeline.ts",
+        "examples/43-03-seckill.ts",
+        "examples/43-04-exposure-tracking.ts",
+        "examples/43-05-ab-experiment.ts"
+      ],
+      "episodes": [],
+      "lines": 297
+    },
+    {
+      "file": "44-account-center.md",
+      "slug": "44-account-center",
+      "title": "第四十四部分 · 多系统统一账号中心",
+      "sections": [
+        {
+          "text": "44.1 总体架构与统一账号模型",
+          "anchor": "_44-1-总体架构与统一账号模型",
+          "backlinks": []
+        },
+        {
+          "text": "44.2 注册页设计与实现",
+          "anchor": "_44-2-注册页设计与实现",
+          "backlinks": []
+        },
+        {
+          "text": "44.3 登录页设计与回跳安全",
+          "anchor": "_44-3-登录页设计与回跳安全",
+          "backlinks": []
+        },
+        {
+          "text": "44.4 会话体系与单点登出",
+          "anchor": "_44-4-会话体系与单点登出",
+          "backlinks": []
+        },
+        {
+          "text": "44.5 修改密码与找回密码",
+          "anchor": "_44-5-修改密码与找回密码",
+          "backlinks": []
+        },
+        {
+          "text": "44.6 多系统接入与工程实践",
+          "anchor": "_44-6-多系统接入与工程实践",
+          "backlinks": []
+        },
+        {
+          "text": "44.7 自测题",
+          "anchor": "_44-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "44.8 本章避坑清单",
+          "anchor": "_44-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/44-01-register-pipeline.ts",
+        "examples/44-03-redirect-whitelist.ts",
+        "examples/44-04-sso-slo.ts",
+        "examples/44-05-password-change-reset.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 58,
+          "title": "一个账号，全家通行",
+          "slug": "EP.58-unified-account-center"
+        }
+      ],
+      "lines": 457
+    },
+    {
+      "file": "45-frontend-advanced-tips.md",
+      "slug": "45-frontend-advanced-tips",
+      "title": "第四十五部分 · 前端高级实用技巧",
+      "sections": [
+        {
+          "text": "45.1 调试技巧：把问题看清楚",
+          "anchor": "_45-1-调试技巧-把问题看清楚",
+          "backlinks": []
+        },
+        {
+          "text": "45.2 线上自愈：版本、缓存与失败恢复",
+          "anchor": "_45-2-线上自愈-版本、缓存与失败恢复",
+          "backlinks": []
+        },
+        {
+          "text": "45.3 交互手感：乐观更新、撤销与快捷键",
+          "anchor": "_45-3-交互手感-乐观更新、撤销与快捷键",
+          "backlinks": []
+        },
+        {
+          "text": "45.4 CSS 技巧：少写 JS 的现代 CSS",
+          "anchor": "_45-4-css-技巧-少写-js-的现代-css",
+          "backlinks": []
+        },
+        {
+          "text": "45.5 工程防呆：配置、开关与缓存键",
+          "anchor": "_45-5-工程防呆-配置、开关与缓存键",
+          "backlinks": []
+        },
+        {
+          "text": "45.6 自测题",
+          "anchor": "_45-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "45.7 本章避坑清单",
+          "anchor": "_45-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/45-01-debug-toolkit.ts",
+        "examples/45-02-version-guard.ts",
+        "examples/45-03-optimistic-undo.ts",
+        "examples/45-05-config-guard.ts"
+      ],
+      "episodes": [],
+      "lines": 573
+    },
+    {
+      "file": "46-error-handling.md",
+      "slug": "46-error-handling",
+      "title": "第四十六部分 · 前端错误捕获处理方案",
+      "sections": [
+        {
+          "text": "46.1 错误分类与捕获全景",
+          "anchor": "_46-1-错误分类与捕获全景",
+          "backlinks": []
+        },
+        {
+          "text": "46.2 同步错误：try/catch 的边界与盲区",
+          "anchor": "_46-2-同步错误-try-catch-的边界与盲区",
+          "backlinks": []
+        },
+        {
+          "text": "46.3 异步错误：Promise 链与 async/await 的捕获规则",
+          "anchor": "_46-3-异步错误-promise-链与-async-await-的捕获规则",
+          "backlinks": []
+        },
+        {
+          "text": "46.4 多个异步任务的错误编排：短路、汇总与补偿",
+          "anchor": "_46-4-多个异步任务的错误编排-短路、汇总与补偿",
+          "backlinks": []
+        },
+        {
+          "text": "46.5 框架与特殊运行时的错误边界",
+          "anchor": "_46-5-框架与特殊运行时的错误边界",
+          "backlinks": []
+        },
+        {
+          "text": "46.6 工程化落地：归一化、分级与上报管线",
+          "anchor": "_46-6-工程化落地-归一化、分级与上报管线",
+          "backlinks": []
+        },
+        {
+          "text": "46.7 自测题",
+          "anchor": "_46-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "46.8 本章避坑清单",
+          "anchor": "_46-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/46-01-sync-capture.ts",
+        "examples/46-02-async-capture.ts",
+        "examples/46-03-multi-task-errors.ts",
+        "examples/46-04-error-pipeline.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 59,
+          "title": "错误捕获四张网",
+          "slug": "EP.59-error-catching"
+        }
+      ],
+      "lines": 440
+    },
+    {
+      "file": "47-secrets-management.md",
+      "slug": "47-secrets-management",
+      "title": "第四十七部分 · 企业级密钥管理与零泄漏方案",
+      "sections": [
+        {
+          "text": "47.1 密钥分级与「前端无秘密」全景",
+          "anchor": "_47-1-密钥分级与「前端无秘密」全景",
+          "backlinks": []
+        },
+        {
+          "text": "47.2 本地开发：.env 体系与团队分发",
+          "anchor": "_47-2-本地开发-env-体系与团队分发",
+          "backlinks": []
+        },
+        {
+          "text": "47.3 注入方案：构建期 vs 运行时与启动门禁",
+          "anchor": "_47-3-注入方案-构建期-vs-运行时与启动门禁",
+          "backlinks": []
+        },
+        {
+          "text": "47.4 泄漏防控工具链：扫描、脱敏与应急响应",
+          "anchor": "_47-4-泄漏防控工具链-扫描、脱敏与应急响应",
+          "backlinks": []
+        },
+        {
+          "text": "47.5 CI/CD 与云端密钥服务",
+          "anchor": "_47-5-ci-cd-与云端密钥服务",
+          "backlinks": []
+        },
+        {
+          "text": "47.6 第三方 Key 的前端防护",
+          "anchor": "_47-6-第三方-key-的前端防护",
+          "backlinks": []
+        },
+        {
+          "text": "47.7 自测题",
+          "anchor": "_47-7-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "47.8 本章避坑清单",
+          "anchor": "_47-8-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 0,
+      "quizByLevel": {
+        "基础": 0,
+        "进阶": 0,
+        "挑战": 0,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/47-02-env-guard.ts",
+        "examples/47-01-secret-scanner.ts",
+        "examples/47-03-log-redactor.ts",
+        "examples/47-04-leak-response.ts"
+      ],
+      "episodes": [
+        {
+          "ep": 60,
+          "title": "密钥零泄漏防线",
+          "slug": "EP.60-secrets-zero-leak"
+        }
+      ],
+      "lines": 409
+    },
+    {
+      "file": "48-flutter.md",
+      "slug": "48-flutter",
+      "title": "第四十八部分 · Flutter 跨平台实战——从 Widget 树到平台能力",
+      "sections": [
+        {
+          "text": "48.1 跨端选型：Flutter 的边界与代价",
+          "anchor": "_48-1-跨端选型-flutter-的边界与代价",
+          "backlinks": []
+        },
+        {
+          "text": "48.2 Widget / Element / RenderObject 三棵树",
+          "anchor": "_48-2-widget-element-renderobject-三棵树",
+          "backlinks": []
+        },
+        {
+          "text": "48.3 状态管理与平台通道",
+          "anchor": "_48-3-状态管理与平台通道",
+          "backlinks": []
+        },
+        {
+          "text": "48.4 工程化：构建、性能与发布",
+          "anchor": "_48-4-工程化-构建、性能与发布",
+          "backlinks": []
+        },
+        {
+          "text": "48.5 自测题",
+          "anchor": "_48-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "48.6 本章避坑清单",
+          "anchor": "_48-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 3,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/48-01-cross-platform-decision.ts",
+        "examples/48-02-widget-reconcile.ts"
+      ],
+      "episodes": [],
+      "lines": 331
+    },
+    {
+      "file": "49-component-library.md",
+      "slug": "49-component-library",
+      "title": "第四十九部分 · 组件库工程——Ant Design 存量维护、二次封装与设计令牌",
+      "sections": [
+        {
+          "text": "49.1 组件库选型与版本基线",
+          "anchor": "_49-1-组件库选型与版本基线",
+          "backlinks": []
+        },
+        {
+          "text": "49.2 Ant Design 3 存量维护与迁移",
+          "anchor": "_49-2-ant-design-3-存量维护与迁移",
+          "backlinks": []
+        },
+        {
+          "text": "49.3 二次封装与组件库工程化",
+          "anchor": "_49-3-二次封装与组件库工程化",
+          "backlinks": []
+        },
+        {
+          "text": "49.4 自测题",
+          "anchor": "_49-4-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "49.5 本章避坑清单",
+          "anchor": "_49-5-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 3,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/49-01-antd-version-adapter.ts",
+        "examples/49-02-field-wrapper.ts"
+      ],
+      "episodes": [],
+      "lines": 269
+    },
+    {
+      "file": "50-bluetooth-hardware.md",
+      "slug": "50-bluetooth-hardware",
+      "title": "第五十部分 · Web 蓝牙与硬件通信——从 GATT 到协议解析",
+      "sections": [
+        {
+          "text": "50.1 浏览器能碰到的硬件与协议选型",
+          "anchor": "_50-1-浏览器能碰到的硬件与协议选型",
+          "backlinks": []
+        },
+        {
+          "text": "50.2 Web Bluetooth：连接与 GATT 读写",
+          "anchor": "_50-2-web-bluetooth-连接与-gatt-读写",
+          "backlinks": []
+        },
+        {
+          "text": "50.3 设备协议层：分帧、校验与命令队列",
+          "anchor": "_50-3-设备协议层-分帧、校验与命令队列",
+          "backlinks": []
+        },
+        {
+          "text": "50.4 稳定性、兼容与降级方案",
+          "anchor": "_50-4-稳定性、兼容与降级方案",
+          "backlinks": []
+        },
+        {
+          "text": "50.5 自测题",
+          "anchor": "_50-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "50.6 本章避坑清单",
+          "anchor": "_50-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 3,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/50-01-ble-frame-codec.ts",
+        "examples/50-02-device-reconnect.ts"
+      ],
+      "episodes": [],
+      "lines": 339
+    },
+    {
+      "file": "51-live-danmaku.md",
+      "slug": "51-live-danmaku",
+      "title": "第五十一部分 · 直播弹幕与实时互动——消息流、渲染治理与交易链路",
+      "sections": [
+        {
+          "text": "51.1 直播链路全景与前端职责",
+          "anchor": "_51-1-直播链路全景与前端职责",
+          "backlinks": []
+        },
+        {
+          "text": "51.2 弹幕消息系统设计",
+          "anchor": "_51-2-弹幕消息系统设计",
+          "backlinks": []
+        },
+        {
+          "text": "51.3 高并发渲染治理",
+          "anchor": "_51-3-高并发渲染治理",
+          "backlinks": []
+        },
+        {
+          "text": "51.4 互动与交易链路",
+          "anchor": "_51-4-互动与交易链路",
+          "backlinks": []
+        },
+        {
+          "text": "51.5 自测题",
+          "anchor": "_51-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "51.6 本章避坑清单",
+          "anchor": "_51-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 3,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/51-01-danmaku-scheduler.ts",
+        "examples/51-02-chat-pipeline.ts"
+      ],
+      "episodes": [],
+      "lines": 350
+    },
+    {
+      "file": "52-database-bff.md",
+      "slug": "52-database-bff",
+      "title": "第五十二部分 · 数据库与 BFF 数据层——前端也要懂的数据建模",
+      "sections": [
+        {
+          "text": "52.1 关系模型与索引：接口慢在哪",
+          "anchor": "_52-1-关系模型与索引-接口慢在哪",
+          "backlinks": []
+        },
+        {
+          "text": "52.2 SQL、ORM 与 N+1",
+          "anchor": "_52-2-sql、orm-与-n-1",
+          "backlinks": []
+        },
+        {
+          "text": "52.3 BFF 的职责与分层",
+          "anchor": "_52-3-bff-的职责与分层",
+          "backlinks": []
+        },
+        {
+          "text": "52.4 缓存与一致性",
+          "anchor": "_52-4-缓存与一致性",
+          "backlinks": []
+        },
+        {
+          "text": "52.5 自测题",
+          "anchor": "_52-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "52.6 本章避坑清单",
+          "anchor": "_52-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 3,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/52-01-n-plus-one.ts",
+        "examples/52-02-cache-aside.ts"
+      ],
+      "episodes": [],
+      "lines": 331
+    },
+    {
+      "file": "53-nginx-deploy.md",
+      "slug": "53-nginx-deploy",
+      "title": "第五十三部分 · Nginx 部署与反向代理——从静态站点到生产网关",
+      "sections": [
+        {
+          "text": "53.1 静态站点托管与路径",
+          "anchor": "_53-1-静态站点托管与路径",
+          "backlinks": []
+        },
+        {
+          "text": "53.2 反向代理与跨域",
+          "anchor": "_53-2-反向代理与跨域",
+          "backlinks": []
+        },
+        {
+          "text": "53.3 HTTPS、安全头与缓存",
+          "anchor": "_53-3-https、安全头与缓存",
+          "backlinks": []
+        },
+        {
+          "text": "53.4 灰度、限流与排障",
+          "anchor": "_53-4-灰度、限流与排障",
+          "backlinks": []
+        },
+        {
+          "text": "53.5 自测题",
+          "anchor": "_53-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "53.6 本章避坑清单",
+          "anchor": "_53-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 3,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/53-01-nginx-config-linter.ts",
+        "examples/53-02-cache-policy.ts"
+      ],
+      "episodes": [],
+      "lines": 375
+    },
+    {
+      "file": "54-animation-tooling.md",
+      "slug": "54-animation-tooling",
+      "title": "第五十四部分 · 动画与工具库——framer-motion、GSAP、jwt-decode、qs、uuid",
+      "sections": [
+        {
+          "text": "54.1 framer-motion：React 声明式动画",
+          "anchor": "_54-1-framer-motion-react-声明式动画",
+          "backlinks": []
+        },
+        {
+          "text": "54.2 GSAP：时间线、滚动与清理",
+          "anchor": "_54-2-gsap-时间线、滚动与清理",
+          "backlinks": []
+        },
+        {
+          "text": "54.3 jwt-decode：解码不等于验签",
+          "anchor": "_54-3-jwt-decode-解码不等于验签",
+          "backlinks": []
+        },
+        {
+          "text": "54.4 qs 与 uuid：查询串与唯一标识",
+          "anchor": "_54-4-qs-与-uuid-查询串与唯一标识",
+          "backlinks": []
+        },
+        {
+          "text": "54.5 自测题",
+          "anchor": "_54-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "54.6 本章避坑清单",
+          "anchor": "_54-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 3,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/54-01-mini-timeline.ts",
+        "examples/54-02-jwt-inspect.ts",
+        "examples/54-03-query-string.ts"
+      ],
+      "episodes": [],
+      "lines": 332
+    },
+    {
+      "file": "55-build-style-tooling.md",
+      "slug": "55-build-style-tooling",
+      "title": "第五十五部分 · 构建与样式库——Vite、Webpack、PostCSS",
+      "sections": [
+        {
+          "text": "55.1 Vite：原生 ESM、预构建与产物切分",
+          "anchor": "_55-1-vite-原生-esm、预构建与产物切分",
+          "backlinks": []
+        },
+        {
+          "text": "55.2 Webpack：核心概念与迁移对照",
+          "anchor": "_55-2-webpack-核心概念与迁移对照",
+          "backlinks": []
+        },
+        {
+          "text": "55.3 PostCSS：样式管线的插件顺序",
+          "anchor": "_55-3-postcss-样式管线的插件顺序",
+          "backlinks": []
+        },
+        {
+          "text": "55.4 构建性能与产物治理",
+          "anchor": "_55-4-构建性能与产物治理",
+          "backlinks": []
+        },
+        {
+          "text": "55.5 自测题",
+          "anchor": "_55-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "55.6 本章避坑清单",
+          "anchor": "_55-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 3,
+        "挑战": 3,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/55-02-vite-base-resolver.ts",
+        "examples/55-01-split-chunks.ts",
+        "examples/55-03-postcss-pipeline.ts"
+      ],
+      "episodes": [],
+      "lines": 334
+    },
+    {
+      "file": "56-offline-cache.md",
+      "slug": "56-offline-cache",
+      "title": "第五十六部分 · 离线与本地缓存全景——PWA、React Native 与内嵌 H5",
+      "sections": [
+        {
+          "text": "56.1 离线能力全景与选型坐标",
+          "anchor": "_56-1-离线能力全景与选型坐标",
+          "backlinks": []
+        },
+        {
+          "text": "56.2 PWA 离线：壳缓存与数据缓存分工",
+          "anchor": "_56-2-pwa-离线-壳缓存与数据缓存分工",
+          "backlinks": []
+        },
+        {
+          "text": "56.3 React Native 本地存储与离线同步",
+          "anchor": "_56-3-react-native-本地存储与离线同步",
+          "backlinks": []
+        },
+        {
+          "text": "56.4 内嵌 H5 离线包与秒开",
+          "anchor": "_56-4-内嵌-h5-离线包与秒开",
+          "backlinks": []
+        },
+        {
+          "text": "56.5 自测题",
+          "anchor": "_56-5-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "56.6 本章避坑清单",
+          "anchor": "_56-6-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 3,
+        "进阶": 3,
+        "挑战": 2,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/56-01-offline-sync-queue.ts",
+        "examples/56-02-offline-package.ts"
+      ],
+      "episodes": [],
+      "lines": 361
+    },
+    {
+      "file": "57-vue-component-patterns.md",
+      "slug": "57-vue-component-patterns",
+      "title": "第五十七部分 · Vue 组件设计模式深潜",
+      "sections": [
+        {
+          "text": "57.1 组件封装七大模式",
+          "anchor": "_57-1-组件封装七大模式",
+          "backlinks": []
+        },
+        {
+          "text": "57.2 自定义指令实战",
+          "anchor": "_57-2-自定义指令实战",
+          "backlinks": []
+        },
+        {
+          "text": "57.3 组件通信全景对比",
+          "anchor": "_57-3-组件通信全景对比",
+          "backlinks": []
+        },
+        {
+          "text": "57.4 v-model 与自定义表单组件",
+          "anchor": "_57-4-v-model-与自定义表单组件",
+          "backlinks": []
+        },
+        {
+          "text": "57.5 高阶组件与组合式封装",
+          "anchor": "_57-5-高阶组件与组合式封装",
+          "backlinks": []
+        },
+        {
+          "text": "57.6 自测题",
+          "anchor": "_57-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "57.7 本章避坑清单",
+          "anchor": "_57-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 5,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/57-01-component-patterns.ts",
+        "examples/57-02-custom-directives.ts",
+        "examples/57-03-event-bus-memory-leak.ts",
+        "examples/57-04-v-model-pattern.ts",
+        "examples/57-05-composables.ts"
+      ],
+      "episodes": [],
+      "lines": 1169
+    },
+    {
+      "file": "58-visualization-practice.md",
+      "slug": "58-visualization-practice",
+      "title": "第五十八部分 · 可视化实战：ECharts / AntV / D3",
+      "sections": [
+        {
+          "text": "58.1 选型决策树",
+          "anchor": "_58-1-选型决策树",
+          "backlinks": []
+        },
+        {
+          "text": "58.2 ECharts 核心 API 速通",
+          "anchor": "_58-2-echarts-核心-api-速通",
+          "backlinks": []
+        },
+        {
+          "text": "58.3 AntV G2 / G6 实战",
+          "anchor": "_58-3-antv-g2-g6-实战",
+          "backlinks": []
+        },
+        {
+          "text": "58.4 风控看板组合模式",
+          "anchor": "_58-4-风控看板组合模式",
+          "backlinks": []
+        },
+        {
+          "text": "58.5 图表联动与钻取",
+          "anchor": "_58-5-图表联动与钻取",
+          "backlinks": []
+        },
+        {
+          "text": "58.6 自测题",
+          "anchor": "_58-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "58.7 本章避坑清单",
+          "anchor": "_58-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 2,
+        "进阶": 4,
+        "挑战": 2,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/58-01-selection.ts",
+        "examples/58-02-echarts-options.ts",
+        "examples/58-03-g2-g6-patterns.ts",
+        "examples/58-04-dashboard-data-pipeline.ts",
+        "examples/58-05-chart-linkage.ts"
+      ],
+      "episodes": [],
+      "lines": 1329
+    },
+    {
+      "file": "59-monitoring-observability.md",
+      "slug": "59-monitoring-observability",
+      "title": "第五十九部分 · 前端监控与可观测性闭环",
+      "sections": [
+        {
+          "text": "59.1 可观测性三大支柱",
+          "anchor": "_59-1-可观测性三大支柱",
+          "backlinks": []
+        },
+        {
+          "text": "59.2 Web Vitals 生产级采集",
+          "anchor": "_59-2-web-vitals-生产级采集",
+          "backlinks": []
+        },
+        {
+          "text": "59.3 错误指纹聚合与分级上报",
+          "anchor": "_59-3-错误指纹聚合与分级上报",
+          "backlinks": []
+        },
+        {
+          "text": "59.4 用户行为轨迹与会话回放",
+          "anchor": "_59-4-用户行为轨迹与会话回放",
+          "backlinks": []
+        },
+        {
+          "text": "59.5 线上故障排查 SOP",
+          "anchor": "_59-5-线上故障排查-sop",
+          "backlinks": []
+        },
+        {
+          "text": "59.6 自测题",
+          "anchor": "_59-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "59.7 本章避坑清单",
+          "anchor": "_59-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 4,
+      "quizByLevel": {
+        "基础": 1,
+        "进阶": 2,
+        "挑战": 1,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/59-01-web-vitals-collector.ts",
+        "examples/59-02-error-fingerprint.ts",
+        "examples/59-03-session-recorder.ts",
+        "examples/59-04-incident-simulator.ts"
+      ],
+      "episodes": [],
+      "lines": 643
+    },
+    {
+      "file": "60-browser-compatibility.md",
+      "slug": "60-browser-compatibility",
+      "title": "第六十部分 · 浏览器兼容性实战——差异地图、排查 SOP 与国产环境生存指南",
+      "sections": [
+        {
+          "text": "60.1 差异从哪来：渲染引擎格局与碎片化",
+          "anchor": "_60-1-差异从哪来-渲染引擎格局与碎片化",
+          "backlinks": []
+        },
+        {
+          "text": "60.2 防御体系：特性检测、降级与构建管线",
+          "anchor": "_60-2-防御体系-特性检测、降级与构建管线",
+          "backlinks": []
+        },
+        {
+          "text": "60.3 高频兼容性案例库",
+          "anchor": "_60-3-高频兼容性案例库",
+          "backlinks": []
+        },
+        {
+          "text": "60.4 国产浏览器与 WebView 生存指南",
+          "anchor": "_60-4-国产浏览器与-webview-生存指南",
+          "backlinks": []
+        },
+        {
+          "text": "60.5 排查 SOP 与远程调试工具链",
+          "anchor": "_60-5-排查-sop-与远程调试工具链",
+          "backlinks": []
+        },
+        {
+          "text": "60.6 自测题",
+          "anchor": "_60-6-自测题",
+          "backlinks": []
+        },
+        {
+          "text": "60.7 本章避坑清单",
+          "anchor": "_60-7-本章避坑清单",
+          "backlinks": []
+        }
+      ],
+      "quizCount": 8,
+      "quizByLevel": {
+        "基础": 3,
+        "进阶": 3,
+        "挑战": 2,
+        "未分级": 0
+      },
+      "examples": [
+        "examples/60-03-ua-risk-report.ts",
+        "examples/60-01-feature-detect.ts",
+        "examples/60-02-safe-date.ts"
+      ],
+      "episodes": [],
+      "lines": 394
+    }
+  ]
+}

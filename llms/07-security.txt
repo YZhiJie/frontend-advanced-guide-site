@@ -1,0 +1,441 @@
+# 第七部分：前端安全（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/07-security
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第七部分：前端安全
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[网络请求优化](./06-network.md)｜下一篇：[跨端开发](./08-cross-platform.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-7" target="_blank" rel="noopener">EP.07《XSS 与 CSRF 攻防》</a>
+
+## 本部分内容
+
+- [7.1 XSS 跨站脚本攻击](#_7-1-xss-跨站脚本攻击)
+- [7.2 CSRF 跨站请求伪造](#_7-2-csrf-跨站请求伪造)
+- [7.3 其他常见攻击与防御](#_7-3-其他常见攻击与防御)
+- [7.4 前端安全清单](#_7-4-前端安全清单)
+- [7.5 认证与会话体系](#_7-5-认证与会话体系)
+- [7.6 自测题](#_7-6-自测题)
+- [7.7 本章避坑清单](#_7-7-本章避坑清单)
+
+---
+
+## 7.1 XSS 跨站脚本攻击
+
+#### 概念解析
+
+XSS 的本质：**攻击者让浏览器把"数据"当成"代码"执行**。按注入途径分三类：
+
+| 类型 | 途径 | 特点 |
+| ---- | ---- | ---- |
+| 存储型 | 恶意脚本存入数据库（如评论区），所有访问者中招 | 危害最大 |
+| 反射型 | 恶意脚本藏在 URL 参数中，服务器原样返回 | 需诱导点击 |
+| DOM 型 | 纯前端把不可信数据插入危险 API（innerHTML 等） | 不经过服务器 |
+
+防御核心思想：**永远不要信任用户输入；输出到哪，就在哪转义**。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/07-01-xss-defense.ts —— [浏览器] XSS 攻防演示
+// ============ 危险写法 vs 安全写法 ============
+
+// 模拟恶意输入(存储型 XSS 的典型载荷)
+const comment = `<img src=x onerror="alert('偷走你的 Cookie: ' + document.cookie)">`;
+
+// ❌ 危险:innerHTML 会解析并执行其中的脚本/事件
+// document.body.innerHTML = `<div>${comment}</div>`;
+
+// ✅ 方案一:纯文本场景用 textContent(任何输入都只会被当作文字显示)
+const el1 = document.createElement('div');
+el1.textContent = comment; // 页面上原样显示这串字符,不会执行
+document.body.appendChild(el1);
+
+// ✅ 方案二:确实需要渲染富文本时,用 DOMPurify 白名单过滤
+// npm i dompurify
+// import DOMPurify from 'dompurify';
+// const clean = DOMPurify.sanitize(comment); // 移除 onerror、javascript: 等一切危险内容
+// document.body.innerHTML = `<div>${clean}</div>`;
+
+// ✅ 方案三:URL 类输入,协议白名单校验(防 javascript: 伪协议)
+function safeUrl(input: string): string {
+    try {
+        const url = new URL(input, location.origin);
+        return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? url.href : '#';
+    } catch {
+        return '#';
+    }
+}
+console.log(safeUrl('javascript:alert(1)')); // '#'
+console.log(safeUrl('https://example.com'));  // 正常放行
+
+// ---- 框架内的默认防线 ----
+// React:  <div>{comment}</div>        → 默认转义,安全
+// React:  <div dangerouslySetInnerHTML={{ __html: comment }} />  → ❌ 逃逸口,必须先 DOMPurify
+// Vue:    <div>{{ comment }}</div>    → 默认转义,安全
+// Vue:    <div v-html="comment" />    → ❌ 同样是逃逸口
+export {};
+```
+
+```html
+<!-- 文件: csp-demo.html —— CSP:纵深防御,即使注入了也不让执行 -->
+<!DOCTYPE html>
+<html>
+<head>
+    <!-- Content-Security-Policy 响应头(推荐由 Nginx/网关下发)或 meta 标签 -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self';
+                   script-src 'self' https://cdn.example.com;
+                   img-src 'self' data: https:;
+                   connect-src 'self' https://api.example.com;
+                   frame-ancestors 'none';
+                   report-uri /api/csp-report" />
+    <!-- 语义:脚本只允许本域与指定 CDN(内联 <script> 一律拦截);
+         frame-ancestors 'none' 同时防点击劫持;
+         report-uri:违规行为上报,便于发现漏洞被利用 -->
+</head>
+<body>
+    <!-- 这段内联脚本会被 CSP 拦截并上报 -->
+    <script>alert('XSS 被 CSP 拦截了')</script>
+</body>
+</html>
+```
+
+> 运行方式：`npx http-server .` 起本地静态服务后访问对比（`file://` 协议下部分行为不同）。关键结论：**textContent/默认插值是安全默认值，`dangerouslySetInnerHTML`/`v-html` 必须过 DOMPurify**。
+
+#### 最佳实践
+
+- ✅ 前后端双重转义：前端负责显示安全，后端负责存储前清洗（防线纵深）；
+- ✅ Cookie 一律 `HttpOnly`（JS 读不到，即使 XSS 得手也偷不走会话）+ `Secure`；
+- ✅ 上线 CSP，先 `Content-Security-Policy-Report-Only` 观察再全量启用；
+- ⚠️ 高频遗漏点：富文本编辑器输出、`a.href`（javascript: 协议）、`iframe.srcdoc`、SVG 文件（可含脚本）、Markdown 渲染器。
+
+## 7.2 CSRF 跨站请求伪造
+
+#### 概念解析
+
+CSRF 攻击的是**"浏览器自动带 Cookie"这一机制**：攻击者并不需要拿到你的 Cookie，只要诱导你的浏览器在登录状态下向目标站点发请求即可。
+
+```
+1. 你刚登录了 bank.com,浏览器存着它的会话 Cookie
+2. 你又打开了恶意页面 evil.com
+3. evil.com 里藏着: <img src="https://bank.com/transfer?to=hacker&amount=10000">
+   或一个自动提交的隐藏表单
+4. 浏览器向 bank.com 发请求,自动附带 Cookie → 服务器以为是你的合法操作
+```
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/07-02-csrf-defense.ts —— CSRF 三层防御
+// ============ 防御一:Cookie 的 SameSite 属性(第一道防线,现代浏览器默认 Lax)============
+
+// Set-Cookie: session=abc; HttpOnly; Secure; SameSite=Lax
+// SameSite=Strict: 完全禁止第三方场景携带(最安全,但从外站点链接跳转也会丢登录态)
+// SameSite=Lax:    顶级导航的 GET 请求可以带,POST/跨站 img/fetch 一律不带(体验与安全的平衡)
+// 💡 Lax 直接让上文的 img 标签攻击失效 —— 这是它成为默认值的原因
+
+// ============ 防御二:CSRF Token(经典方案)============
+
+// 服务端渲染页面时下发一次性 token:<meta name="csrf-token" content="xxx">
+function getCsrfToken(): string {
+    return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+}
+
+async function submitForm(body: unknown) {
+    await fetch('/api/transfer', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCsrfToken(), // 攻击者的跨站页面拿不到这个值(受同源策略保护)
+        },
+        body: JSON.stringify(body),
+    });
+}
+// 原理:CSRF 只能"借"浏览器自动带的 Cookie,无法读取目标域的页面内容;
+// 而校验的正是"只有你自己的页面才能拿到的" token
+
+// ============ 防御三:校验 Origin/Referer 头(服务端兜底)============
+// 服务端:取请求头 Origin(或 Referer),必须与白名单域完全一致,否则 403
+// 注意:直接修改 Cookie 中的会话标识校验(双重提交 Cookie)也可,但本质相同
+
+export {};
+```
+
+> 运行方式：阅读理解为主；可在本地起两个不同端口的站点模拟 evil.com 向 bank.com 发 POST，观察 SameSite=Lax 下 Cookie 不被携带（DevTools Application → Cookies 查看属性）。
+
+#### 最佳实践
+
+- ✅ 会话 Cookie 一律 `HttpOnly + Secure + SameSite=Lax`——免费挡掉绝大多数 CSRF；
+- ✅ 写操作（POST/PUT/DELETE）服务端强制校验 CSRF Token 或 Origin 头；
+- ✅ 敏感操作（改密码、支付）增加二次确认（密码/验证码），同时防 CSRF 与会话劫持；
+- ⚠️ JSON API 也别大意：`<form enctype="text/plain">` 可以伪造简单 JSON 请求，不能只依赖 Content-Type 拒绝。
+
+## 7.3 其他常见攻击与防御
+
+#### 概念解析与代码示例
+
+```typescript
+// 文件: examples/07-03-other-attacks.ts —— 四类高频安全问题的攻与防
+// ============ 1. 点击劫持(Clickjacking)============
+// 攻击:把你的页面放进透明 iframe,叠在"抽奖"按钮上,用户点的是隐藏的"转账"按钮
+
+// 防御 A:HTTP 响应头(服务端配置,二选一)
+//   X-Frame-Options: DENY                     ← 不允许被任何页面嵌入
+//   Content-Security-Policy: frame-ancestors 'none'  ← CSP 版本,能力更强
+// 防御 B(兜底 JS,可被绕过,仅辅助):
+if (window.self !== window.top) {
+    document.body.style.display = 'none';
+    window.top!.location = window.self.location; // 试图跳出 iframe
+}
+
+// ============ 2. 原型污染(Prototype Pollution)============
+// 攻击:深合并用户可控 JSON 时,劫持 __proto__
+
+// ❌ 危险的 merge 实现
+function unsafeMerge(target: Record<string, unknown>, source: Record<string, unknown>) {
+    for (const key in source) {
+        if (typeof source[key] === 'object' && source[key] !== null) {
+            target[key] = unsafeMerge((target[key] as object) ?? {}, source[key] as Record<string, unknown>);
+        } else {
+            target[key] = source[key]; // key 为 __proto__ 时 → 污染所有对象的原型!
+        }
+    }
+    return target;
+}
+
+// 演示污染效果(勿在生产尝试):
+const payload = JSON.parse('{"__proto__": {"isAdmin": true}}');
+const merged = unsafeMerge({}, payload);
+const victim: Record<string, unknown> = {};
+console.log(victim.isAdmin); // true —— 一个全新的空对象都"中招"了
+
+// ✅ 防御:过滤危险键 + 冻结原型
+function safeMerge(target: Record<string, unknown>, source: Record<string, unknown>) {
+    for (const key in source) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue; // 黑名单
+        if (typeof source[key] === 'object' && source[key] !== null) {
+            target[key] = safeMerge((target[key] as object) ?? {}, source[key] as Record<string, unknown>);
+        } else {
+            target[key] = source[key];
+        }
+    }
+    return target;
+}
+console.log(Object.keys(safeMerge({}, payload))); // [] —— __proto__ 被忽略
+
+// ============ 3. 中间人攻击(MITM)============
+// 防御:全站 HTTPS + HSTS(强制浏览器后续都用 HTTPS)
+// 严格传输安全响应头:
+//   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+// 敏感信息(手机号/身份证)前后端都应脱敏展示,日志中严禁明文
+
+// ============ 4. 供应链攻击 ============
+// 攻击:恶意版本包(如经典的 event-stream 事件)——你 npm install 的那一刻中招
+// 防御:
+//   1) 提交 lockfile,CI 用 --frozen-lockfile,杜绝"悄悄装了新版本";
+//   2) 开启 npm audit / Renovate 的安全告警;
+//   3) 锁定关键依赖的确切版本;新包引入前看维护活跃度与下载量;
+//   4) Node 侧可用 --ignore-scripts 安装(阻止 install 钩子执行任意脚本)
+export {};
+```
+
+> 运行方式：[浏览器] 示例依赖 `window`，Node 环境直接运行会报错，以阅读理解为主；重点理解原型污染前后 `victim.isAdmin` 的输出差异，可把代码贴进浏览器 DevTools 实操。
+
+## 7.4 前端安全清单
+
+| 类别 | 措施 | 优先级 |
+| ---- | ---- | ------ |
+| XSS | 默认插值/textContent；富文本过 DOMPurify；审计 `v-html`/`dangerouslySetInnerHTML` | 🔴 必须 |
+| XSS | Cookie 设置 `HttpOnly; Secure`；上线 CSP | 🔴 必须 |
+| CSRF | `SameSite=Lax` + 写操作校验 CSRF Token/Origin | 🔴 必须 |
+| 传输 | 全站 HTTPS + HSTS；敏感数据脱敏 | 🔴 必须 |
+| 嵌入 | `X-Frame-Options: DENY` 或 CSP `frame-ancestors` | 🟡 推荐 |
+| 依赖 | lockfile 提交 + audit + 依赖白名单审批 | 🟡 推荐 |
+| 输入 | 前后端双重校验；上传文件校验类型/重命名/隔离存储 | 🔴 必须 |
+| 权限 | 前端路由守卫只是体验层，**鉴权必须在服务端** | 🔴 必须 |
+
+## 7.5 认证与会话体系
+
+#### 概念解析
+
+**Session vs JWT**：
+
+| 维度 | Session(Cookie) | JWT |
+| ---- | --------------- | --- |
+| 状态 | 服务端存储会话,天然可撤销 | 无状态,签发后难以主动作废 |
+| 扩展性 | 需要共享存储(Redis) | 任意节点可验证 |
+| 大小 | Cookie 仅存会话 ID | Token 携带载荷,请求头变大 |
+| 典型场景 | 传统 Web 应用 | 开放 API、微服务间、App |
+
+**Token 存储位置的安全对比**（核心权衡：XSS vs CSRF）：
+
+| 存储位置 | XSS 可偷 | CSRF 风险 | 结论 |
+| -------- | -------- | --------- | ---- |
+| localStorage | ✅ 可偷(致命) | 无 | 纯 SPA 常用但有 XSS 即沦陷 |
+| 内存(变量) | 刷新即丢 | 无 | 最安全,配合刷新机制使用 |
+| **HttpOnly Cookie** | ❌ 读不到 | 有(需 SameSite+CSRF Token) | **生产推荐** |
+
+**生产推荐架构**：短有效期 access token（内存）+ HttpOnly 的 refresh token（Cookie，带轮换与重放检测）——兼得安全与体验，正是 6.4 请求层"401 静默续期"的配套方案。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/07-04-auth-manager.ts —— 安全的 Token 管理器
+// ============ access 在内存 + refresh 在 HttpOnly Cookie 的组合实现 ============
+
+class AuthManager {
+    private accessToken: string | null = null;   // 只在内存:XSS 拿不到,刷新页面丢失
+    private refreshInflight: Promise<string> | null = null;
+
+    /** 应用启动/页面刷新时,用 HttpOnly Cookie 中的 refresh token 换新 access */
+    async bootstrap(): Promise<void> {
+        try {
+            this.accessToken = await this.refresh(); // refresh token 由浏览器自动携带
+        } catch {
+            this.accessToken = null;                 // 未登录/登录过期
+        }
+    }
+
+    /** 刷新:并发调用合并为一次(与 6.4 的 401 处理同款模式) */
+    private refresh(): Promise<string> {
+        this.refreshInflight ??= fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+            .then((r) => {
+                if (!r.ok) throw new Error('unauthorized');
+                return r.json() as Promise<{ accessToken: string }>;
+            })
+            .then(({ accessToken }) => {
+                this.accessToken = accessToken;
+                return accessToken;
+            })
+            .finally(() => {
+                this.refreshInflight = null;
+            });
+        return this.refreshInflight;
+    }
+
+    get token() {
+        return this.accessToken;
+    }
+    get isAuthenticated() {
+        return this.accessToken !== null;
+    }
+    logout() {
+        this.accessToken = null;
+        // 服务端同时清除 HttpOnly Cookie 并作废 refresh token
+        void fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    }
+}
+
+export const auth = new AuthManager();
+```
+
+```mermaid
+sequenceDiagram
+    participant FE as 前端(SPA)
+    participant AS as 授权服务器
+    FE->>FE: 生成 code_verifier 与 code_challenge(哈希)
+    FE->>AS: ① 跳转授权页,携带 code_challenge
+    AS->>FE: ② 用户登录并授权,重定向回 code
+    FE->>AS: ③ 用 code + code_verifier 换 token
+    AS->>AS: 校验 verifier 哈希与 challenge 一致
+    AS->>FE: ④ 签发 token
+    Note over FE,AS: code_verifier 只存内存 —— 授权码被截获也无法换取 token
+```
+
+```typescript
+// 文件: examples/07-05-qr-login.ts —— 扫码登录:轮询版(WS 版见 6.6)
+// ============ 三步:取二维码 → 轮询状态 → 携带票据登录 ============
+
+type QrStatus = 'waiting' | 'scanned' | 'confirmed' | 'expired';
+
+async function qrLogin(onStatus: (s: QrStatus, ticket?: string) => void) {
+    // ① 服务端生成二维码(含唯一 sceneId),前端展示
+    const { sceneId } = await fetch('/api/auth/qr/create', { method: 'POST' }).then((r) => r.json());
+    renderQrImage(`https://app.example.com/scan?sceneId=${sceneId}`);
+
+    // ② 轮询状态(2s 一次;生产更优:SSE/WS 由服务端推送,见 6.6)
+    return new Promise<string>((resolve, reject) => {
+        const timer = setInterval(async () => {
+            const { status, ticket } = await fetch(`/api/auth/qr/status?sceneId=${sceneId}`).then((r) => r.json());
+            onStatus(status);
+
+            if (status === 'confirmed' && ticket) {
+                clearInterval(timer);
+                // ③ 用一次性 ticket 换正式会话(ticket 60s 有效且仅可用一次)
+                const { accessToken } = await fetch('/api/auth/qr/exchange', {
+                    method: 'POST',
+                    body: JSON.stringify({ ticket }),
+                }).then((r) => r.json());
+                resolve(accessToken);
+            }
+            if (status === 'expired') {
+                clearInterval(timer);
+                reject(new Error('二维码已过期,请刷新重试'));
+            }
+        }, 2000);
+    });
+}
+
+function renderQrImage(url: string) {
+    console.log('渲染二维码:', url); // 生产用 qrcode 库生成
+}
+
+// 手机扫码 → App 内确认 → 浏览器轮询到 confirmed → 免密登录完成
+```
+
+> 运行方式：`npx tsx examples/07-04-auth-manager.ts` 需配套服务端（以阅读理解为主，重点是并发刷新合并与内存 access 的设计）；扫码登录放入项目配合后端联调。
+
+#### 最佳实践
+
+- ✅ access token 放内存、refresh token 放 HttpOnly + Secure + SameSite=Lax Cookie 并**轮换**（每次刷新换新，旧 token 立即作废，可检测重放）；
+- ✅ 前端路由守卫只做体验（跳转/提示），每个接口的鉴权在服务端；
+- ✅ OAuth 一律用授权码 + PKCE，禁止 implicit 模式（token 进 URL 已被废弃）；
+- ⚠️ JWT 无法主动撤销：需要"登出即失效"能力的系统用 Session，或在 JWT 中加入版本号并服务端校验；
+- 📖 面试高频：JWT vs Session 选型、Token 存储三位置的攻防矩阵、PKCE 解决什么问题、扫码登录的轮询与推送两种实现。
+
+---
+
+## 7.6 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】XSS 的三种类型与共同防御核心?</b></summary>
+
+存储型(入库危害最大)、反射型(藏在 URL)、DOM 型(纯前端插入)。共同核心:不信任任何用户输入 —— 输出转义(textContent/默认插值)、富文本白名单过滤(DOMPurify)、Cookie 加 HttpOnly、上线 CSP 纵深防御。
+</details>
+
+<details>
+<summary><b>2. 【进阶】SameSite=Lax 为什么能挡住大多数 CSRF 攻击?</b></summary>
+
+Lax 规则下,跨站的 POST 请求、img/fetch/iframe 都不会携带 Cookie,只有顶级导航的 GET 才带。而经典 CSRF 载荷(隐藏表单自动提交、img 触发转账)恰好都是跨站 POST/GET 嵌入,直接失效。
+</details>
+
+<details>
+<summary><b>3. 【挑战】JWT 应该放 localStorage 还是 HttpOnly Cookie?为什么?</b></summary>
+
+推荐 HttpOnly Cookie。localStorage 可被任何运行的 JS 读取,存在 XSS 就等于会话沦陷;HttpOnly JS 读不到,代价是有 CSRF 风险,用 SameSite=Lax + CSRF Token 补齐(见 [7.2](./07-security.md#_7-2-csrf-跨站请求伪造)/7.5)。
+</details>
+
+<details>
+<summary><b>4. 【进阶】OAuth 授权码模式为什么需要 PKCE?</b></summary>
+
+纯前端(SPA/移动端)无法安全保存 client_secret。PKCE 用一次性 code_verifier(只存内存)生成 challenge,即使授权码被中间人截获,没有 verifier 也换不到 token —— 防授权码拦截攻击。
+</details>
+
+---
+
+## 7.7 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| XSS 输出 | 用户输入直接进 `innerHTML`、`dangerouslySetInnerHTML`、`v-html` 被当代码执行 | 默认插值走 `textContent` 自动转义；富文本必须过 DOMPurify 白名单，禁止手写正则过滤 |
+| XSS 分类 | 只防了表单入口，漏了 URL 参数回显与纯前端注入 | 存储型、反射型、DOM 型同源同防：输出到哪、就在哪转义，别只盯入口 |
+| CSRF | 隐藏表单自动提交能带走登录态 Cookie 完成转账 | Cookie 加 `SameSite=Lax`（跨站 POST 不再携带），敏感操作加 CSRF Token 双校验 |
+| CSP | 上了 CSP 却用 `unsafe-inline`、宽泛 `*` 白名单，等于没设 | 用 nonce、hash 替代 `unsafe-inline`，只放行可信域名并配 `report-uri` 收集违规 |
+| Token 存储 | 把 JWT 放进 `localStorage`，一次 XSS 即会话沦陷 | 优先 HttpOnly Cookie（JS 读不到）；不能改 Cookie 时只放内存并配短过期 |
+| 原型污染 | `Object.assign`、深层合并把 `__proto__` 写进原型链 | 合并前过滤 `__proto__`、`constructor`、`prototype` 键，改用 `Object.create(null)` 隔离 |
+| 第三方供应链 | 外链脚本、npm 依赖被篡改后直接执行 | 外链加 SRI 校验、锁定版本并跑 `pnpm audit`，CSP 收紧其来源与能力 |

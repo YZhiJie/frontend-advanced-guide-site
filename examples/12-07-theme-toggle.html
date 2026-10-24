@@ -1,0 +1,51 @@
+<!-- 文件: examples/12-07-theme-toggle.html —— [浏览器] 完整的暗色模式切换 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        /* 语义层:亮色为默认值 */
+        :root {
+            --color-bg: #ffffff;
+            --color-text: #1f1f1f;
+            --color-primary: #1890ff;
+            --color-card: #f5f5f5;
+        }
+        /* 暗色主题:只需覆盖语义层 */
+        :root[data-theme='dark'] {
+            --color-bg: #141414;
+            --color-text: rgba(255, 255, 255, 0.85);
+            --color-card: #1f1f1f;
+        }
+        /* 用户没手动选过时,跟随系统 */
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme]) {
+                --color-bg: #141414;
+                --color-text: rgba(255, 255, 255, 0.85);
+                --color-card: #1f1f1f;
+            }
+        }
+
+        body { background: var(--color-bg); color: var(--color-text); transition: background 0.2s; }
+        .card { background: var(--color-card); padding: 16px; border-radius: 8px; margin-top: 12px; }
+        button { background: var(--color-primary); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <button id="toggle">切换主题</button>
+    <div class="card">所有颜色都来自语义层变量,切换主题时组件代码零改动</div>
+
+    <script>
+        // 初始化:读取用户上一次的选择(localStorage);首帧前执行避免闪烁(FOUC)
+        const saved = localStorage.getItem('theme');
+        if (saved) document.documentElement.dataset.theme = saved;
+
+        document.getElementById('toggle').addEventListener('click', () => {
+            const root = document.documentElement;
+            const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+            root.dataset.theme = next;
+            localStorage.setItem('theme', next); // 手动选择优先于系统偏好
+        });
+    </script>
+</body>
+</html>

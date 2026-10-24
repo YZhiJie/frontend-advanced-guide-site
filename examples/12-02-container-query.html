@@ -1,0 +1,38 @@
+<!-- 文件: examples/12-02-container-query.html —— [浏览器] 容器查询:组件级响应式 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        /* 声明:这个元素是查询容器,子组件可以感知它的宽度 */
+        .sidebar { container-type: inline-size; width: 260px; resize: horizontal; overflow: auto; border: 1px dashed #999; padding: 8px; }
+        .main { container-type: inline-size; margin-top: 12px; border: 1px dashed #999; padding: 8px; }
+
+        /* 同一个商品卡片组件:窄容器(侧栏)显示紧凑形态,宽容器(主区)显示横向形态 */
+        .product-card { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; }
+        .product-card img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #eee; }
+
+        /* 容器宽度 ≥ 400px 时切换为横向布局 —— 与视口无关! */
+        @container (min-width: 400px) {
+            .product-card { flex-direction: row; align-items: center; gap: 16px; }
+            .product-card img { width: 180px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <p>侧栏(可拖动右下角改变宽度)</p>
+        <div class="product-card">
+            <img alt="商品图" />
+            <div><b>机械键盘</b><p>¥199</p></div>
+        </div>
+    </div>
+    <div class="main">
+        <p>主内容区(宽容器)</p>
+        <div class="product-card">
+            <img alt="商品图" />
+            <div><b>机械键盘</b><p>¥199</p></div>
+        </div>
+    </div>
+</body>
+</html>

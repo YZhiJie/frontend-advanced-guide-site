@@ -1,0 +1,686 @@
+# 第三部分：前端工程化（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/03-engineering
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第三部分：前端工程化
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[TypeScript 高级应用](./02-typescript.md)｜下一篇：[框架深入理解](./04-frameworks.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-3" target="_blank" rel="noopener">EP.03《工程化与摇树优化》</a>
+
+## 本部分内容
+
+- [3.1 模块化方案演进](#_3-1-模块化方案演进)
+- [3.2 包管理与依赖治理](#_3-2-包管理与依赖治理)
+- [3.3 构建工具原理与实践](#_3-3-构建工具原理与实践)
+- [3.4 代码分割与 Tree Shaking](#_3-4-代码分割与-tree-shaking)
+- [3.5 性能优化体系](#_3-5-性能优化体系)
+- [3.6 Monorepo 实践](#_3-6-monorepo-实践)
+- [3.7 CI/CD 与质量工具链](#_3-7-ci-cd-与质量工具链)
+- [3.8 自测题](#_3-8-自测题)
+- [3.9 本章避坑清单](#_3-9-本章避坑清单)
+
+---
+
+> 工程化能力是中级与高级工程师的分水岭：模块化、构建、依赖治理、性能体系、CI/CD——决定的是**团队的整体效率与产出质量**。
+
+## 3.1 模块化方案演进
+
+#### 概念解析
+
+| 方案 | 年代 | 关键字 | 现状 |
+| ---- | ---- | ------ | ---- |
+| IIFE / 命名空间 | 2010 前 | `(function(){})()` | 仅存于遗留代码 |
+| CommonJS | 2009 | `require` / `module.exports` | Node.js 传统方案 |
+| AMD/CMD | 2011 | `define` / `requirejs` | 已淘汰 |
+| UMD | 2012 | CJS+AMD 兼容壳 | CDN 直接引入的库仍在用 |
+| **ESM** | 2015 | `import` / `export` | **语言标准，唯一未来** |
+
+**CJS 与 ESM 的核心区别**（高频面试题）：
+
+| 维度 | CommonJS | ESM |
+| ---- | -------- | --- |
+| 加载时机 | 运行时加载（同步） | 编译期静态分析 + 异步加载 |
+| 输出 | 值的**拷贝** | 值的**引用（绑定）** |
+| 顶层 this | 指向模块本身 | `undefined` |
+| Tree Shaking | 不可 | 可（依赖静态结构） |
+| 循环引用 | 返回已执行的部分 | 通过绑定 + TDZ 机制处理 |
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/03-01-modules/esm/counter.ts
+// ============ ESM:值的"引用绑定"特性 ============
+
+export let count = 0;
+
+export function increment() {
+    count++; // 修改的是导出绑定本身
+}
+```
+
+```typescript
+// 文件: examples/03-01-modules/esm/main.ts
+import { count, increment } from './counter.ts';
+
+console.log(count); // 0
+increment();
+console.log(count); // 1 —— ESM 导出的是"活引用",外部能看到变化
+
+// ---- 对比:CJS 导出的是值拷贝 ----
+// counter.cjs:
+//   let count = 0;
+//   function increment() { count++; }
+//   module.exports = { count, increment };
+// main.cjs:
+//   const { count, increment } = require('./counter.cjs');
+//   increment();
+//   console.log(count); // 0 —— require 拿到的是快照,外部永远看到旧值
+//   console.log(require('./counter.cjs').count); // 1 —— 重新 require 才能拿到新值
+
+// ---- ESM 的三种导入 ----
+import { increment as inc } from './counter.ts'; // 具名导入
+import * as counter from './counter.ts';          // 命名空间
+const mod = await import('./counter.ts');         // 动态导入:返回 Promise,代码分割的基础
+console.log(count, inc, counter.count, mod.count);
+```
+
+> 运行方式：`npx tsx examples/03-01-modules/esm/main.ts`（`03-01` 目录中同时附有 `counter.cjs` / `main.cjs` 注释版对照，可用 `node` 体验 CJS 行为）。
+
+#### 最佳实践
+
+- ✅ 新项目一律 ESM（`package.json` 声明 `"type": "module"`），并通过 `exports` 字段控制导出入口；
+- ✅ 库作者发布双格式（ESM 为主、CJS 兼容），用 `exports` 条件导出：`{"import": "./esm/index.js", "require": "./cjs/index.cjs"}`；
+- ⚠️ ESM 中 `this` 在顶层是 `undefined`，判断环境用 `import.meta` 而不是 `module`/`__dirname`；
+- ✅ 浏览器端注意 `<script type="module">` 的两个特性：默认 `defer`、严格模式。
+
+## 3.2 包管理与依赖治理
+
+#### 概念解析
+
+**pnpm 成为事实标准的原因**：基于全局内容寻址存储 + 硬链接，同一版本的包在磁盘上只存一份；`node_modules` 采用符号链接结构，**天然杜绝幽灵依赖**（只能 import 声明过的依赖）。
+
+| 工具 | 安装速度 | 磁盘占用 | 幽灵依赖 | monorepo |
+| ---- | -------- | -------- | -------- | -------- |
+| npm | 慢 | 高 | 存在 | workspaces（弱） |
+| yarn 1 | 快 | 高 | 存在 | 弱 |
+| yarn berry | 快 | 低(zip) | 可控 | 强 |
+| **pnpm** | 快 | **最低** | **不存在** | **强** |
+
+**语义化版本（semver）**：`主版本.次版本.修订号`——`^1.2.3` 允许 `1.x.x`（次版本+修订），`~1.2.3` 只允许 `1.2.x`（修订）。
+
+#### 完整代码示例
+
+```bash
+# 文件: 常用命令速查(在项目根目录执行)
+
+# ---- 日常 ----
+pnpm i                          # 安装依赖(严格按 lockfile)
+pnpm add axios                  # 添加生产依赖
+pnpm add -D vitest              # 添加开发依赖
+pnpm add react@19               # 指定版本
+pnpm update --latest            # 升级到最新 semver 允许版本
+
+# ---- 分析与治理 ----
+pnpm why react                  # 谁依赖了 react(依赖来源追溯)
+pnpm ls react --depth 2         # 查看依赖树
+pnpm outdated                    # 列出可更新的依赖
+npm audit --production           # 安全漏洞审计
+npx depcheck                     # 找出未使用的依赖
+
+# ---- 磁盘与缓存 ----
+pnpm store path                  # 查看全局内容寻址存储位置
+pnpm store prune                 # 清理存储中未被引用的包
+```
+
+```jsonc
+// 文件: package.json —— 值得掌握的关键字段
+{
+    "name": "my-app",
+    "version": "1.0.0",
+    "type": "module",
+    "engines": { "node": ">=20" },          // 声明运行环境,配合 engine-strict
+    "packageManager": "pnpm@9.15.0",        // 锁定包管理器版本,CI 与本地一致
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc --noEmit && vite build",
+        "test": "vitest run",
+        "lint": "eslint . --max-warnings 0",
+        "preinstall": "npx only-allow pnpm"  // 强制团队使用 pnpm
+    },
+    "peerDependencies": { "react": ">=18" } // 库作者:声明宿主环境需提供的依赖
+}
+```
+
+```yaml
+# 文件: .npmrc —— pnpm 项目常见配置
+shamefully-hoist=false      # 保持严格,杜绝幽灵依赖
+strict-peer-dependencies=true
+auto-install-peers=true
+registry=https://registry.npmjs.org/
+```
+
+#### 最佳实践
+
+- ✅ **永远提交 lockfile**，CI 使用 `pnpm install --frozen-lockfile` 保证与本地完全一致；
+- ✅ 锁定包管理器（`packageManager` 字段 + `preinstall` 校验），避免团队"装出来不一样"；
+- ✅ 定期 `pnpm outdated` + `pnpm why` 治理依赖，安全漏洞用 `audit` + Renovate/Dependabot 自动化；
+- ⚠️ 不要轻易用 `pnpm add -w` 提升到根依赖；遇到幽灵依赖报错，**显式声明**而不是关闭严格模式；
+- 📖 面试高频：pnpm 为什么快/省空间（硬链接+内容寻址）、幽灵依赖是什么、`dependencies` vs `peerDependencies`。
+
+## 3.3 构建工具原理与实践
+
+#### 概念解析
+
+**Webpack 核心流程**：从 `entry` 出发递归构建依赖图 → 每个文件经过 **Loader** 转换（loader 是纯函数，链式执行，从右到左）→ **Plugin** 在生命周期钩子（基于 Tapable 事件流）中介入 → 输出 **Chunk** → 生成 Bundle。**一切皆模块、一切皆插件**。
+
+**Vite 为什么快**：
+
+```
+开发时:  原生 ESM 按需编译 —— 请求哪个模块,esbuild 边缘编译哪个,不打包整个应用
+         依赖预构建(esbuild, Go 编写, 比 JS 打包器快 10~100 倍):把 CJS 依赖转成 ESM 并合并
+构建时:  生产环境使用 Rollup 打包(稳定的产物 + 生态插件),Vite 6+ 还支持 Rolldown(Rust 版 Rollup)
+```
+
+#### 完整代码示例
+
+```javascript
+// 文件: webpack.config.js —— 生产配置骨架(理解核心概念用)
+const path = require('path');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+
+module.exports = {
+    mode: 'production',
+    entry: { main: './src/index.tsx' },                       // 多入口:一个页面一个 entry
+    output: {
+        path: path.resolve(__dirname, 'dist'),
+        filename: '[name].[contenthash:8].js',                 // 内容哈希:文件变才变名,配合强缓存
+        clean: true,                                           // 构建前清空 dist
+    },
+    module: {
+        rules: [
+            // loader 链:从右往左执行(tsx → swc 转译为 js)
+            { test: /\.tsx?$/, use: 'swc-loader', exclude: /node_modules/ },
+            { test: /\.css$/, use: [MiniCssExtractPlugin.loader, 'css-loader', 'postcss-loader'] },
+            // asset 模块:8KB 以下图片内联为 base64,减少请求数
+            { test: /\.(png|jpe?g|svg|webp)$/, type: 'asset', parser: { dataUrlCondition: { maxSize: 8 * 1024 } } },
+        ],
+    },
+    resolve: {
+        extensions: ['.tsx', '.ts', '.js'],                    // 省略后缀
+        alias: { '@': path.resolve(__dirname, 'src') },
+    },
+    cache: { type: 'filesystem' },                             // 持久化缓存:二次构建提速 70%+
+    optimization: {
+        splitChunks: {
+            chunks: 'all',
+            cacheGroups: {
+                vendors: { test: /[\\/]node_modules[\\/]/, name: 'vendors', priority: -10 },
+            },
+        },
+        runtimeChunk: 'single',                                // runtime 单独抽出,业务变更不影响它
+    },
+    plugins: [
+        new HtmlWebpackPlugin({ template: './index.html' }),   // 自动注入带哈希的脚本
+        new MiniCssExtractPlugin({ filename: '[name].[contenthash:8].css' }),
+    ],
+};
+```
+
+```typescript
+// 文件: vite.config.ts —— 现代 Vite 项目标准配置
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { visualizer } from 'rollup-plugin-visualizer';
+
+export default defineConfig(({ mode }) => ({
+    plugins: [
+        react(),
+        // 构建后自动打开产物分析报告(持续关注包体积)
+        mode === 'production' && visualizer({ open: true, gzipSize: true }),
+    ].filter(Boolean),
+
+    resolve: {
+        alias: { '@': '/src' },
+    },
+
+    server: {
+        port: 5173,
+        proxy: {
+            // 开发环境代理:解决本地跨域(生产由 Nginx/网关处理)
+            '/api': {
+                target: 'http://localhost:3000',
+                changeOrigin: true,
+                rewrite: (p) => p.replace(/^\/api/, ''),
+            },
+        },
+    },
+
+    build: {
+        target: 'es2018',           // 按用户群浏览器占比定目标(esbuild 兼容表)
+        sourcemap: mode !== 'production', // 生产按需:上传到监控平台而非公网
+        rollupOptions: {
+            output: {
+                // 手动分包:基础库变动少 → 长缓存;业务代码频繁变 → 独立 chunk
+                manualChunks(id: string) {
+                    if (id.includes('node_modules')) {
+                        if (id.includes('react')) return 'react-vendor';
+                        if (id.includes('echarts')) return 'chart-vendor'; // 大库单独拆
+                        return 'vendor';
+                    }
+                },
+            },
+        },
+        chunkSizeWarningLimit: 500, // 超过 500KB 的 chunk 给出警告
+    },
+}));
+```
+
+#### 最佳实践
+
+- ✅ 新项目选 Vite，遗留大仓库迁移可评估 Rspack/Turbopack（Webpack 兼容 API）；微任务级自定义需求仍可学 Webpack 插件模型；
+- ✅ 产物文件名必须带 `[contenthash]`，否则强缓存（见 [6.2](./06-network.md#_6-2-缓存策略详解)）无法安全启用；
+- ✅ 每次引入新依赖后跑一遍 bundle 分析，警惕"装一个小库、拖一大串依赖"；
+- ⚠️ Loader 面向"单文件转换"，Plugin 面向"构建流程介入"，扩展构建能力优先找现成 Plugin；
+- 📖 面试高频：Webpack 构建流程、loader 与 plugin 区别、HMR 原理（文件变更 → 生成补丁 chunk → 浏览器通过 WebSocket 收到更新 → 模块热替换并沿依赖链向上冒泡）、Vite 冷启动快的原因。
+
+## 3.4 代码分割与 Tree Shaking
+
+#### 概念解析
+
+- **代码分割（Code Splitting）**：把单一大 bundle 拆成按需加载的小 chunk，首屏只加载首屏需要的代码；
+- **Tree Shaking**：借助 ESM 的静态结构，打包器删除"导入但未使用"的导出。生效的三个前提：使用 ESM、`sideEffects: false`（或精确标注）、生产模式的压缩器（esbuild/terser）。
+
+#### 完整代码示例
+
+```tsx
+// 文件: src/router.tsx —— 路由级懒加载(最有效的代码分割)
+import { lazy, Suspense } from 'react';
+import { createBrowserRouter } from 'react-router-dom';
+import { FullscreenSpin } from './components/FullscreenSpin';
+
+// 每个页面单独一个 chunk,首屏只加载 Home
+const Home = lazy(() => import('@/pages/Home'));
+const Order = lazy(() => import('@/pages/Order'));      // 订单页往往很重(表格/图表)
+const Admin = lazy(() => import('@/pages/Admin'));
+
+export const router = createBrowserRouter([
+    {
+        path: '/',
+        element: (
+            <Suspense fallback={<FullscreenSpin />}>
+                <Home />
+            </Suspense>
+        ),
+    },
+    { path: '/order', element: <Suspense fallback={<FullscreenSpin />}><Order /></Suspense> },
+    { path: '/admin', element: <Suspense fallback={<FullscreenSpin />}><Admin /></Suspense> },
+]);
+```
+
+```typescript
+// 文件: src/utils/download.ts —— 组件内按需加载重依赖
+// 场景:导出 Excel 的功能只有 1% 的用户会用,不应该进主包
+export async function exportToExcel(rows: Record<string, unknown>[]) {
+    // 点击导出时才下载 xlsx 库(~500KB),并自动打独立 chunk
+    const XLSX = await import('xlsx');
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    XLSX.writeFile(wb, 'export.xlsx');
+}
+```
+
+```jsonc
+// 文件: package.json —— Tree Shaking 的关键配置(库作者视角)
+{
+    "name": "my-ui-lib",
+    "sideEffects": [
+        "**/*.css",        // css 有副作用(全局样式),不能被摇掉
+        "./src/polyfills.ts"
+    ],
+    "exports": {
+        ".": {
+            "import": "./esm/index.js",   // ESM 入口:可被 Tree Shaking
+            "require": "./cjs/index.cjs"  // CJS 入口:不可
+        }
+    }
+}
+```
+
+```typescript
+// 文件: examples/03-02-tree-shaking.ts —— 帮助你理解"摇不掉"的写法
+// ============ 会阻止 Tree Shaking 的三种代码 ============
+
+// 1. ✅ 可摇:纯 ESM 具名导出,未使用的函数会被删除
+export function used() { return 'used'; }
+export function unused() { return 'this will be dropped'; }
+
+// 2. ❌ 摇不掉:副作用代码(顶层执行)——打包器不敢删
+export const config = { api: loadConfig() };
+function loadConfig() { console.log('顶层副作用:初始化配置'); return {}; }
+
+// 3. ❌ 摇不掉:给原型/全局对象挂方法
+// Array.prototype.last = function () { ... };
+
+// 4. ⚠️ 部分可摇:对象属性聚合 —— unusedMember 可能被保留
+export const utils = {
+    usedMember: () => 1,
+    unusedMember: () => 2,
+};
+// 💡 最佳做法:导出离散的具名函数,而不是大对象(很多老工具库的通病)
+```
+
+> 运行方式：路由与按需加载示例放入 Vite 项目后 `pnpm build`，观察 `dist/assets` 中生成的多个 chunk；Tree Shaking 示例用 `npx tsx examples/03-02-tree-shaking.ts` 理解语义即可，验证摇树效果需 `pnpm build` 后搜索产物。
+
+#### 最佳实践
+
+- ✅ 路由级懒加载 + 重型组件（富文本、图表、编辑器）手动懒加载，通常可减少 40%+ 首包；
+- ✅ 引入组件库用**子路径导入**（`import { Button } from 'antd/es/button'`）或确认库已配 `sideEffects`；
+- ⚠️ 动态导入的路径不要用变量拼接（打包器无法静态分析，会导致打包整个目录或失败）；
+- ✅ 用 `rollup-plugin-visualizer` / `source-map-explorer` 定期审查产物构成。
+
+## 3.5 性能优化体系
+
+#### 概念解析
+
+性能优化要成体系：**度量 → 定位 → 优化 → 回归监控**，而不是凭感觉。核心指标是 Google 的 Core Web Vitals：
+
+| 指标 | 含义 | 优秀线 | 主要影响 |
+| ---- | ---- | ------ | -------- |
+| LCP | 最大内容绘制 | ≤ 2.5s | 加载性能（首屏） |
+| INP | 交互到下一次绘制 | ≤ 200ms | 运行时响应速度 |
+| CLS | 累积布局偏移 | ≤ 0.1 | 视觉稳定性 |
+
+优化分两大方向：**加载性能**（更少的字节、更早的请求、不阻塞渲染）与**运行时性能**（JS 不阻塞交互、渲染管线友好，见[第十部分](./10-browser-rendering.md)）。
+
+#### 完整代码示例
+
+```html
+<!-- 文件: index.html —— 资源提示与关键资源优先级 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <!-- 关键 API 的 DNS 提前解析 + 预连接(跨域资源必加) -->
+    <link rel="preconnect" href="https://api.example.com" />
+    <link rel="dns-prefetch" href="https://cdn.example.com" />
+    <!-- 首屏关键资源预加载:字体是最典型的 LCP 阻塞源 -->
+    <link rel="preload" href="/fonts/main.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- 下一屏路由预取:空闲时下载,导航时秒开 -->
+    <link rel="prefetch" href="/assets/order-abc123.js" />
+    <!-- 关键 CSS 内联 + 其余异步加载,避免渲染阻塞 -->
+    <style>/* 首屏关键样式(工具如 critters 自动提取) */</style>
+    <title>性能优化示例</title>
+</head>
+<body>
+    <!-- 图片:宽高占位防 CLS + 懒加载 + 现代格式 + 响应式 -->
+    <img
+        src="/img/hero.avif"
+        srcset="/img/hero@1x.avif 1x, /img/hero@2x.avif 2x"
+        width="1200" height="600"
+        alt="首屏主图"
+        fetchpriority="high"
+    />
+    <img src="/img/below-fold.webp" width="400" height="300" loading="lazy" alt="次屏图片" />
+</body>
+</html>
+```
+
+```typescript
+// 文件: examples/03-03-web-vitals.ts —— 性能度量:上报核心指标
+// ============ 用 Performance API 手工采集 Core Web Vitals ============
+
+// ---- LCP:最大内容绘制 ----
+new PerformanceObserver((list) => {
+    const entries = list.getEntries();
+    const last = entries[entries.length - 1];
+    report({ metric: 'LCP', value: last.startTime, element: (last as any).element?.tagName });
+}).observe({ type: 'largest-contentful-paint', buffered: true });
+
+// ---- CLS:累积布局偏移(只统计非用户输入导致的偏移)----
+let clsValue = 0;
+new PerformanceObserver((list) => {
+    for (const entry of list.getEntries() as PerformanceEntry[] & { hadRecentInput: boolean; value: number }[]) {
+        if (!entry.hadRecentInput) clsValue += entry.value;
+    }
+    report({ metric: 'CLS', value: clsValue });
+}).observe({ type: 'layout-shift', buffered: true });
+
+// ---- 自定义埋点:某个关键操作的耗时 ----
+performance.mark('list-render-start');
+requestAnimationFrame(() => {
+    performance.mark('list-render-end');
+    performance.measure('list-render', 'list-render-start', 'list-render-end');
+    const measure = performance.getEntriesByName('list-render').pop();
+    report({ metric: 'list-render', value: measure?.duration });
+});
+
+// ---- 统一上报:sendBeacon 不阻塞页面卸载 ----
+function report(data: Record<string, unknown>) {
+    console.log('[上报]', data);
+    navigator.sendBeacon?.('/api/metrics', new Blob([JSON.stringify(data)], { type: 'application/json' }));
+}
+
+// 💡 生产环境建议直接用 web-vitals 官方库:
+// import { onLCP, onINP, onCLS } from 'web-vitals';
+// onLCP(report); onINP(report); onCLS(report);
+```
+
+> 运行方式：HTML 部分放入 Vite 项目 `index.html` 后 `pnpm dev` 用 Lighthouse 验证；度量脚本粘贴到真实页面的 DevTools Console 即可看到 `[上报]` 日志。实验室工具：Lighthouse、Performance 面板；线上工具：RUM(真实用户监控)，见 [11.2](./11-patterns-architecture.md#_11-2-前端监控与错误上报)。
+
+#### 最佳实践（加载性能清单）
+
+- ✅ **JS 体积**：路由懒加载、重库按需、`manualChunks` 分包、`esbuild` 压缩、依赖审计；
+- ✅ **图片**：AVIF/WebP 优先、响应式 `srcset`、`loading="lazy"`、尺寸占位防 CLS、CDN 裁剪参数；
+- ✅ **字体**：`woff2` + `font-display: swap` + `preload`，子集化中文字体（中文字体动辄几 MB）；
+- ✅ **请求**：HTTP 缓存（见 [6.2](./06-network.md#_6-2-缓存策略详解)）、CDN、HTTP/2、关键接口 `preload`/`fetchpriority`；
+- ✅ **渲染阻塞**：CSS 内联关键部分、脚本 `defer`/`module`、第三方脚本 `async` + 延迟挂载；
+- ⚠️ 优化前先建立指标基线，优化后用 Lighthouse/RUM 回归验证——**没有度量的优化是赌博**。
+
+## 3.6 Monorepo 实践
+
+#### 概念解析
+
+Monorepo 把多个包/应用放进一个仓库：**代码共享零成本、原子化提交、统一工具链**。当前主流方案：**pnpm workspace（依赖管理）+ Turborepo（任务编排与缓存）**。
+
+#### 完整代码示例
+
+```yaml
+# 文件: pnpm-workspace.yaml —— 声明工作区包的位置
+packages:
+    - 'apps/*'      # 应用:host、admin、docs
+    - 'packages/*'  # 共享包:ui、utils、api-client、eslint-config、tsconfig
+```
+
+```jsonc
+// 文件: turbo.json —— Turborepo v2 任务编排
+{
+    "tasks": {
+        "build": {
+            "dependsOn": ["^build"],   // 先构建上游依赖包(^ 表示依赖的包)
+            "outputs": ["dist/**"]     // 声明产物:命中缓存时直接还原,不再执行
+        },
+        "test": { "dependsOn": ["build"] },
+        "lint": {},                     // 无依赖,可全并行
+        "dev": { "cache": false, "persistent": true }
+    }
+}
+```
+
+```jsonc
+// 文件: packages/ui/package.json —— 工作区包的标准写法
+{
+    "name": "@acme/ui",
+    "version": "0.0.0",
+    "private": true,
+    "exports": { ".": "./src/index.ts" },  // 内部包直接源码引用(消费方统一转译,无需构建)
+    "dependencies": {
+        "@acme/utils": "workspace:*"        // 工作区协议:始终链接到本地包
+    },
+    "peerDependencies": {
+        "react": ">=18"
+    }
+}
+```
+
+```bash
+# 文件: 常用命令
+pnpm install                     # 全仓库安装,内部包自动软链
+pnpm --filter @acme/ui build     # 只构建 ui 包(上游自动先构建)
+pnpm --filter ./apps/* dev       # 并行启动所有应用的开发服务
+pnpm -r test                     # 按依赖拓扑递归执行所有包的测试
+turbo build                      # Turborepo 构建:命中缓存的包秒过
+turbo build --filter=host...     # 构建 host 及其全部上游
+```
+
+#### 最佳实践
+
+- ✅ 内部包用 `exports` 直接指向源码（配合 TS `paths`），省掉每个包的构建环节（Just-in-Time Package 模式）；
+- ✅ 三个包以上共用配置就下沉为 `@acme/eslint-config`、`@acme/tsconfig`，保持单一来源；
+- ⚠️ 版本发布用 Changesets 管理，避免手改版本号；私有包不必强求 semver 完美；
+- ⚠️ CI 必须用 Turborepo 的远程缓存或 GitHub Actions 缓存，否则大仓构建时间失控。
+
+## 3.7 CI/CD 与质量工具链
+
+#### 概念解析
+
+**质量门禁流水线**：代码提交 → Git Hooks（本地）→ CI（远端强制门禁）→ 构建 → 部署。原则是：**机器能把关的绝不靠自觉**。
+
+#### 完整代码示例
+
+```yaml
+# 文件: .github/workflows/ci.yml —— 前端标准 CI 流水线
+name: CI
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+
+jobs:
+    quality:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: pnpm/action-setup@v4        # 版本读取自 packageManager 字段
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: pnpm                    # 缓存依赖,加速安装
+
+            - run: pnpm install --frozen-lockfile  # 锁文件不匹配直接失败
+
+            - run: pnpm lint                     # 门禁 1:代码规范
+            - run: pnpm typecheck                # 门禁 2:tsc --noEmit 类型检查
+            - run: pnpm test --coverage          # 门禁 3:单元测试 + 覆盖率
+            - run: pnpm build                    # 门禁 4:构建成功
+
+            - uses: actions/upload-artifact@v4   # 产物可供后续部署 job 使用
+              with:
+                  name: dist
+                  path: apps/*/dist
+
+    lighthouse:                                  # 性能回归门禁(可选)
+        needs: quality
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: Lighthouse CI
+              run: |
+                  npx @lhci/cli@0.14.x autorun
+```
+
+```jsonc
+// 文件: package.json —— 本地质量工具链配置
+{
+    "scripts": {
+        "prepare": "husky",                      // 安装后初始化 git hooks
+        "lint-staged": "lint-staged"
+    },
+    "lint-staged": {                             // 只检查暂存区文件,提交更快
+        "*.{ts,tsx}": ["eslint --fix", "prettier --write"],
+        "*.css": ["prettier --write"]
+    }
+}
+```
+
+```javascript
+// 文件: eslint.config.js —— ESLint 扁平配置(TS 项目推荐形态)
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import reactHooks from 'eslint-plugin-react-hooks';
+
+export default tseslint.config(
+    { ignores: ['dist/**', 'node_modules/**'] },
+    js.configs.recommended,
+    ...tseslint.configs.recommended,
+    {
+        files: ['**/*.{ts,tsx}'],
+        plugins: { 'react-hooks': reactHooks },
+        rules: {
+            ...reactHooks.configs.recommended.rules,
+            '@typescript-eslint/no-explicit-any': 'warn',
+            '@typescript-eslint/no-floating-promises': 'error', // 忘记 await 的 Promise 直接报错
+            'no-console': ['warn', { allow: ['warn', 'error'] }],
+        },
+    },
+);
+```
+
+> 运行方式：`npm i -D husky lint-staged prettier eslint typescript-eslint && npx husky init`，在 `.husky/pre-commit` 写入 `npx lint-staged`。工作流文件提交到 GitHub 后自动生效。
+
+#### 最佳实践
+
+- ✅ 门禁顺序讲究"快在前"：lint（秒级）→ typecheck（十秒级）→ test → build；
+- ✅ 主分支开启保护：必须 CI 通过 + 至少 1 人 approve 才能合并；
+- ⚠️ 覆盖率门槛循序渐进（如先 40%），一步到位 80% 只会催生垃圾测试；
+- ⚠️ `no-floating-promises` 是前端性价比最高的一条 lint 规则，能拦截大量"忘记 await 导致静默失败"的 bug。
+
+---
+
+## 3.8 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【进阶】Vite 冷启动为什么快?</b></summary>
+
+两个原因:① 开发时不打包整个应用,利用浏览器原生 ESM 按需编译 —— 请求到哪个模块才编译哪个;② 依赖预构建用 esbuild(Go 编写,比 JS 打包器快 10~100 倍)把 CJS 依赖转 ESM 并合并。
+</details>
+
+<details>
+<summary><b>2. 【基础】Tree Shaking 生效的三个前提是什么?</b></summary>
+
+① 使用 ESM(import/export,静态结构可分析);② package.json 正确标注 sideEffects(无副作用的代码才敢删);③ 生产模式的压缩器(esbuild/terser)做实际删除。三者缺一不可。
+</details>
+
+<details>
+<summary><b>3. 【基础】缓存的黄金法则是什么?</b></summary>
+
+HTML 用 Cache-Control: no-cache(每次协商,保证引用最新);带内容哈希的静态资源用 max-age=31536000, immutable(强缓存一年,文件变名就变,绝对安全)。
+</details>
+
+<details>
+<summary><b>4. 【进阶】幽灵依赖是什么?pnpm 如何从结构上解决它?</b></summary>
+
+npm/yarn 扁平化 node_modules,把所有依赖提升到顶层,导致代码能 import 到 package.json 里没有声明的包(传递依赖),它们被升级/移除时项目莫名报错。pnpm 用符号链接 + 内容寻址存储,node_modules 里只暴露显式声明的依赖。
+</details>
+
+---
+
+## 3.9 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 幽灵依赖 | 本地能跑，换台机器或 CI 就报 `Cannot find module` | 扁平化提升让代码能 import 未声明的传递依赖；只引用 `package.json` 里显式声明的包，pnpm 的符号链接结构可从根上杜绝 |
+| `peerDependencies` | 装了插件后运行报警告或行为错乱 | peer 版本不匹配（如 React 19 配只支持 18 的库）；安装前对照 peer 要求并把版本统一提升到兼容区间，别用 `--force` 硬装 |
+| lockfile 漂移 | 本地与 CI 装出的依赖版本不一致，构建结果不同 | `pnpm-lock.yaml` 必须提交，CI 用 `--frozen-lockfile` 冻结；不要在本地以 `--no-save` 装包后仍照常提交代码 |
+| 构建缓存 | 改过依赖后构建仍用旧预构建产物 | Vite 的 `node_modules/.vite` 缓存按配置与 lockfile 校验；不一致时删掉它重装，CI 不要缓存这个目录 |
+| Monorepo 提升 | workspace 里某包莫名引到了别的包的依赖 | 依赖被提升到根 `node_modules` 引发越界 import；逐包声明依赖，或用 pnpm 的隔离结构把依赖收在各自包内 |
+| CI 门禁 | 只跑 lint 就绿灯，合并后 `tsc`、构建才炸 | 顺序应为 lint（秒级）→ `tsc --noEmit` → test → build（见 [3.7](./03-engineering.md#_3-7-ci-cd-与质量工具链)）；缺一环都把错误留给了下游 |
+| 环境变量泄漏 | 带 `VITE_` 前缀的密钥被带进产物，客户端能读到 | 打包会把 `import.meta.env.VITE_` 全量内联进客户端代码，凡 `VITE_` 变量都等于公开；密钥只留在服务端，客户端只放非敏感配置 |

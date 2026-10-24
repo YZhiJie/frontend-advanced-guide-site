@@ -1,0 +1,579 @@
+# 第十部分：浏览器原理与渲染性能（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/10-browser-rendering
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第十部分：浏览器原理与渲染性能
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[测试策略](./09-testing.md)｜下一篇：[设计模式与架构](./11-patterns-architecture.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-10" target="_blank" rel="noopener">EP.10《浏览器渲染流水线》</a>
+
+## 本部分内容
+
+- [第十部分：浏览器原理与渲染性能](#第十部分-浏览器原理与渲染性能)
+  - [本部分内容](#本部分内容)
+  - [10.1 从输入 URL 到页面呈现](#_10-1-从输入-url-到页面呈现)
+      - [概念解析](#概念解析)
+      - [典型应用场景](#典型应用场景)
+      - [完整代码示例](#完整代码示例)
+      - [最佳实践](#最佳实践)
+      - [补充：骨架屏与感知性能](#补充-骨架屏与感知性能)
+  - [10.2 渲染流程与重排重绘](#_10-2-渲染流程与重排重绘)
+      - [概念解析](#概念解析-1)
+      - [完整代码示例](#完整代码示例-1)
+      - [最佳实践](#最佳实践-1)
+  - [10.3 渲染性能优化实战](#_10-3-渲染性能优化实战)
+      - [完整代码示例](#完整代码示例-2)
+      - [最佳实践](#最佳实践-2)
+  - [10.4 高性能虚拟列表](#_10-4-高性能虚拟列表)
+      - [概念解析](#概念解析-2)
+      - [完整代码示例](#完整代码示例-3)
+      - [最佳实践](#最佳实践-3)
+  - [10.5 Web Worker 计算卸载](#_10-5-web-worker-计算卸载)
+      - [概念解析](#概念解析-3)
+      - [完整代码示例](#完整代码示例-4)
+      - [最佳实践](#最佳实践-4)
+  - [10.6 Service Worker 与 PWA](#_10-6-service-worker-与-pwa)
+      - [概念解析](#概念解析-4)
+      - [完整代码示例](#完整代码示例-5)
+      - [最佳实践](#最佳实践-5)
+  - [10.7 自测题](#_10-7-自测题)
+  - [10.8 本章避坑清单](#_10-8-本章避坑清单)
+
+---
+
+## 10.1 从输入 URL 到页面呈现
+
+#### 概念解析
+
+```
+1. URL 解析 → 缓存查找(强缓存? → Service Worker? → 内存/磁盘缓存?)
+2. DNS 解析(缓存 → hosts → 递归查询)             ← preconnect/dns-prefetch 优化点
+3. TCP 握手 + TLS 握手(HTTP/3 走 QUIC,0-RTT)     ← preconnect 优化点
+4. 发送 HTTP 请求 → 服务器处理 → 响应(CDN 边缘命中?)
+5. 浏览器解析响应:
+   HTML → DOM 树
+   CSS  → CSSOM 树         ← CSS 阻塞渲染但不阻塞解析
+   JS   → 执行(默认阻塞 HTML 解析!) ← defer/async/module 优化点
+6. DOM + CSSOM → 渲染树(Layout Tree)
+7. 布局(Layout):计算几何位置 → 绘制(Paint):光栅化 → 合成(Composite):GPU 合成图层
+```
+
+关键结论：**JS 默认阻塞解析、CSS 阻塞渲染、合成层动画最快**——后面所有优化技巧都从这里推导。
+
+第 5～7 步是前端优化的主战场，逐步拆开看：
+
+**① 解析 HTML，构建 DOM 树**
+
+- 网络收到的是字节流，HTML 分词器按字符编码切成 token（开始标签/结束标签/文本/注释），每个开始标签生成一个节点并按嵌套关系挂成树——**DOM 是边解析边构建的**，不是等整个文档下载完才开始；
+- 解析器遇到普通 `<script>` 会**暂停 DOM 构建**，下载并执行完 JS 才继续（脚本可能改 DOM，比如 `document.write`）；`defer` 延迟到 DOM 构建完成后按顺序执行，`async` 下载完立即执行（顺序不保证）；
+- 阻塞期间浏览器会派出**预加载扫描器（preload scanner）**向后扫描，提前并行预取 img/link/script 等外链——关键资源可用 `<link rel="preload">` 与 `fetchpriority="high"` 主动插队。
+
+**② 解析 CSS，构建 CSSOM 树**
+
+- CSS 字节流同样经过分词 → 解析，生成带层叠/继承关系的 CSSOM；
+- **CSS 不阻塞 DOM 解析，但阻塞渲染**：没有 CSSOM 就无法计算节点样式，浏览器宁可不画也不画一棵"注定要重排的树"（FOUC 防护）；
+- 所以 `@import` 串行加载、超大的 head 样式表都会直接表现为白屏。
+
+**③ 合成渲染树（Render Tree）**
+
+- 把 DOM 与 CSSOM 合并，为每个**可见节点**生成带样式的渲染对象；
+- 取舍规则：`display: none` 的节点**不进渲染树**（不占空间，其后代也不进）；`visibility: hidden` **保留盒子**（占位只是不可见）；`::before/::after` 伪元素会生成匿名盒子；`<head>`、注释不进；
+- 随后 Layout 计算每个渲染对象的几何盒（位置、尺寸），Paint 按层级把盒子画成绘制记录，光栅化（Raster）转为位图，最后 Composite 由 GPU 把图层合成上屏。
+
+#### 典型应用场景
+
+| 现象 / 需求 | 对应阶段 | 处置 |
+| ---------- | -------- | ---- |
+| 白屏时间长，Network 显示 JS 在 head 阻塞 | DOM 构建被 JS 打断 | 脚本放 body 末尾或加 `defer`；第三方脚本 `async` |
+| 样式表加载完之前一直白屏 | CSSOM 阻塞渲染 | 关键 CSS 内联；非关键 CSS 媒体查询拆分；去掉 `@import` 串行 |
+| LCP 图片发现得晚 | 预加载扫描器 / 资源优先级 | `<link rel="preload" as="image" fetchpriority="high">` |
+| 元素加了 `display:none` 却仍占高？排查为什么布局没塌 | 渲染树取舍规则 | 确认是不是 `visibility:hidden`/`opacity:0`，它们保留盒子 |
+| 首屏插入内容导致跳动（CLS） | Layout | 图片/广告位预留宽高、`aspect-ratio` 占位 |
+
+#### 完整代码示例
+
+```html
+<!-- 文件: examples/10-05-critical-render-path.html —— [浏览器] 关键渲染路径可观测实验 -->
+<!-- 打开即自动输出四组结论: -->
+<!-- 实验1: head 内联脚本读 body 元素得到 null,DOMContentLoaded 后可读到 -->
+<!-- 实验2: Network 面板观察预加载扫描器提前发出的图片请求 -->
+<!-- 实验3: display:none 不进渲染树(offsetHeight=0) vs visibility:hidden 占位 80px -->
+<!-- 实验4: Performance 面板观察 Recalculate Style(CSSOM) 与首次绘制的先后 -->
+<script>
+  // 本脚本在 <head> 中执行,此时 body 尚未解析
+  window.__phase0 = {
+    targetA: document.getElementById('target-a'), // null
+    domIsReady: document.readyState,             // 'loading'
+  };
+</script>
+```
+
+> 运行方式：直接用浏览器打开 `examples/10-05-critical-render-path.html`，页面内有自动输出的实测数据；配合 Network / Performance 面板对照各阶段。
+
+#### 最佳实践
+
+- ✅ head 只放必须的资源：关键 CSS 内联、`<title>`/字体 preload；普通 JS 一律 `defer`；
+- ✅ 牢记"CSS 阻塞渲染、JS 阻塞解析"，任何放在关键路径上的第三方脚本都要评估白屏成本；
+- ⚠️ `display:none` 才移出渲染树；只想隐藏又不想引发布局变化时用合成路径（`opacity` + 图层），而不是 `visibility` 切换（仍触发 Paint）；
+- ✅ 优化顺序先测量：Performance 面板看 Parse HTML / Recalculate Style / Layout 三段各自耗时，再决定压缩哪一段。
+
+#### 补充：骨架屏与感知性能
+
+白屏的根因是"没有可绘制内容"。骨架屏（Skeleton）在数据到达前先把页面结构画成灰色占位块——它不缩短真实加载时间，只改善**感知性能**：用户看到"结构已经在那里"就比盯着白屏更愿意等。三个落地要点：
+
+- ✅ **占位尺寸必须等于真实内容**（固定高度或 `aspect-ratio`），否则数据到达时布局跳变，白屏换来的好感被 CLS 一次败光；
+- ✅ 微光（shimmer）动画只动 `transform`/`opacity`（走合成），别做宽度/位置动画（每帧重排，低端机反而卡）；
+- ⚠️ 分工别搞反：骨架屏管的是**"等数据"这一段**——CSR 列表/详情页用它过渡；SSR 场景的"等首字节"靠流式渲染分段出水（见 [13.4](./13-ssr-meta-frameworks.md#_13-4-ssr-性能优化)），`Suspense` 的 fallback 本质上就是 React 语法的骨架屏。
+
+验收时别被指标骗到：LCP 记录"最大内容绘制"，一大块灰块也算绘制——骨架屏页要结合 FCP→真实内容就绪的间隔一起看，单看 LCP 会误以为优化到位。
+
+## 10.2 渲染流程与重排重绘
+
+#### 概念解析
+
+| 操作 | 触发 | 开销 |
+| ---- | ---- | ---- |
+| 重排（Reflow/Layout） | 改几何属性：宽高、位置、字体、读取 `offsetTop` 等 | 最大：从 Layout 开始整条管线重来 |
+| 重绘（Repaint） | 改外观属性：颜色、阴影、可见性 | 中：跳过 Layout，重新 Paint |
+| 合成（Composite） | `transform`、`opacity` | 最小：只重新 Composite，不触发 Layout/Paint |
+
+⚠️ **强制同步布局（Layout Thrashing）**：一帧内交替"读布局属性 → 写样式 → 再读"，每次读都会强制浏览器执行布局，性能杀手。
+
+#### 完整代码示例
+
+```javascript
+// 文件: examples/10-01-layout-thrashing.js —— [浏览器] 布局抖动的罪与罚
+
+const items = document.querySelectorAll('.item');
+
+// ❌ 反例:读写交替,每次 offsetHeight 都强制同步布局 —— N 次布局
+// items.forEach((el) => {
+//     const top = el.offsetTop;      // 读(强制布局)
+//     el.style.transform = `translateY(${top + 10}px)`; // 写(使布局失效)
+// });
+
+// ✅ 正确:先批量读,再批量写 —— 只布局 1 次(读写分离/FastDom 模式)
+requestAnimationFrame(() => {
+    const tops = Array.from(items).map((el) => el.offsetTop); // 批量读
+    tops.forEach((top, i) => {
+        items[i].style.transform = `translateY(${top + 10}px)`; // 批量写
+    });
+});
+
+// ✅ 动画永远用 transform/opacity(只走合成,不触发重排重绘)
+// ❌ el.style.left = '100px'      → 触发重排
+// ✅ el.style.transform = 'translateX(100px)' → 只合成
+export {};
+```
+
+> 运行方式：粘贴到有 `.item` 元素的页面 Console 中，用 Performance 面板录制对比两种写法的 Layout 次数（紫色条）。
+
+#### 最佳实践
+
+- ✅ 读写分离是原则；批量操作 DOM 用 `DocumentFragment` 或先 `display: none` 再恢复；
+- ⚠️ 频繁读取 `offsetTop/scrollTop/getBoundingClientRect/getComputedStyle` 都会触发强制布局；
+- ✅ 用 CLS 视角自查布局偏移：图片/广告位必须预留宽高。
+
+## 10.3 渲染性能优化实战
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/10-02-raf-scroll.ts —— [浏览器] 高频事件与动画的正确姿势
+
+// ---- 1. 滚动/指针事件:用 rAF 节流,对齐渲染帧 ----
+let ticking = false;
+window.addEventListener('scroll', () => {
+    if (ticking) return; // 一帧内合并多次触发
+    ticking = true;
+    requestAnimationFrame(() => {
+        updateHeader(window.scrollY); // 真正的 DOM 操作放在下一帧
+        ticking = false;
+    });
+});
+function updateHeader(scrollY: number) {
+    const header = document.querySelector('#header');
+    if (header) header.style.transform = `translateY(${Math.min(scrollY, 64)}px)`;
+}
+
+// ---- 2. 长任务拆分:让出主线程,保持交互响应 ----
+async function processHugeList(items: unknown[]) {
+    const results: unknown[] = [];
+    const CHUNK = 100;
+    for (let i = 0; i < items.length; i += CHUNK) {
+        results.push(...items.slice(i, i + CHUNK).map(expensiveTransform));
+        if (i + CHUNK < items.length) {
+            // scheduler.yield() 可用时优先(更语义化);否则退化为 setTimeout(0)
+            const scheduler = (window as any).scheduler;
+            if (scheduler && typeof scheduler.yield === 'function') {
+                await scheduler.yield();
+            } else {
+                await new Promise((r) => setTimeout(r, 0)); // 让出主线程,插入输入事件处理
+            }
+        }
+    }
+    return results;
+}
+function expensiveTransform(x: unknown) { return x; }
+
+// ---- 3. 合成层提示:will-change 用在"确实在动画"的元素上 ----
+// .carousel-item { will-change: transform; }   ✅ 轮播正在动
+// ⚠️ 全站乱加 will-change = 内存爆炸(每个提示都会创建合成层)
+// 更优做法:动画开始前 JS 加 will-change,结束后移除
+
+// ---- 4. 用 Performance 面板定位: Long Task(>50ms 红色三角)就是优化目标 ----
+const observer = new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) {
+        report({ type: 'longtask', duration: entry.duration, start: entry.startTime });
+    }
+});
+observer.observe({ entryTypes: ['longtask'] });
+function report(data: Record<string, unknown>) { console.log('[性能上报]', data); }
+export {};
+```
+
+> 运行方式：粘贴到真实页面 Console，配合 DevTools Performance 面板（勾选 Screenshots + FPS）录制对比优化前后帧率。
+
+#### 最佳实践
+
+- ✅ INP 优化优先看**输入响应**：事件处理函数里同步 DOM 操作越少越好，重计算放 `requestAnimationFrame`/`scheduler`；
+- ✅ 动画三原则：`transform`/`opacity`、rAF 对齐、必要时才 `will-change`；
+- ⚠️ 大量 DOM 操作是主线程杀手，超过 1000 节点的更新考虑虚拟化或 Web Worker（[10.5](./10-browser-rendering.md#_10-5-web-worker-计算卸载)）。
+
+## 10.4 高性能虚拟列表
+
+#### 概念解析
+
+虚拟列表只渲染**可视区 + 上下缓冲**的条目：DOM 数量从 10000 → ~30。核心 = 滚动位置 → 可视区间换算 + 大占位容器撑起真实滚动高度。
+
+#### 完整代码示例
+
+```tsx
+// 文件: src/components/VirtualList.tsx —— 固定行高虚拟列表(50 行核心实现)
+import { memo, useCallback, useRef, useState } from 'react';
+
+interface VirtualListProps<T> {
+    items: T[];
+    itemHeight: number;                          // 每项固定高度(px)
+    viewportHeight: number;                      // 可视区域高度(px)
+    overscan?: number;                           // 上下额外渲染的缓冲条数
+    renderItem: (item: T, index: number) => React.ReactNode;
+}
+
+function VirtualListInner<T>({
+    items, itemHeight, viewportHeight, overscan = 5, renderItem,
+}: VirtualListProps<T>) {
+    const [scrollTop, setScrollTop] = useState(0);
+    const frame = useRef(0);
+
+    // 可视区起点(带缓冲):多渲染 overscan 条,消除快速滚动时的白屏
+    const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - overscan);
+    const visibleCount = Math.ceil(viewportHeight / itemHeight) + overscan * 2;
+    const endIndex = Math.min(items.length, startIndex + visibleCount);
+    const visibleItems = items.slice(startIndex, endIndex);
+
+    // rAF 节流:一帧最多计算一次,避免滚动事件高频触发
+    const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+        const target = e.currentTarget;
+        cancelAnimationFrame(frame.current);
+        frame.current = requestAnimationFrame(() => setScrollTop(target.scrollTop));
+    }, []);
+
+    return (
+        <div style={{ height: viewportHeight, overflow: 'auto' }} onScroll={onScroll}>
+            {/* 内层撑起真实滚动高度:让滚动条 behaves 像全量渲染 */}
+            <div style={{ height: items.length * itemHeight, position: 'relative' }}>
+                {/* 可视区内容整体平移,占位错位由 translateY 修正 */}
+                <div style={{ transform: `translateY(${startIndex * itemHeight}px)` }}>
+                    {visibleItems.map((item, i) => (
+                        <div key={startIndex + i} style={{ height: itemHeight }}>
+                            {renderItem(item, startIndex + i)}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export const VirtualList = memo(VirtualListInner) as typeof VirtualListInner;
+```
+
+```tsx
+// 文件: src/demo/VirtualListDemo.tsx —— 使用:10000 条数据流畅滚动
+import { VirtualList } from '@/components/VirtualList';
+
+const bigData = Array.from({ length: 10000 }, (_, i) => ({ id: i, name: `用户 ${i}` }));
+
+export function Demo() {
+    return (
+        <VirtualList
+            items={bigData}
+            itemHeight={48}
+            viewportHeight={480}
+            renderItem={(item) => (
+                <div style={{ display: 'flex', alignItems: 'center', height: '100%', padding: '0 12px' }}>
+                    {item.name}
+                </div>
+            )}
+        />
+    );
+}
+```
+
+> 运行方式：放入 React 项目运行，DevTools Elements 面板可验证 DOM 中始终只有 ~30 个列表项。动态高度场景需维护"偏移量累积数组 + 二分查找"，成熟方案直接用 `react-window` / `vue-virtual-scroller`。
+
+#### 最佳实践
+
+- ✅ `key` 用真实 id（`startIndex + i` 在数据变化时会错位，示例从简）；
+- ✅ 滚动计算必须 rAF 节流；行内组件用 `memo` 避免整屏重渲染；
+- ⚠️ 虚拟列表 + 浏览器"Ctrl+F 查找"天生冲突，需要搜索功能的场景考虑分页替代。
+
+## 10.5 Web Worker 计算卸载
+
+#### 概念解析
+
+超过 50ms 的纯计算（大 JSON 解析、图片处理、加密、复杂排序）会卡住主线程导致掉帧。**Web Worker 把计算移到独立线程**，主线程只收结果。限制：无 DOM、通过结构化克隆通信。
+
+#### 完整代码示例
+
+```typescript
+// 文件: src/workers/csv-parser.worker.ts —— Worker 线程:解析 10 万行 CSV
+self.onmessage = (e: MessageEvent<{ raw: string }>) => {
+    const { raw } = e.data;
+    const start = performance.now();
+
+    const lines = raw.split('\n');
+    const header = lines[0].split(',');
+    const rows = lines.slice(1).map((line) => {
+        const cells = line.split(',');
+        return Object.fromEntries(header.map((h, i) => [h, cells[i] ?? '']));
+    });
+
+    // postMessage 结构化克隆回传(大数据量可转 Transferable 提速)
+    (self as unknown as Worker).postMessage({
+        rows,
+        cost: performance.now() - start,
+    });
+};
+
+export {}; // 声明为模块
+```
+
+```typescript
+// 文件: src/utils/parseCsv.ts —— 主线程:封装为 Promise API
+export function parseCsvInBackground(raw: string): Promise<{ rows: Record<string, string>[]; cost: number }> {
+    return new Promise((resolve, reject) => {
+        // Vite 原生支持 Worker 导入(new URL 语法,构建时自动处理为独立 chunk)
+        const worker = new Worker(new URL('../workers/csv-parser.worker.ts', import.meta.url), {
+            type: 'module',
+        });
+
+        worker.onmessage = (e) => {
+            resolve(e.data);
+            worker.terminate(); // 一次性任务用完即毁;常驻任务(如实时编解码)则保留复用
+        };
+        worker.onerror = (e) => reject(new Error(e.message));
+        worker.postMessage({ raw });
+    });
+}
+
+// 使用:UI 完全不卡
+// const { rows, cost } = await parseCsvInBackground(csvText);
+// console.log(`主线程零阻塞,Worker 中耗时 ${cost.toFixed(1)}ms`);
+```
+
+> 运行方式：放入 Vite 项目运行（`npm run dev`），解析 10 万行 CSV 时主线程保持可交互（对比主线程直接 `split` 的卡顿）。
+
+#### 最佳实践
+
+- ✅ 优先级：能"分片让出主线程"（[10.3](./10-browser-rendering.md#_10-3-渲染性能优化实战)）就不用 Worker——通信与维护有成本；真正的大计算才上 Worker；
+- ✅ 大二进制数据用 **Transferable**（`postMessage(buf, [buf])`）零拷贝传输；
+- ✅ 常驻 Worker 做池化复用；`SharedWorker` 可跨标签页共享（多开页面的本地缓存同步场景）；
+- ⚠️ Worker 里没有 DOM/window，需要操作 UI 的结果回主线程处理；纯计算函数也可以用 `Comlink` 库简化为"远程函数调用"。
+
+## 10.6 Service Worker 与 PWA
+
+#### 概念解析
+
+Service Worker（SW）是**运行在浏览器后台、可拦截页面所有网络请求**的脚本——它是 HTTP 缓存（[6.2](./06-network.md#_6-2-缓存策略详解)）之上的可编程缓存层，也是 PWA（离线可用、可安装）的基础。
+
+**生命周期**（三态，全部异步）：
+
+```mermaid
+stateDiagram-v2
+    [*] --> installing: 首次注册 / 检测到字节更新
+    installing --> waiting: install 完成(预缓存结束)
+    waiting --> activating: 旧 SW 的页面全部关闭<br/>或调用 skipWaiting
+    activating --> activated: activate 完成(清理旧版本缓存)
+    activated --> activated: 拦截 fetch,按路由策略响应
+```
+
+⚠️ 三个前提：必须 HTTPS（localhost 除外）、有独立作用域（默认为 sw.js 所在目录）、无法访问 DOM（与页面通过 postMessage 通信）。
+
+#### 完整代码示例
+
+```javascript
+// 文件: examples/10-03-sw.js —— [浏览器] 按路由分流缓存策略的 Service Worker
+const VERSION = 'v1'; // 发版时递增:旧缓存靠 activate 阶段清理
+const STATIC_CACHE = `static-${VERSION}`;
+const PAGE_CACHE = `pages-${VERSION}`;
+const PRECACHE = ['/', '/offline.html', '/fonts/main.woff2'];
+
+// ---- 安装:预缓存应用壳 ----
+self.addEventListener('install', (event) => {
+    event.waitUntil(
+        caches.open(STATIC_CACHE).then((cache) => cache.addAll(PRECACHE)),
+        // 不调用 skipWaiting:等用户所有标签页关闭后自然接管,避免新旧版本混跑
+    );
+});
+
+// ---- 激活:清掉旧版本缓存 ----
+self.addEventListener('activate', (event) => {
+    event.waitUntil(
+        caches.keys().then((keys) =>
+            Promise.all(keys.filter((k) => !k.endsWith(VERSION)).map((k) => caches.delete(k))),
+        ),
+    );
+});
+
+// ---- 拦截请求:按资源类型选择策略 ----
+self.addEventListener('fetch', (event) => {
+    const { request } = event;
+    const url = new URL(request.url);
+
+    if (request.method !== 'GET' || url.origin !== location.origin) return; // 只管同源 GET
+
+    if (url.pathname.startsWith('/api/')) {
+        event.respondWith(networkFirst(request));   // API:新鲜优先
+    } else if (/\.(js|css|png|jpe?g|webp|avif|woff2)$/.test(url.pathname)) {
+        event.respondWith(cacheFirst(request));     // 带指纹静态资源:缓存优先
+    } else {
+        event.respondWith(staleWhileRevalidate(request)); // 页面/文档:先用再更
+    }
+});
+
+// 策略一:缓存优先 —— 命中即返回,永不等待网络(适合内容哈希命名的静态资源)
+async function cacheFirst(request) {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    const res = await fetch(request);
+    const cache = await caches.open(STATIC_CACHE);
+    cache.put(request, res.clone()); // clone:响应流只能被读一次,缓存与返回各要一份
+    return res;
+}
+
+// 策略二:网络优先 —— 拿到最新,失败回退缓存,再失败回退离线页
+async function networkFirst(request) {
+    try {
+        const res = await fetch(request);
+        const cache = await caches.open(PAGE_CACHE);
+        cache.put(request, res.clone());
+        return res;
+    } catch {
+        return (await caches.match(request)) ?? caches.match('/offline.html');
+    }
+}
+
+// 策略三:先用缓存保速度,后台静默更新(适合页面壳、文档)
+async function staleWhileRevalidate(request) {
+    const cached = await caches.match(request);
+    const fetchPromise = fetch(request).then((res) => {
+        caches.open(PAGE_CACHE).then((cache) => cache.put(request, res.clone()));
+        return res;
+    });
+    return cached ?? fetchPromise;
+}
+```
+
+```typescript
+// 文件: examples/10-04-sw-register.ts —— [浏览器] 注册与更新提示
+export function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+
+    window.addEventListener('load', async () => {
+        const reg = await navigator.serviceWorker.register('/sw.js');
+
+        // 检测到新版本在 waiting → 提示用户"有更新,点击刷新"
+        reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing;
+            newWorker?.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // 自定义 UI:让用户确认后执行跳过等待 + 刷新
+                    showUpdateToast(() => {
+                        newWorker.postMessage('SKIP_WAITING'); // SW 侧监听并 self.skipWaiting()
+                    });
+                }
+            });
+        });
+    });
+}
+
+function showUpdateToast(onRefresh: () => void) {
+    console.log('[PWA] 发现新版本');
+    // UI 上渲染"立即更新"按钮,点击后调用 onRefresh 并 location.reload()
+    void onRefresh;
+}
+
+// 💡 调试:DevTools → Application → Service Workers(Update on reload 便于开发)
+//    ⚠️ 开发时 SW 缓存会干扰热更新,建议 dev 环境不注册
+export {};
+```
+
+> 运行方式：`npx http-server . -p 8080`（HTTPS 部署环境或 localhost）后注册生效；DevTools → Application → Cache Storage 可查看各缓存内容，Network 面板中 SW 拦截的请求会标注齿轮图标。
+
+#### 最佳实践
+
+- ✅ 策略按资源性质分流（示例的三分法覆盖 90% 场景）；API 的"新鲜度敏感"接口直接 bypass SW，交给 HTTP 缓存；
+- ✅ 版本化 + activate 清理是缓存泄漏的唯一防线，发版必须递增 `VERSION`；
+- ✅ 更新必须用户确认后跳过等待，避免"一半用户新版一半旧版"的混跑窗口；
+- ⚠️ SW 缓存与 HTTP 缓存叠加时以后者为准的细节多（`Cache-Control` 仍会生效），先理清 6.2 再上 SW；
+- 📖 面试高频：SW 生命周期与更新机制、三种缓存策略的适用资源、SW 与 Web Worker 的区别（生命周期/用途/通信）。
+
+---
+
+## 10.7 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】哪些属性变化只走合成(Composite)?哪些触发重排?</b></summary>
+
+只走合成:transform、opacity(以及 filter 等少数)。触发重排:几何属性(width/left/top/font-size)与读取 offsetTop 等;触发重绘:颜色、阴影等外观属性。动画永远优先 transform/opacity。
+</details>
+
+<details>
+<summary><b>2. 【进阶】Layout Thrashing 是什么?如何避免?</b></summary>
+
+同一帧内交替"读布局属性(offsetTop)→ 写样式 → 再读",每次读都强制浏览器同步执行布局,N 个元素 N 次布局。避免:读写分离 —— 先批量读完全部布局值,再批量写(或用 FastDom 类库自动调度)。
+</details>
+
+<details>
+<summary><b>3. 【基础】固定行高虚拟列表的核心计算公式是什么?</b></summary>
+
+startIndex = max(0, floor(scrollTop / itemHeight) - overscan);可视条数 = ceil(viewportHeight / itemHeight) + overscan × 2;外层容器高度 = 总条数 × itemHeight 撑起滚动,内容用 translateY(startIndex × itemHeight) 修正位置。
+</details>
+
+<details>
+<summary><b>4. 【进阶】Service Worker 缓存与 HTTP 缓存是什么关系?默认三分手法是什么?</b></summary>
+
+SW 是 HTTP 缓存之上的可编程层,拦截 fetch 事件,策略由代码决定。默认三分法:带指纹静态资源 Cache First、API Network First(失败回退缓存/离线页)、页面文档 Stale-While-Revalidate,配合版本号 + activate 阶段清理旧缓存。
+</details>
+
+---
+
+## 10.8 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 布局抖动 | 一帧内读 `offsetTop` → 写样式 → 再读，强制同步布局 N 次 | 读写分离：先批量读完全部布局值再批量写，把读收拢到 `requestAnimationFrame` 帧首 |
+| 长任务 | 单次长任务卡住主线程，交互延迟、INP 飙红 | 把大计算切片（`setTimeout`、`scheduler.yield`）交给 Web Worker，单帧任务压在 50ms 内 |
+| 重排重绘 | 动画改 `top`、`left`、`width`，每帧触发重排而掉帧 | 动画只动 `transform`、`opacity` 走合成层；写几何属性、读 `offsetTop` 才是重排重绘源头 |
+| 滚动同步阻塞 | `scroll`/`wheel`/`touchmove` 监听未加 `{ passive: true }`，浏览器无法预判是否 `preventDefault`，只能等 JS 执行完再滚（控制台有 non-passive 告警） | 滚动/触摸监听默认加 `{ passive: true }`；只有真要阻止默认行为（下拉刷新、自定义手势）才用默认 passive 值 |
+| 不定高虚拟列表 | 列表项高度不一，总高估算错导致滚动跳动、白屏 | 动态测量并缓存每项高度、用 `ResizeObserver` 回填，别用固定 `itemHeight` 硬算 |
+| `will-change` 滥用 | 给大量元素常驻 `will-change`，合成层与内存暴涨 | 只给即将动画的少数元素短时启用，动画结束即移除，别当性能银弹 |
+| 内存泄漏 | 事件监听、定时器、订阅未在卸载时清理，页面越用越卡 | 卸载时 `removeEventListener`、`clearInterval`、取消订阅；用 `AbortController` 统一收口 |
+| 强制布局读取 | 批量增删 DOM 后又立刻读尺寸，触发逐次同步布局 | 先改完 DOM 再统一读一次；用 `DocumentFragment` 减少回流次数 |

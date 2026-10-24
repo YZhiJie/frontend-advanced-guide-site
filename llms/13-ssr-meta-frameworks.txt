@@ -1,0 +1,373 @@
+# 第十三部分：SSR 与元框架（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/13-ssr-meta-frameworks
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第十三部分：SSR 与元框架
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[CSS 工程化与现代 CSS](./12-css-engineering.md)｜下一篇：[前端 AI 工程](./14-frontend-ai.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-13" target="_blank" rel="noopener">EP.13《SSR 与水合》</a>
+
+## 本部分内容
+
+- [13.1 渲染模式全景](#_13-1-渲染模式全景)
+- [13.2 Hydration 原理与疑难排查](#_13-2-hydration-原理与疑难排查)
+- [13.3 React Server Components 与 App Router](#_13-3-react-server-components-与-app-router)
+- [13.4 SSR 性能优化](#_13-4-ssr-性能优化)
+- [13.5 自测题](#_13-5-自测题)
+- [13.6 本章避坑清单](#_13-6-本章避坑清单)
+
+---
+
+> 2026 年的前端招聘与架构讨论中，SSR/RSC/元框架是绝对主场。这一部分讲清三件事：渲染模式怎么选、Hydration 到底发生了什么、Next.js App Router 的正确心智模型。
+
+## 13.1 渲染模式全景
+
+#### 概念解析
+
+| 模式 | HTML 产生时机 | 首屏 | SEO | 动态性 | 典型场景 |
+| ---- | ------------- | ---- | --- | ------ | -------- |
+| CSR | 浏览器下载 JS 后客户端渲染 | 慢 | 差 | 高 | 后台管理系统 |
+| SSR | **每次请求**时服务端渲染 | 快 | 好 | 高(可个性化) | 首页、搜索页 |
+| SSG | **构建时**渲染 | 最快(CDN 直出) | 好 | 内容更新需重建 | 文档、博客、营销页 |
+| ISR | 构建时 + **按周期后台再生** | 快 | 好 | 准实时 | 商品详情、列表 |
+| 流式 SSR | 请求时边渲染边推送 | 首字节极快 | 好 | 高 | 信息流、AI 对话页 |
+
+CSR vs SSR 的本质：**HTML 从哪里来**。CSR 首屏白屏长（要等 JS 下载执行 + 请求数据）；SSR 把"取数 + 渲染"提前到服务端，用户拿到的是可直接显示的 HTML，但服务端成本上升、开发者要面对双端一致性（见 [13.2](./13-ssr-meta-frameworks.md#_13-2-hydration-原理与疑难排查)）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/13-01-ssr-manual.ts —— 手写一个 20 行的 SSR 服务(理解原理用)
+// 安装:npm i express react react-dom && npm i -D @types/express @types/react-dom
+import express from 'express';
+import { renderToString } from 'react-dom/server';
+import { createElement } from 'react';
+
+const app = express();
+
+// ① 组件写法与客户端完全一致(同一份组件代码两端共用)
+const List = ({ items }: { items: string[] }) =>
+    createElement('ul', null, items.map((it) => createElement('li', { key: it }, it)));
+
+app.get('/', async (_req, res) => {
+    // ② 服务端取数:可直连数据库/内网服务,没有 CORS 问题,密钥不出服务器
+    const items = await fetch('https://api.example.com/list').then((r) => r.json());
+
+    // ③ 把组件渲染成 HTML 字符串 —— 用户拿到就能看到内容,不用等 JS
+    const html = renderToString(createElement(List, { items }));
+
+    // ④ 数据同时注入 window,供客户端脚本 hydration 使用
+    res.send(`<!DOCTYPE html>
+        <html><body>
+            <div id="root">${html}</div>
+            <script>window.__DATA__ = ${JSON.stringify(items)}</script>
+            <script type="module" src="/client.js"></script>
+        </body></html>`);
+
+    // client.js 中:hydrateRoot(root, createElement(List, { items: window.__DATA__ }))
+    // → hydration 认领 DOM 并挂事件,页面从此可交互(TTI)
+});
+
+app.listen(3000);
+// 客户端入口 client.js:hydrateRoot(document.getElementById('root'), <App items={window.__DATA__} />)
+// 服务端渲染的 HTML 立即可见;hydration 后事件绑定、可交互(TTI)
+```
+
+> 运行方式：概念演示为主——真实项目用 Next.js 等元框架；此示例帮助理解"SSR = 服务端 renderToString + 客户端 hydrate"两个动作。
+
+#### 最佳实践
+
+- ✅ 选型速记：**内容型**（SEO/首屏敏感）→ SSG/ISR 优先，纯动态再加 SSR；**工具型**（登录后才用）→ CSR 即可；
+- ✅ 同一应用可按路由混用模式（Next 中每条路由独立选择 SSG/ISR/SSR）；
+- ⚠️ SSR 不是免费的：服务端成本、双端代码约束、水合开销，纯后台系统上 SSR 是负收益。
+
+## 13.2 Hydration 原理与疑难排查
+
+#### 概念解析
+
+```mermaid
+flowchart LR
+    A["① 服务端<br/>renderToString<br/>产出 HTML 字符串"] --> B["② 浏览器<br/>立即显示 HTML<br/>(此时不可交互)"]
+    B --> C["③ 客户端 hydrateRoot<br/>认领已有节点 + 补挂事件<br/>→ 可交互(TTI)"]
+```
+
+**Hydration mismatch**（水合不一致）：服务端与客户端渲染结果不同时，React 18 会丢弃服务端 DOM 重新渲染（首屏闪烁），并报 `Hydration failed` 警告。
+
+| 常见原因 | 示例 | 修复 |
+| -------- | ---- | ---- |
+| 随机/时间值 | `Date.now()`、`Math.random()` 直接进渲染 | 放进 `useEffect` 后 setState |
+| 浏览器环境差异 | `window.innerWidth`、`navigator.userAgent` 参与渲染 | 同上,或 `useSyncExternalStore` |
+| 非法 DOM 嵌套 | `<p>` 内放 `<div>`、`<table>` 手写 `<tr>` | 修正标签结构 |
+| 服务端/客户端条件分支 | `typeof window === 'undefined' ? A : B` | 用 `useIsomorphicLayoutEffect` 类方案统一 |
+| 惰性初始化读 storage | `useState(localStorage.getItem(...))` | `useState(() => 默认)` + effect 内读取 |
+
+#### 完整代码示例
+
+```tsx
+// 文件: examples/13-02-hydration-safe.tsx —— 三种"浏览器才有"数据的安全写法
+import { useEffect, useState, useSyncExternalStore } from 'react';
+
+// ❌ 危险:直接渲染当前时间,服务端与客户端必然不同 → mismatch
+// function Clock() { return <span>{new Date().toLocaleTimeString()}</span>; }
+
+// ✅ 写法一:首帧渲染占位,mount 后再同步真实值(牺牲首帧准确性,换稳定性)
+export function ClockSafe() {
+    const [time, setTime] = useState<string>('--:--:--'); // 服务端与客户端首帧一致
+    useEffect(() => {
+        const id = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000);
+        return () => clearInterval(id);
+    }, []);
+    return <span>{time}</span>;
+}
+
+// ✅ 写法二:useSyncExternalStore —— 官方为"外部数据源"设计的 SSR 安全 API
+// getSnapshot 在服务端返回固定快照,getServerSnapshot 消除 mismatch
+function subscribe(callback: () => void) {
+    window.addEventListener('resize', callback);
+    return () => window.removeEventListener('resize', callback);
+}
+export function WindowWidth() {
+    const width = useSyncExternalStore(
+        subscribe,
+        () => window.innerWidth,        // 客户端快照
+        () => 0,                        // 服务端快照(固定值,避免不一致)
+    );
+    return <span>窗口宽度: {width || '测量中...'}px</span>;
+}
+```
+
+```typescript
+// 文件: examples/13-03-selective-hydration.ts —— 选择性水合与调度优先级(概念示意)
+// React 18+ 的 hydration 是并发的:
+//   - 用户点击哪个区域,那个区域优先水合(Interaction 优先)
+//   - 其余部分利用空闲时间逐步水合,长页面不再"整页卡一次"
+// 对开发者的含义:
+//   1. 首屏可交互时间(TTI)由"最关键交互组件"决定,而不是整页 JS 执行完
+//   2. 不要在顶层塞一个巨大的同步组件阻塞整个水合队列
+// 验证方式(Next.js):Performance 面板录制首屏,观察 hydrate 分段执行 + 点击优先
+export {};
+```
+
+> 运行方式：`13-02` 放入 Next.js 项目（`npx create-next-app@latest --ts --app`）的页面中直接观察；人为制造一个 mismatch（渲染 `Date.now()`）可以看到 React 的警告与重渲染行为。
+
+#### 最佳实践
+
+- ✅ 看到 `Hydration failed` 警告不要 `suppressHydrationWarning` 一关了之——它只压制文本层差异，结构性问题仍会整树重建；
+- ✅ "首帧必须稳定"原则：任何依赖浏览器/时间/随机的数据，首帧渲染占位值；
+- ⚠️ `<table>`/`<select>` 的子元素结构受限，是 hydration 报错的隐形大户；
+- 📖 面试高频：SSR 后为什么要 hydration、mismatch 的成因分类、React 18 选择性水合改善了什么。
+
+## 13.3 React Server Components 与 App Router
+
+#### 概念解析
+
+RSC 的核心思想：**组件分两种运行环境**——
+
+| | Server Component(默认) | Client Component(`'use client'`) |
+| ---- | ---------------------- | -------------------------------- |
+| 运行位置 | 仅服务端 | 服务端出首屏 + 客户端运行 |
+| 能力 | 直连数据库/读文件/持密钥 | useState/useEffect/事件/浏览器 API |
+| 产物 | 不进客户端 JS bundle | 进入 bundle |
+| 通信 | 只能通过 props 传**可序列化**数据给客户端组件 | 完整交互能力 |
+
+边界规则：`'use client'` 标记的是**边界入口**——从它开始，其引入的所有子树都是客户端组件；Server 组件可以 import Client 组件（传可序列化 props），反向不行（但可以把 Server 组件作为 `children` 传入）。
+
+#### 完整代码示例
+
+```tsx
+// 文件: examples/13-04-app-router-demo/app/posts/page.tsx
+// ============ App Router:服务端组件默认,直接 async 取数 ============
+import { PostCard } from './PostCard';
+
+export const revalidate = 60; // ISR:本路由 60 秒再生一次
+
+export default async function PostsPage() {
+    // ① 服务端组件可以直接 await —— 没有 useEffect/useState/loading 三件套
+    // ② fetch 带缓存语义:相同 URL 的请求在渲染期间自动去重,60s 内命中缓存
+    const res = await fetch('https://api.example.com/posts', { next: { revalidate: 60 } });
+    const posts = (await res.json()) as { id: number; title: string }[];
+
+    return (
+        <main>
+            <h1>文章列表(服务端渲染,零客户端 JS)</h1>
+            {/* Server → Client:传可序列化 props */}
+            {posts.map((p) => <PostCard key={p.id} id={p.id} title={p.title} />)}
+        </main>
+    );
+}
+```
+
+```tsx
+// 文件: examples/13-04-app-router-demo/app/posts/PostCard.tsx
+'use client'; // 交互边界:从这里开始的子树是客户端组件
+import { useState } from 'react';
+
+export function PostCard({ id, title }: { id: number; title: string }) {
+    const [liked, setLiked] = useState(false);
+    return (
+        <article onClick={() => setLiked(!liked)}>
+            <h3>{title}</h3>
+            <button>{liked ? '❤️' : '🤍'} {id}</button>
+        </article>
+    );
+}
+```
+
+```tsx
+// 文件: examples/13-04-app-router-demo/app/posts/actions.ts
+// ============ Server Actions:表单提交不需要手写 API 端点 ============
+'use server';
+import { revalidatePath } from 'next/cache';
+
+export async function createPost(formData: FormData) {
+    const title = String(formData.get('title'));
+    await db.post.create({ data: { title } }); // 服务端直连数据库(密钥不出服务器)
+    revalidatePath('/posts');                  // 让列表路由的缓存失效并重新渲染
+}
+declare const db: { post: { create(args: { data: { title: string } }): Promise<unknown> } };
+```
+
+```tsx
+// 文件: examples/13-04-app-router-demo/app/posts/new/page.tsx
+import { createPost } from '../actions';
+
+export default function NewPostPage() {
+    return (
+        // action 直接绑定服务端函数:渐进增强,JS 未加载完也能提交
+        <form action={createPost}>
+            <input name="title" required />
+            <button type="submit">发布</button>
+        </form>
+    );
+}
+```
+
+> 运行方式：`npx create-next-app@latest my-app --typescript --app` 创建项目后，把四个文件按路径放入 `app/posts/`，`npm run dev` 后访问 `/posts`。在 DevTools Network 里可以确认：纯服务端组件不产生客户端 JS 请求。
+
+#### 最佳实践
+
+- ✅ 默认写 Server Component，**只在需要交互/状态/浏览器 API 的叶子节点**加 `'use client'`——边界越靠叶子，客户端 bundle 越小；
+- ✅ 密钥类操作（数据库、支付）只出现在 Server 组件 / Server Actions；
+- ⚠️ Server → Client 的 props 必须可序列化（不能传函数、类实例）；需要传"渲染逻辑"时用 `children` 传 Server 组件；
+- ⚠️ 别把 Server Actions 当万能接口——它们是公开端点，内部要做鉴权与入参校验；
+- 📖 面试高频：RSC 与 SSR 的区别（渲染位置 vs 组件运行环境）、`'use client'` 边界规则、Server Actions 的本质（RPC + 渐进增强）。
+
+## 13.4 SSR 性能优化
+
+#### 概念解析
+
+SSR 的性能瓶颈顺序：**服务端取数 waterfall > 水合 JS 体积 > 渲染开销**。对应三板斧：并行取数与流式渲染、RSC 减包、缓存。
+
+#### 完整代码示例
+
+```tsx
+// 文件: examples/13-05-waterfall.tsx —— 取数 waterfall:从 1.5s 到 0.5s
+// ============ ❌ 反例:串行 await 形成请求瀑布 ============
+// export default async function Dashboard() {
+//     const user = await getUser();          // 500ms
+//     const orders = await getOrders(user.id); // 依赖 user,再 500ms
+//     const stats = await getStats(user.id);   // 再 500ms → 共 1.5s
+// }
+
+// ============ ✅ 方案一:先并行无依赖请求,再补依赖请求 ============
+export default async function Dashboard() {
+    const userPromise = getUser();                         // 立即发起,不 await
+    const [orders, stats] = await Promise.all([
+        getOrdersPublic(),                                  // 无需 user 的部分先并行
+        getStatsPublic(),
+    ]);
+    const user = await userPromise;                        // 与上面并行进行
+    return <Summary user={user} orders={orders} stats={stats} />;
+}
+declare function getUser(): Promise<{ id: string }>;
+declare function getOrdersPublic(): Promise<unknown[]>;
+declare function getStatsPublic(): Promise<unknown>;
+
+// ============ ✅✅ 方案二:慢请求包进 Suspense,流式先送其余部分 ============
+// <main>
+//     <Summary user={user} />               {/* 立刻流式送达 */}
+//     <Suspense fallback={<OrdersSkeleton />}>
+//         <OrdersPanel />                    {/* 内部 await getOrders,好了再送 */}
+//     </Suspense>
+// </main>
+// 首字节时间(TTFB)取决于最快的部分,而不是最慢的请求
+```
+
+```tsx
+// 文件: examples/13-06-cache-tags.ts —— 精准缓存与按需失效
+import { revalidateTag } from 'next/cache';
+
+// 读:带标签缓存(同一 tag 的所有请求共享)
+async function getProducts() {
+    const res = await fetch('https://api.example.com/products', {
+        next: { tags: ['products'], revalidate: 300 }, // 5 分钟再生 + 标签
+    });
+    return res.json();
+}
+
+// 写:后台改了商品 → 精确失效带该标签的缓存(而不是全站刷新)
+export async function POST() {
+    await fetch('https://api.example.com/products', { method: 'POST', /* ... */ });
+    revalidateTag('products');
+}
+```
+
+> 运行方式：放入 Next.js App Router 项目观察 Network 面板的流式响应（HTML 分段到达）与缓存命中（`x-nextjs-cache` 响应头）。
+
+#### 最佳实践
+
+- ✅ 性能顺序：先消除取数 waterfall（零成本重构），再上 Suspense 流式，最后才考虑加机器/Edge；
+- ✅ 缓存策略按数据性质分层：静态内容 SSG、准实时 ISR、用户个性化请求用 `no-store` + 客户端组件请求；
+- ⚠️ SSR 页面里依然可能写出"客户端瀑布"：Client 组件的 `useEffect` 取数链。数据获取尽量前移到服务端；
+- 📖 面试高频：TTFB/FCP/TTI 在 SSR 场景的含义、Suspense 流式为什么能同时改善 TTFB 与 LCP、`revalidate` 与 `revalidateTag` 的区别。
+
+## 13.5 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】CSR/SSR/SSG/ISR 的 HTML 分别在什么时机产生？各自的典型场景？</b></summary>
+
+CSR 在浏览器执行 JS 后产生（后台系统）；SSR 每次请求时服务端产生（搜索页、个性化首页）；SSG 构建时产生（文档、博客）；ISR 构建时 + 周期后台再生（商品详情）。核心判断依据是内容变化频率与 SEO/首屏要求。
+</details>
+
+<details>
+<summary><b>2. 【进阶】Hydration 做了什么？为什么会出现 mismatch？最典型的三类原因？</b></summary>
+
+Hydration 让 React 在客户端"认领"服务端渲染的 DOM 并补挂事件，而不是重建。mismatch 发生在服务端与客户端渲染结果不一致时，React 丢弃服务端 DOM 重渲染。三类典型原因：随机/时间值直接渲染、浏览器环境数据（window/navigator）参与渲染、非法 DOM 嵌套。修复思路是首帧渲染稳定占位，mount 后再同步真实值。
+</details>
+
+<details>
+<summary><b>3. 【进阶】RSC 与 SSR 有什么区别？'use client' 的边界规则是什么？</b></summary>
+
+SSR 解决"HTML 从哪来"（初始渲染位置），RSC 解决"组件在哪运行"（服务端组件不进客户端 bundle、可直连数据库）。'use client' 标记客户端边界入口：从它开始的子树都是客户端组件；Server 可传可序列化 props 给 Client，Client 中可用 children 接收 Server 组件，反向传函数/组件实例不行。
+</details>
+
+<details>
+<summary><b>4. 【挑战】一个 SSR 页面首屏慢，你的排查与优化顺序？</b></summary>
+
+按成本从低到高：① 检查服务端取数是否有 waterfall（串行 await）→ 改并行或 Suspense 流式；② 检查客户端 bundle（客户端组件是否边界过大、引入重库）→ 收紧 'use client' 边界、动态导入；③ 检查缓存（该 SSG/ISR 的路由是否在用实时 SSR、fetch 缓存是否命中）；④ 最后考虑运行时与部署（Edge、实例扩容）。
+</details>
+
+<details>
+<summary><b>5. 【挑战】为什么说"登录后的后台系统不建议上 SSR"？</b></summary>
+
+后台系统不需要 SEO，用户已登录后对首字节也不敏感；SSR 反而带来服务端成本、双端约束、每次请求的渲染开销，以及个性化数据难以缓存的问题。CSR + 合理代码分割 + 骨架屏是更优解。
+</details>
+
+---
+
+## 13.6 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 水合不一致 | 服务端与客户端渲染结果不同（`Date.now()`、`Math.random()`），控制台报 mismatch | 时间、随机数只在客户端副作用里生成，首屏值由服务端注入 props 保两端一致 |
+| 仅客户端 API | 渲染期读 `window`、`document`、`localStorage`，SSR 直接抛错、结果不符 | 放进 `useEffect`（仅客户端执行）；用 `typeof window !== 'undefined'` 守卫，别在渲染期访问 |
+| `useLayoutEffect` | SSR 里 `useLayoutEffect` 触发警告，首屏无法测量布局 | SSR 场景改用 `useEffect`；确需测量的封装成 `useIsomorphicLayoutEffect` |
+| 缓存策略 | Next 的 `fetch` 默认缓存行为记不清，改了数据页面还是旧 | 明确声明缓存：设 `cache: 'no-store'`、`next: { revalidate: N }`，别靠默认值猜 |
+| RSC 边界 | `'use client'` 边界过大，把重库拖进客户端 bundle | 边界尽量下沉到叶子组件，Server 组件只传可序列化 props，别整段标成客户端 |
+| 双端数据 | 首屏直连数据库、读文件写进组件，客户端复用时无此能力 | 取数放 Server 端（RSC、loader），客户端组件只消费序列化后的数据 |
+| 首屏瀑布 | 串行 `await` 取数拉长 TTFB，流式渲染没用上 | 并行取数、用 `Suspense` 流式推送，让首字节先到、慢区块后补 |

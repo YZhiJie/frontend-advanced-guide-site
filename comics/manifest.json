@@ -1,0 +1,510 @@
+{
+  "series": "进阶漫画剧场 · 霓虹墨 Neon Ink",
+  "version": "1.0.0",
+  "canvas": {
+    "width": 1200,
+    "height": 840
+  },
+  "panels": {
+    "count": 4,
+    "width": 572,
+    "height": 361
+  },
+  "characters": [
+    "像素酱",
+    "标签君",
+    "码叔"
+  ],
+  "parts": [
+    {
+      "file": "01-javascript-advanced.md",
+      "label": "第一部分 · JavaScript 高级特性"
+    },
+    {
+      "file": "02-typescript.md",
+      "label": "第二部分 · TypeScript 高级应用"
+    },
+    {
+      "file": "03-engineering.md",
+      "label": "第三部分 · 前端工程化"
+    },
+    {
+      "file": "04-frameworks.md",
+      "label": "第四部分 · 框架深入理解"
+    },
+    {
+      "file": "05-state-management.md",
+      "label": "第五部分 · 状态管理方案"
+    },
+    {
+      "file": "06-network.md",
+      "label": "第六部分 · 网络请求优化"
+    },
+    {
+      "file": "07-security.md",
+      "label": "第七部分 · 前端安全"
+    },
+    {
+      "file": "08-cross-platform.md",
+      "label": "第八部分 · 跨端开发"
+    },
+    {
+      "file": "09-testing.md",
+      "label": "第九部分 · 测试策略"
+    },
+    {
+      "file": "10-browser-rendering.md",
+      "label": "第十部分 · 浏览器原理与渲染性能"
+    },
+    {
+      "file": "11-patterns-architecture.md",
+      "label": "第十一部分 · 设计模式与架构"
+    },
+    {
+      "file": "12-css-engineering.md",
+      "label": "第十二部分 · CSS 工程化与现代 CSS"
+    },
+    {
+      "file": "13-ssr-meta-frameworks.md",
+      "label": "第十三部分 · SSR 与元框架"
+    },
+    {
+      "file": "14-frontend-ai.md",
+      "label": "第十四部分 · 前端 AI 工程"
+    },
+    {
+      "file": "15-accessibility-i18n.md",
+      "label": "第十五部分 · 可访问性与国际化"
+    },
+    {
+      "file": "16-node-server.md",
+      "label": "第十六部分 · Node.js 与服务端基础"
+    },
+    {
+      "file": "17-web-platform.md",
+      "label": "第十七部分 · Web 新能力与可视化"
+    },
+    {
+      "file": "18-worker-messaging.md",
+      "label": "第十八部分 · Worker 家族与跨标签页通信"
+    },
+    {
+      "file": "19-business-snippets.md",
+      "label": "第十九部分 · 常用业务功能代码片段"
+    },
+    {
+      "file": "21-frontend-ai-interview.md",
+      "label": "第二十一部分 · 前端 AI 技术与面试通关"
+    },
+    {
+      "file": "22-frontend-data-structures.md",
+      "label": "第二十二部分 · 前端常用数据结构与算法"
+    },
+    {
+      "file": "23-js-high-frequency-interview.md",
+      "label": "第二十三部分 · JavaScript 高频面试题通关"
+    },
+    {
+      "file": "24-ai-collaboration.md",
+      "label": "第二十四部分 · AI 协作工程化"
+    },
+    {
+      "file": "26-mini-network-stack.md",
+      "label": "第二十六部分 · 手写网络栈"
+    },
+    {
+      "file": "27-mini-framework.md",
+      "label": "第二十七部分 · 手写前端框架"
+    },
+    {
+      "file": "28-mini-browser-engine.md",
+      "label": "第二十八部分 · 手写浏览器内核"
+    },
+    {
+      "file": "29-rxjs.md",
+      "label": "第二十九部分 · RxJS 响应式编程"
+    },
+    {
+      "file": "30-lodash.md",
+      "label": "第三十部分 · Lodash 工具库实战"
+    },
+    {
+      "file": "31-xlsx.md",
+      "label": "第三十一部分 · XLSX 表格工程"
+    },
+    {
+      "file": "32-dayjs.md",
+      "label": "第三十二部分 · Day.js 日期工程"
+    },
+    {
+      "file": "33-zod.md",
+      "label": "第三十三部分 · Zod 运行时校验"
+    },
+    {
+      "file": "35-admin-system-auth.md",
+      "label": "第三十五部分 · 后台管理系统权限方案"
+    },
+    {
+      "file": "44-account-center.md",
+      "label": "第四十四部分 · 多系统统一账号中心"
+    },
+    {
+      "file": "46-error-handling.md",
+      "label": "第四十六部分 · 前端错误捕获处理方案"
+    },
+    {
+      "file": "47-secrets-management.md",
+      "label": "第四十七部分 · 企业级密钥管理与零泄漏方案"
+    }
+  ],
+  "episodes": [
+    {
+      "ep": 1,
+      "slug": "EP.01-closure-and-event-loop",
+      "title": "闭包与事件循环",
+      "part": "01-javascript-advanced.md"
+    },
+    {
+      "ep": 2,
+      "slug": "EP.02-type-gymnastics",
+      "title": "TypeScript 类型体操",
+      "part": "02-typescript.md"
+    },
+    {
+      "ep": 3,
+      "slug": "EP.03-tree-shaking-build",
+      "title": "工程化与摇树优化",
+      "part": "03-engineering.md"
+    },
+    {
+      "ep": 4,
+      "slug": "EP.04-fiber-and-reactivity",
+      "title": "React Fiber 与 Vue 响应式",
+      "part": "04-frameworks.md"
+    },
+    {
+      "ep": 5,
+      "slug": "EP.05-state-management",
+      "title": "状态管理思想",
+      "part": "05-state-management.md"
+    },
+    {
+      "ep": 6,
+      "slug": "EP.06-http-cache-and-race",
+      "title": "HTTP 缓存与竞态",
+      "part": "06-network.md"
+    },
+    {
+      "ep": 7,
+      "slug": "EP.07-xss-csrf-defense",
+      "title": "XSS 与 CSRF 攻防",
+      "part": "07-security.md"
+    },
+    {
+      "ep": 8,
+      "slug": "EP.08-jsbridge-hybrid",
+      "title": "JSBridge 与跨端",
+      "part": "08-cross-platform.md"
+    },
+    {
+      "ep": 9,
+      "slug": "EP.09-testing-pyramid",
+      "title": "测试金字塔",
+      "part": "09-testing.md"
+    },
+    {
+      "ep": 10,
+      "slug": "EP.10-render-pipeline",
+      "title": "浏览器渲染流水线",
+      "part": "10-browser-rendering.md"
+    },
+    {
+      "ep": 11,
+      "slug": "EP.11-design-patterns",
+      "title": "设计模式实战",
+      "part": "11-patterns-architecture.md"
+    },
+    {
+      "ep": 12,
+      "slug": "EP.12-css-engineering",
+      "title": "CSS 工程化",
+      "part": "12-css-engineering.md"
+    },
+    {
+      "ep": 13,
+      "slug": "EP.13-ssr-hydration",
+      "title": "SSR 与水合",
+      "part": "13-ssr-meta-frameworks.md"
+    },
+    {
+      "ep": 14,
+      "slug": "EP.14-ai-streaming-ui",
+      "title": "AI 流式 UI",
+      "part": "14-frontend-ai.md"
+    },
+    {
+      "ep": 15,
+      "slug": "EP.15-a11y-semantic",
+      "title": "可访问性与语义化",
+      "part": "15-accessibility-i18n.md"
+    },
+    {
+      "ep": 16,
+      "slug": "EP.16-node-stream-backpressure",
+      "title": "Node 流与背压",
+      "part": "16-node-server.md"
+    },
+    {
+      "ep": 17,
+      "slug": "EP.17-web-platform",
+      "title": "Web 新能力",
+      "part": "17-web-platform.md"
+    },
+    {
+      "ep": 18,
+      "slug": "EP.18-worker-family",
+      "title": "Worker 家族与跨 Tab",
+      "part": "18-worker-messaging.md"
+    },
+    {
+      "ep": 19,
+      "slug": "EP.19-business-snippets",
+      "title": "业务片段百宝箱",
+      "part": "19-business-snippets.md"
+    },
+    {
+      "ep": 20,
+      "slug": "EP.20-sse-streaming",
+      "title": "SSE 流式传输",
+      "part": "21-frontend-ai-interview.md"
+    },
+    {
+      "ep": 21,
+      "slug": "EP.21-typewriter-render",
+      "title": "打字机渲染",
+      "part": "21-frontend-ai-interview.md"
+    },
+    {
+      "ep": 22,
+      "slug": "EP.22-ai-cs-system",
+      "title": "AI 客服系统",
+      "part": "21-frontend-ai-interview.md"
+    },
+    {
+      "ep": 23,
+      "slug": "EP.23-mcp-protocol",
+      "title": "MCP 协议",
+      "part": "21-frontend-ai-interview.md"
+    },
+    {
+      "ep": 24,
+      "slug": "EP.24-markdown-incremental",
+      "title": "Markdown 增量渲染",
+      "part": "21-frontend-ai-interview.md"
+    },
+    {
+      "ep": 25,
+      "slug": "EP.25-websocket-render",
+      "title": "WebSocket 实时渲染",
+      "part": "21-frontend-ai-interview.md"
+    },
+    {
+      "ep": 26,
+      "slug": "EP.26-ds-stack-queue",
+      "title": "栈与队列",
+      "part": "22-frontend-data-structures.md"
+    },
+    {
+      "ep": 27,
+      "slug": "EP.27-ds-linked-list",
+      "title": "链表指针舞",
+      "part": "22-frontend-data-structures.md"
+    },
+    {
+      "ep": 28,
+      "slug": "EP.28-ds-hash-table",
+      "title": "哈希表一秒定位",
+      "part": "22-frontend-data-structures.md"
+    },
+    {
+      "ep": 29,
+      "slug": "EP.29-ds-tree",
+      "title": "二叉搜索树",
+      "part": "22-frontend-data-structures.md"
+    },
+    {
+      "ep": 30,
+      "slug": "EP.30-ds-graph-heap",
+      "title": "图与堆",
+      "part": "22-frontend-data-structures.md"
+    },
+    {
+      "ep": 31,
+      "slug": "EP.31-ds-sorting",
+      "title": "排序大比武",
+      "part": "22-frontend-data-structures.md"
+    },
+    {
+      "ep": 32,
+      "slug": "EP.32-ds-dp",
+      "title": "动态规划五步法",
+      "part": "22-frontend-data-structures.md"
+    },
+    {
+      "ep": 33,
+      "slug": "EP.33-descriptor-proxy-iterator",
+      "title": "描述符·Proxy 与现代 ES",
+      "part": "01-javascript-advanced.md"
+    },
+    {
+      "ep": 34,
+      "slug": "EP.34-js-high-frequency-interview",
+      "title": "JS 高频面试题通关",
+      "part": "23-js-high-frequency-interview.md"
+    },
+    {
+      "ep": 35,
+      "slug": "EP.35-regex-advanced",
+      "title": "正则高级用法通关",
+      "part": "01-javascript-advanced.md"
+    },
+    {
+      "ep": 36,
+      "slug": "EP.36-generator-advanced",
+      "title": "生成器高阶模式",
+      "part": "01-javascript-advanced.md"
+    },
+    {
+      "ep": 37,
+      "slug": "EP.37-ai-collaboration",
+      "title": "AI 协作工程化",
+      "part": "24-ai-collaboration.md"
+    },
+    {
+      "ep": 38,
+      "slug": "EP.38-vdom-diff-key",
+      "title": "vdom diff 里的 key 魔法",
+      "part": "27-mini-framework.md"
+    },
+    {
+      "ep": 39,
+      "slug": "EP.39-proxy-reactivity",
+      "title": "Proxy 里偷偷收集依赖",
+      "part": "27-mini-framework.md"
+    },
+    {
+      "ep": 40,
+      "slug": "EP.40-fiber",
+      "title": "Fiber 为啥长这样",
+      "part": "27-mini-framework.md"
+    },
+    {
+      "ep": 41,
+      "slug": "EP.41-ast-mini-bundler",
+      "title": "AST 里藏了啥",
+      "part": "27-mini-framework.md"
+    },
+    {
+      "ep": 44,
+      "slug": "EP.44-http-parser",
+      "title": "HTTP 报文那七行字",
+      "part": "26-mini-network-stack.md"
+    },
+    {
+      "ep": 45,
+      "slug": "EP.45-mini-fetch",
+      "title": "fetch 背后那个 URL 对象",
+      "part": "26-mini-network-stack.md"
+    },
+    {
+      "ep": 46,
+      "slug": "EP.46-mini-sse",
+      "title": "SSE 那三种冒号",
+      "part": "26-mini-network-stack.md"
+    },
+    {
+      "ep": 47,
+      "slug": "EP.47-mini-css-parser",
+      "title": "CSS 字符串变盒子",
+      "part": "28-mini-browser-engine.md"
+    },
+    {
+      "ep": 48,
+      "slug": "EP.48-mini-selector",
+      "title": ".a .b 为啥慢",
+      "part": "28-mini-browser-engine.md"
+    },
+    {
+      "ep": 49,
+      "slug": "EP.49-mini-flex-layout",
+      "title": "flex 主轴交叉轴那点事",
+      "part": "28-mini-browser-engine.md"
+    },
+    {
+      "ep": 50,
+      "slug": "EP.50-rxjs-stream",
+      "title": "响应式的流思维",
+      "part": "29-rxjs.md"
+    },
+    {
+      "ep": 51,
+      "slug": "EP.51-lodash-toolbelt",
+      "title": "数据变换瑞士军刀",
+      "part": "30-lodash.md"
+    },
+    {
+      "ep": 52,
+      "slug": "EP.52-xlsx-table-io",
+      "title": "表格那三层模型",
+      "part": "31-xlsx.md"
+    },
+    {
+      "ep": 53,
+      "slug": "EP.53-dayjs-date",
+      "title": "日期那点不精确的事",
+      "part": "32-dayjs.md"
+    },
+    {
+      "ep": 54,
+      "slug": "EP.54-zod-boundary",
+      "title": "运行时那道边界墙",
+      "part": "33-zod.md"
+    },
+    {
+      "ep": 55,
+      "slug": "EP.55-rbac-model",
+      "title": "角色不是权限",
+      "part": "35-admin-system-auth.md"
+    },
+    {
+      "ep": 56,
+      "slug": "EP.56-dynamic-route",
+      "title": "路由那道门卫",
+      "part": "35-admin-system-auth.md"
+    },
+    {
+      "ep": 57,
+      "slug": "EP.57-permission-directive",
+      "title": "销毁还是隐藏",
+      "part": "35-admin-system-auth.md"
+    },
+    {
+      "ep": 58,
+      "slug": "EP.58-unified-account-center",
+      "title": "一个账号，全家通行",
+      "part": "44-account-center.md"
+    },
+    {
+      "ep": 59,
+      "slug": "EP.59-error-catching",
+      "title": "错误捕获四张网",
+      "part": "46-error-handling.md"
+    },
+    {
+      "ep": 60,
+      "slug": "EP.60-secrets-zero-leak",
+      "title": "密钥零泄漏防线",
+      "part": "47-secrets-management.md"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+<!-- 文件: examples/17-03-canvas-layers.html —— [浏览器] Canvas 分层:性能优化的经典手法 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        /* 三层画布叠放:静态背景层(不重绘) + 数据层(低频) + 交互层(高频) */
+        .stage { position: relative; width: 600px; height: 300px; }
+        .stage canvas { position: absolute; inset: 0; }
+    </style>
+</head>
+<body>
+    <div class="stage">
+        <canvas id="bg" width="600" height="300"></canvas>    <!-- 网格背景:只画一次 -->
+        <canvas id="data" width="600" height="300"></canvas>  <!-- 折线:数据变化才重绘 -->
+        <canvas id="ui" width="600" height="300"></canvas>    <!-- 十字准星:鼠标移动高频重绘 -->
+    </div>
+    <script>
+        const bg = document.getElementById('bg').getContext('2d');
+        const ui = document.getElementById('ui').getContext('2d');
+
+        // 背景层:只画一次 —— 高频重绘的代价永远不要花在不变的内容上
+        for (let x = 0; x < 600; x += 30) { bg.fillRect(x, 0, 1, 300); }
+
+        // 交互层:鼠标移动只清除/重绘最上层的小画布,下层零开销
+        document.getElementById('ui').addEventListener('mousemove', (e) => {
+            ui.clearRect(0, 0, 600, 300);          // 只清交互层
+            ui.fillRect(e.offsetX - 1, 0, 2, 300);
+        });
+    </script>
+</body>
+</html>

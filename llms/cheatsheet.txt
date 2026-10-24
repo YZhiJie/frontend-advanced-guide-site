@@ -1,0 +1,592 @@
+# 速查卡 Cheat Sheet（全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/cheatsheet
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 🗺️ 速查卡 Cheat Sheet
+
+> 高频知识点的"一页纸"速查，面试前与 Code Review 时扫一眼。每条都链接回对应章节的完整讲解。
+
+---
+
+## 事件循环判定
+
+| 场景 | 归属 | 顺序 |
+| ---- | ---- | ---- |
+| 同步代码、`console.log` | 调用栈 | 最先 |
+| `Promise.then/finally`、`await` 之后、`queueMicrotask` | **微任务** | 当前轮全部清空 |
+| `setTimeout/setInterval`、I/O、UI 事件 | **宏任务** | 每轮只取一个 |
+
+> 口诀：**同步跑完 → 微任务清空 → 一个宏任务 → 循环**。详见 [1.5](./01-javascript-advanced.md#_1-5-异步编程与事件循环)。
+
+## 防抖 vs 节流
+
+| | 防抖 debounce | 节流 throttle |
+|--| ------------ | ------------- |
+| 行为 | 停止触发 N ms 后执行一次 | 每 N ms 最多执行一次 |
+| 记忆 | **等停止** | **匀速跑** |
+| 场景 | 搜索联想、resize 完成 | 滚动加载、按钮防连点 |
+
+详见 [1.8](./01-javascript-advanced.md#_1-8-手写高频工具函数)。
+
+## 缓存决策
+
+```
+带内容哈希的静态资源  → Cache-Control: max-age=31536000, immutable   (强缓存一年)
+HTML / 入口文档       → Cache-Control: no-cache                       (每次协商)
+实时数据(余额/库存)   → no-store
+低频变化的数据        → 短 max-age + stale-while-revalidate
+```
+
+> 黄金法则:**HTML 不强缓存,指纹资源强缓存**。详见 [6.2](./06-network.md#_6-2-缓存策略详解)、SW 可编程层见 [10.6](./10-browser-rendering.md#_10-6-service-worker-与-pwa)。
+
+## 竞态处理三招（优先级从高到低）
+
+1. **取消旧请求**：`AbortController`（搜索、筛选必配）；
+2. **忽略过期结果**：版本号/标志位比对；
+3. **防抖**：减少触发频率（只能缓解，需与前两者组合）。
+
+详见 [6.5](./06-network.md#_6-5-竞态处理与请求取消)。
+
+## 请求层标配（生产 checklist）
+
+- [ ] 统一注入凭证 + 响应剥壳（`code === 0`）
+- [ ] 401 静默续期：**并发共享同一个刷新 Promise**
+- [ ] 幂等请求网络错误重试（指数退避,最多 2 次）
+- [ ] 错误归一化：业务错误 vs 网络错误
+- [ ] 输入驱动的请求全部处理竞态
+
+详见 [6.4](./06-network.md#_6-4-请求层封装实战)、[7.5](./07-security.md#_7-5-认证与会话体系)。
+
+## 状态管理选型
+
+| 状态类型 | 放哪里 |
+| -------- | ------ |
+| 组件内 UI 状态 | `useState` / `ref` |
+| 跨组件客户端状态 | Zustand（React）/ Pinia（Vue） |
+| 服务端数据 | TanStack Query（缓存/失效/重试声明式） |
+| 筛选/页码/Tab | URL 参数（可分享可回退） |
+
+> 只有需要**审计/回放**才上 Redux。详见 [5.6](./05-state-management.md#_5-6-状态管理选型对比)。
+
+## 原理地基速查
+
+**JS 执行管线（1.1）**：源码 → 词法分析(token) → 语法分析(AST) → 字节码(Ignition/TurboFan) → 执行上下文创建（`var`→undefined、`let/const`→TDZ）→ 逐行执行。`SyntaxError` 解析期全段不执行，`ReferenceError` 执行期才抛。Babel/ESLint/SWC 都是 AST 改写。
+
+**首次渲染管线（10.1）**：HTML→DOM 树 · CSS→CSSOM 树 → 渲染树（`display:none` 不入树、`visibility:hidden` 占位）→ Style → Layout → Paint → Composite。JS 阻塞解析（用 `defer`），CSS 阻塞渲染（关键 CSS 内联）。
+
+**盒模型与 margin（12.1）**：`content-box` 占位=width+padding+border；`border-box` 占位恒=width（reset 全局设）。垂直相邻 margin 合并取 `max`；父子 margin 穿透用 `display:flow-root` 隔断；flex/grid 子项不合并。
+
+## 渲染性能三板斧
+
+| 手段 | 关键 API | 章节 |
+| ---- | -------- | ---- |
+| 动画只走合成 | `transform` / `opacity`（勿滥用 `will-change`） | [10.2](./10-browser-rendering.md#_10-2-渲染流程与重排重绘) |
+| 读写分离 | 别交替读 `offsetTop` 写样式（Layout Thrashing） | [10.2](./10-browser-rendering.md#_10-2-渲染流程与重排重绘) |
+| 只渲染可见 | `content-visibility: auto` → 虚拟列表 | [12.4](./12-css-engineering.md#_12-4-css-性能优化) / [10.4](./10-browser-rendering.md#_10-4-高性能虚拟列表) |
+
+> React 场景：先 Profiler 测量,再 memo 组合拳;非紧急更新用 `useTransition`。详见 [4.3](./04-frameworks.md#_4-3-react-性能优化与新特性)。
+
+## 首屏加载 checklist
+
+- [ ] 路由级懒加载 + 重型组件手动懒加载
+- [ ] 产物文件名带 `[contenthash]`
+- [ ] 图片:现代格式 + `srcset` + `loading="lazy"` + 宽高占位
+- [ ] 字体:woff2 + `font-display: swap` + preload + 子集化
+- [ ] 关键域 `preconnect`,关键资源 `fetchpriority`
+- [ ] LCP ≤ 2.5s / INP ≤ 200ms / CLS ≤ 0.1 有监控
+
+详见 [3.5](./03-engineering.md#_3-5-性能优化体系)。
+
+## 安全底线
+
+| 威胁 | 一句话防御 |
+| ---- | ---------- |
+| XSS | 默认插值；富文本过 DOMPurify；Cookie `HttpOnly`；CSP |
+| CSRF | `SameSite=Lax` + 写操作校验 CSRF Token/Origin |
+| Token 窃取 | access 在内存、refresh 在 HttpOnly Cookie |
+| 供应链 | 提交 lockfile + CI `--frozen-lockfile` + audit |
+
+详见 [7.4](./07-security.md#_7-4-前端安全清单)。
+
+## TypeScript 三件套
+
+```typescript
+type Pick      <T, K extends keyof T> = { [P in K]: T[P] }              // 挑键
+type Exclude   <T, U>                 = T extends U ? never : T         // 拆联合(分布式)
+type ReturnType<T>                    = T extends (...a: never[]) => infer R ? R : never  // infer 捕获
+```
+
+> 手写顺序:Partial → Pick → Omit → ReturnType → DeepReadonly。详见 [2.5](./02-typescript.md#_2-5-手写常用工具类型)。
+
+## 框架渲染优化对照
+
+| React | Vue |
+| ----- | --- |
+| `memo` + `useCallback`/`useMemo` 组合 | `computed` 缓存派生值 |
+| `useTransition`/`useDeferredValue` 降级非紧急更新 | `v-memo` / `shallowRef` + 整体替换 |
+| 收紧 `'use client'` 边界 | 重型实例 `markRaw` + `shallowRef` |
+| key 用稳定业务 id | key 用稳定业务 id |
+| 页面保活：`hidden` 常驻 + `visited` 懒挂载（[4.7.3](./04-frameworks.md#_4-7-3-缓存组件实例-keepalive-与-react-的等价实现)） | 页面保活：`<keep-alive :max>`（`include` 按 name 匹配） |
+
+详见 [4.3](./04-frameworks.md#_4-3-react-性能优化与新特性) / [4.5](./04-frameworks.md#_4-5-vue-组合式-api-与性能优化)。
+
+## 高频 API 速查
+
+| API | 用途 | 注意 |
+| --- | ---- | ---- |
+| `AbortController` | 取消请求/断流 | `AbortError` 是正常流程 |
+| `structuredClone` | 深拷贝 | 不支持函数/Symbol/DOM |
+| `queueMicrotask` | 微任务 | 比 `setTimeout(0)` 早执行 |
+| `IntersectionObserver` | 懒加载/曝光埋点 | `rootMargin` 提前量 |
+| `navigator.sendBeacon` | 卸载前上报 | 退化 `fetch keepalive` |
+| `Intl.*` | 日期/货币/复数本地化 | 零依赖,勿手写格式化 |
+
+## Node 部署速查
+
+| 坑 | 解法 |
+| -- | ---- |
+| SPA 刷新 404 | Nginx `try_files $uri $uri/ /index.html` |
+| 镜像太大 | Docker 多阶段构建,运行层只带生产依赖 |
+| 多核吃不满 | PM2 `-i max` 集群(状态外置到 Redis) |
+| 发布断流 | 容器内单进程 + 优雅退出(SIGTERM 处理) |
+
+详见 [16.4](./16-node-server.md#_16-4-部署与运行)。
+
+## 可视化选型决策
+
+```
+交互多/元素少(<1k) → SVG        业务图表 → ECharts/AntV
+大量 2D/粒子       → Canvas 2D  高度定制 → D3
+3D / 万级图元      → WebGL(WebGPU)
+```
+
+> Canvas 性能三板斧:分层、离屏缓存静态内容、rAF 合并重绘。详见 [17.2](./17-web-platform.md#_17-2-可视化技术选型)。
+
+## 浏览器新能力速查（17.1）
+
+| 能力 | 一句话用法 | 替代了什么 |
+| ---- | ---------- | ---------- |
+| **Popover API** | `<div popover>` + `popovertarget=xx` | 手写 z-index 大战 + 全局点击监听 |
+| **`<dialog>` showModal** | `dlg.showModal()` + `::backdrop` + `form method=dialog` | 手写 modal 遮罩 + focus trap 库 |
+| **View Transitions** | `document.startViewTransition(() => updateDOM())` | 手写 FLIP / 引动画库 |
+| **Speculation Rules** | `<script type=speculationrules>` 声明 `prerender`/`prefetch` | `<link rel=prefetch>` 粗粒度 |
+| **OPFS** | `navigator.storage.getDirectory()` 页面私有文件系统 | localStorage/IDB 的某些场景 |
+| **Wake Lock** | `navigator.wakeLock.request('screen')` | 不可实现（需原生） |
+| **CSS `:has()`** | `form:has(input:invalid) .submit { … }` 父级选择器 | JS 判断子状态后加类名 |
+| **Container Queries** | `@container (min-width:300px) { … }` | ResizeObserver + classList |
+
+> 模态必阻断用 `<dialog>` showModal（自带焦点陷阱）；非模态轻弹层用 `popover`（light dismiss）。Shadow DOM 内事件外发必须 `composed:true` + `bubbles:true`。详见 [17.1](./17-web-platform.md#_17-1-浏览器新能力速查) / [17.3](./17-web-platform.md#_17-3-web-components)。
+
+## 大数据可视化优化（17.2）
+
+| 手段 | 何时用 | 关键点 |
+| ---- | ------ | ------ |
+| `OffscreenCanvas` + Worker | 万级粒子/复杂滤镜卡主线程 | `transferControlToOffscreen` 单向不可逆；Worker 无 DOM API |
+| ECharts 四件套 | 万级以上数据点 | `large:true` + `sampling:'lttb'` + `progressive:5000` + `showSymbol:false` |
+| `dataZoom` 只渲染可见 | 百万级数据 | `rangeMode:['value','percent']` + `start/end` 限定窗口 |
+| Three.js `dispose()` | 页面切换防 WebGL context 泄漏 | WebGL context 浏览器上限 ~16 个；StrictMode 双挂载需彻底清理 |
+
+> 生产级 3D 用 React Three Fiber / TresJS，自动管理生命周期。详见 [17.2](./17-web-platform.md#_17-2-可视化技术选型)。
+
+## Web Components 三件套速查（17.3）
+
+| 能力 | 关键 API/属性 | 坑点 |
+| ---- | ------------- | ---- |
+| Custom Elements | `customElements.define`、`observedAttributes`、`connectedCallback` | `disconnectedCallback` 不止一次（元素可能反复挂/卸） |
+| Shadow DOM | `attachShadow({mode:'open'})` | 内部事件外发需 `composed:true` |
+| Slot 组合 | `<slot name=xx>` + `<slot>` 默认 | 内容仍在光 DOM，只是渲染位置被组件控制 |
+| 声明式 Shadow DOM | `<template shadowrootmode="open">` | JS 再调 `attachShadow` 会报错 → 用 `this.shadowRoot ??` 检测 |
+| Lit | `@customElement` + `@property` + `html` 模板 | 自动处理响应式/属性反射/Shadow DOM，样板代码消 80% |
+
+> 选 WC 的信号：跨框架/跨团队/跨应用复用（设计系统、微前端）。React 19 已原生支持自定义元素属性/事件映射。详见 [17.3](./17-web-platform.md#_17-3-web-components)。
+
+## WASM 适用边界（17.4）
+
+```
+先 Profiler 定位热点 → 纯计算(图像/编解码/加密) → 有现成 C/C++/Rust 实现可复用?
+   是 → 编译为 WASM（5~20x 提速）    否 → JS 优化 + Web Worker 可能足够
+   ❌ 操作 DOM → 反模式（边界穿越开销抵消优势）
+```
+
+| 维度 | AssemblyScript | Rust + wasm-pack |
+| ---- | -------------- | ---------------- |
+| 上手 | TypeScript 子集 | Rust（曲线陡） |
+| 性能 | 接近原生（略慢） | 最优 |
+| 生态 | 小 | 大（crates.io） |
+| 适用 | 原型验证 | 生产级 |
+
+> 生产用法：WASM 跑在 Worker 中，主线程通过 Transferable 零拷贝传 ArrayBuffer；批量传递整帧而非逐像素，减少 JS↔WASM 边界穿越。详见 [17.4](./17-web-platform.md#_17-4-webassembly-适用边界)。
+
+## Worker 三兄弟选型
+
+| 维度 | DedicatedWorker | SharedWorker | ServiceWorker |
+| ---- | --------------- | ------------ | ------------- |
+| 归属 | 单个页面独占 | 同源多 Tab 共享一个实例 | 浏览器级代理,与页面解耦 |
+| 生命周期 | 页面关闭 / `terminate()` 即毁 | 所有 port 关闭后可回收 | 安装后持久;空闲挂起、事件唤醒 |
+| 拦截 fetch | ❌ | ❌ | ✅(核心能力) |
+| 典型用途 | 计算卸载、大 JSON/像素处理 | 单 WebSocket 复用、跨 Tab 状态 | 离线缓存、Push、后台同步 |
+| 全局变量 | 存活期可靠 | 存活期跨页共享 | ❌ 不可靠,状态落 IDB/Cache |
+
+**postMessage 数据传递三招**：
+
+| 方式 | 成本 | 要点 |
+| ---- | ---- | ---- |
+| 结构化克隆(默认) | 深拷贝,大对象贵 | 不支持函数/DOM/原型链 |
+| Transferable | 零拷贝转移 | `postMessage(m, [buf])`,发送方立即 detached |
+| SharedArrayBuffer | 共享内存 | 需 COOP+COEP 头(`crossOriginIsolated`),配 `Atomics` |
+
+> Worker 路径统一写 `new Worker(new URL('./x.worker.ts', import.meta.url), { type: 'module' })`;常驻 + 池化复用,切路由记得 `terminate()`。详见 [模块二](./18-worker-messaging.md#模块二-dedicatedworker-web-worker-详解) / [模块三](./18-worker-messaging.md#模块三-sharedworker-共享线程详解) / [10.5](./10-browser-rendering.md#_10-5-web-worker-计算卸载)。
+
+## Service Worker 一页纸
+
+```
+生命周期: install(预缓存) → waiting(skipWaiting 跳过) → activate(清旧缓存 + clients.claim)
+铁律:     异步操作一律 event.waitUntil() 续期;无 DOM、无 localStorage;随时被挂起
+更新:     sw.js 逐字节变化才触发;发现新版 → 提示 → postMessage('SKIP_WAITING')
+          → controllerchange → location.reload();上线必备"自毁 SW"回滚预案
+```
+
+| 资源类型 | 缓存策略 |
+| -------- | -------- |
+| 带 hash 静态资源 | Cache First(+ 运行时回填) |
+| HTML / 导航请求 | Network First(失败回退缓存 / offline.html) |
+| 可容忍短暂过期 | Stale While Revalidate |
+| 实时接口 / 写入请求 | Network Only,不缓存 |
+
+详见 [模块五](./18-worker-messaging.md#模块五-serviceworker-详解) / [10.6](./10-browser-rendering.md#_10-6-service-worker-与-pwa)。
+
+## 跨 Tab 通信选型
+
+| 场景 | 方案 | 关键注意 |
+| ---- | ---- | -------- |
+| 同源多 Tab 广播 | **BroadcastChannel**(首选) | 自己收不到、无持久化 |
+| 广播 + 新 Tab 状态初始化 | `localStorage` + storage 事件 | 自己收不到;相同值不触发,消息带时间戳;约 5MB |
+| 弹窗 / iframe(可跨源) | `window.postMessage` | 收发双方都校验 origin,发送禁用 `'*'` |
+| 全浏览器单连接 / 共享状态 | SharedWorker 总线 | URL+name 逐字符一致才是同一实例;心跳清僵尸 port |
+| Leader 选举 / 互斥 | Web Locks API | Leader 崩溃锁自动释放,无需心跳 |
+| 大数据共享 | IndexedDB + BroadcastChannel 通知 | IDB 无变更事件,只传 id 不传正文 |
+| 跨设备 / 跨浏览器 | WebSocket / SSE 服务端中转 | 配合 Web Locks 只让 Leader 建一条连接 |
+
+> MessagePort 用 `addEventListener('message')` 必须手动 `port.start()`(赋 `onmessage` 会隐式启动);ServiceWorker 中继用 `clients.matchAll()` 遍历,或直接在 SW 内用 BroadcastChannel。详见 [模块四](./18-worker-messaging.md#模块四-messagechannel-messageport-端口通信) / [模块六](./18-worker-messaging.md#模块六-跨-tab-窗口通信全方案),18 条坑点见 [模块十](./18-worker-messaging.md#模块十-坑点速查、调试与自测)。
+
+## 模式识别与架构速查
+
+| 看到什么坏味道 | 上什么模式 |
+| -------------- | ---------- |
+| if-else / switch 长链 | 策略（查表注册） |
+| 布尔标志位组合（loading && !error && …） | 状态机（互斥状态 + 显式转移） |
+| 撤销/重做需求 | 命令（do/undo 双栈；新操作清空 redo 栈） |
+| 全局唯一（弹窗/Toast/store） | 单例（闭包 + 惰性创建） |
+| 重复请求 / 懒加载 / 控制访问 | 代理（缓存 + 去重） |
+| 多渠道异构 SDK | 适配器（业务只认抽象） |
+| 跨模块多对多通知 | 发布订阅（on 返回解绑函数,卸载必调） |
+
+**监控上报三件套**：`sendBeacon`（hidden 兜底 flush）+ 采样限流（防自拖垮）+ 指纹聚合（message + stack 前两帧去行列号）。上报数据必带 sessionId / release / 环境。详见 [11.2](./11-patterns-architecture.md#_11-2-前端监控与错误上报)。
+
+**微前端选型**：多栈存量聚合 → qiankun｜重隔离（不可信代码）→ wujie/iframe｜同栈大团队共享依赖 → Module Federation（防双框架实例）｜其余 90% 需求 → 别上微前端，Monorepo + 路由懒加载。详见 [11.3](./11-patterns-architecture.md#_11-3-微前端概览)。
+
+**分层铁律**：视图 → 业务 → 服务 → 基建，依赖只许自上而下；目录按功能域分（删除一个功能 = 删一个目录）；组件设计 = 受控/非受控双模 + 组合优于配置 + Headless 拆逻辑。详见 [11.4](./11-patterns-architecture.md#_11-4-前端架构设计方法)。
+
+## 测试金字塔与选型速查
+
+```
+        ╭─ E2E (≤20 条) ╮       关键用户路径,Playwright
+       ╭┤  集成/组件    ├╮      Testing Library 性价比最高
+      ╭ └────────────── ┘╰╗     Vitest 单测(纯函数/hooks/store)
+     ╰──────────────────────╯   类型测试/ESLint 零运行成本
+```
+
+| 看到这个代码 | 该写什么测试 |
+| ------------ | ------------ |
+| 纯函数（金额计算、解析、深拷贝） | Vitest 单测，参数化 it.each + 异常分支 |
+| 自定义 Hook / composable | Vitest 单测 + 必要时 jsdom |
+| UI 组件（有交互/异步） | Testing Library + userEvent + MSW |
+| 关键用户路径（登录/下单/支付） | Playwright E2E，限制 ≤20 条 |
+| 导出给他人用的库 | tsd 类型测试 + tsc --noEmit |
+| 配置文件/纯文案 | 静态检查 + Review，不写测试 |
+
+> 决策口诀：**能写单测的不写集成，能写集成的不写 E2E**。详见 [9.1](./09-testing.md#_9-1-测试金字塔与整体策略)。
+
+## Testing Library 查询优先级
+
+```
+getByRole > getByLabelText > getByPlaceholderText > getByText
+       > getByDisplayValue > getByAltText > getByTitle > getByTestId
+```
+
+| 前缀 | 行为 | 不匹配时 |
+| ---- | ---- | -------- |
+| `getBy*` | 同步取一个 | 抛错（同步断言用） |
+| `queryBy*` | 同步取一个 | 返回 null（断言"不存在"用） |
+| `findBy*` | 异步等一个 | 超时抛错（异步出现的元素用） |
+
+> 交互优先 `userEvent` 而非 `fireEvent`，前者模拟真实用户的聚焦/按键/失焦链。详见 [9.3](./09-testing.md#_9-3-组件测试与-testing-library)。
+
+## Vitest 假定时器与 Mock 速查
+
+| 场景 | API |
+| ---- | --- |
+| 接管 setTimeout | `vi.useFakeTimers()` |
+| 推进时间 | `vi.advanceTimersByTime(300)` |
+| 跑完所有队列 | `vi.runAllTimers()` |
+| 固定 Date | `vi.setSystemTime(new Date('2026-09-23'))` |
+| 还原 | `vi.useRealTimers()`（afterEach 必备） |
+| 模块边界 mock | `vi.mock('@/api/http', () => ({ http: { get: vi.fn() } }))` |
+| spy 函数 | `const fn = vi.fn()`；断言 `fn.toHaveBeenCalledWith('a')` |
+| 取 mock 的类型 | `vi.mocked(http.get).mockResolvedValue({...})` |
+| 临时覆盖 MSW | `server.use(http.get('/api/x', ...))` + afterEach `resetHandlers` |
+
+> ⚠️ 坑：`vi.useFakeTimers` 默认接管 `Date`，被测代码 `new Date()` 会拿到 1970-01-01，需 `vi.setSystemTime` 或 `useFakeTimers({ toFake: ['setTimeout'] })`。详见 [9.2](./09-testing.md#_9-2-单元测试与-vitest) / [9.5](./09-testing.md#_9-5-mock-策略与-msw)。
+
+## Mock 三层级
+
+| 层级 | 代表 | 侵入性 | 适用 |
+| ---- | ---- | ------ | ---- |
+| 函数级 | `vi.fn` / `vi.mock` | 高（业务感知） | 单测单元边界 |
+| 网络级 | **MSW** | 低（业务零感知） | 集成/组件测试、Storybook、联调 |
+| 服务级 | mock server / Pact | 0 | 契约测试、E2E 联调 |
+
+> 共识：**单测用 vi.fn 在模块边界 mock；集成/Storybook/联调用 MSW；E2E 用真实后端**。详见 [9.5](./09-testing.md#_9-5-mock-策略与-msw)。
+
+## Playwright E2E 速查
+
+```
+auto-waiting 6 条件: Visible + Stable + Enabled + Receives events + Hit target + Actionable
+登录复用: storageState 序列化 cookie/localStorage → 5s 登录压成 0ms
+造数据:   request fixture 调 API,不用 UI 一遍遍点(10~30s → 50~200ms)
+分片:     npx playwright test --shard=1/4,GitHub Actions 矩阵并行
+调试:     npx playwright test --ui(可视化逐步) | --update-snapshots(更新截图 baseline)
+```
+
+| 项 | 实践 |
+| -- | ---- |
+| 选择器 | `getByRole`/`getByTestId`，不依赖文案与 class |
+| 失败留档 | trace + screenshot + video 三件套 |
+| E2E 数量 | "公司倒闭级"路径 ≤20 条，其余下沉为集成测试 |
+| CI 失败策略 | `fail-fast: false` + `if: always()` 上传报告 |
+
+> 选 POM：把"页面操作"封装成对象（LoginPage/CartPage），UI 改了只改 POM，测试不动。详见 [9.4](./09-testing.md#_9-4-e2e-测试与-playwright)。
+
+## CI 质量门禁分层
+
+| 层级 | 工具 | 阈值 | 失败策略 |
+| ---- | ---- | ---- | -------- |
+| 静态 | `tsc --noEmit` | 0 error | 阻断 |
+| Lint | ESLint | 0 error | 阻断 |
+| 单测 | Vitest | 通过率 100% | 阻断 |
+| 覆盖率 | `--coverage` | lines/branches/functions ≥ 80% | 阻断 |
+| E2E | Playwright | 通过率 ≥ 95% | 阻断 |
+| 性能 | Lighthouse CI | performance ≥ 90 | warn/阻断 |
+| 安全 | npm audit / Snyk | 0 high/critical | 阻断 |
+| 视觉 | 截图对比 | 差异 ≤ 1% | warn |
+
+> 流水线四阶段：unit(静态+单测+覆盖率+产物) → e2e(分片) → merge-reports → lighthouse。`needs: unit` 让 E2E 前置依赖；`cache: 'pnpm'` 二次跑省 1~3 分钟。详见 [9.9](./09-testing.md#_9-9-ci-集成与质量门禁)。
+
+## 业务片段速查（19）
+
+| 场景 | 核心函数 | 必处理的边界 |
+| ---- | -------- | ------------ |
+| 表单校验 | 规则工厂 + `validateField`/`validateForm` | blur 单字段、submit 全表；`0/false` 不算空；异步查重单独建模 |
+| 输入/提交 | `formatPhone`/`formatAmountInput`/`withSubmitLock`/`countdown` | 中途改值光标恢复；锁在 `finally` 释放；倒计时卸载要 cancel；幂等靠服务端 |
+| 列表查询 | `normalizeQuery`/`toSearchParams`/`resolvePageInfo` | URL 为唯一外部来源；参数白名单；删数据后 page 越界夹回 |
+| 本地存储 | `TypedStorage`（泛型 + TTL + 前缀） | 损坏 JSON 兜底；配额异常降级；敏感数据不入 localStorage |
+| 树处理 | `listToTree`/`findPath`/`filterTree` | 两遍 Map 法 O(n)；不原地改入参；过滤保留命中祖先链 |
+| 文件 | `validateFile`/`download`/`copyText` | 前端校验非安全边界；对象 URL 延迟回收；剪贴板保留 execCommand 兜底 |
+| 埋点 | `Reporter`（阈值 + 定时 + pagehide） | 失败批次回队重试；sendBeacon 64KB 上限；曝光 once + ratio 双保险 |
+| 权限 | `hasPermission`/`resolveActions`/`resolveRoute` | `user:*` 匹配保留冒号防越权；隐藏≠安全；未登录 redirect / 无权限 403 |
+| IndexedDB | `openDB`/Repository/`IDBKeyRange`/游标 | 只在 `onupgradeneeded` 建表；事务内不夹 await；多写同事务保原子；add 撞主键报错、put 覆盖 |
+
+> 片段全部框架无关、可直接进 `src/utils` 配单测；完整实现见 [第十九部分](./19-business-snippets.md)。
+
+## 对象封闭三档
+
+| API | 禁新增 | 禁删除/重配 | 禁改值 | 判定 |
+| --- | ------ | ----------- | ------ | ---- |
+| `Object.preventExtensions(o)` | ✅ | ❌ | ❌ | `Object.isExtensible(o) === false` |
+| `Object.seal(o)` | ✅ | ✅ | ❌ | `Object.isSealed(o)` |
+| `Object.freeze(o)` | ✅ | ✅ | ✅ | `Object.isFrozen(o)` |
+
+> 三档都是**浅**操作，嵌套对象要递归 `deepFreeze`；ESM/严格模式违反 writable/configurable 直接抛 TypeError。`defineProperty` 省略的特性默认 false，`value/writable` 与 `get/set` 互斥。详见 [1.9](./01-javascript-advanced.md#_1-9-属性描述符与对象封闭)。
+
+## ES2022–ES2027 速查
+
+| 版本 | 必记 API |
+| ---- | --------- |
+| ES2022 | 类私有字段 `#x`、`#x in obj`、静态块、顶层 await、`.at()`、`Object.hasOwn`、`Error.cause` |
+| ES2023 | `toSorted/toReversed/toSpliced/with`、`findLast(Index)`、Symbol 可作 WeakMap 键 |
+| ES2024 | `Object.groupBy`、`Promise.withResolvers`、`String.isWellFormed`、正则 `/v`、可伸缩 ArrayBuffer |
+| ES2025 | Iterator helpers（`Iterator.from`）、`Promise.try`、`Float16Array`、`RegExp.escape`、Set 数学方法、重复命名捕获组 |
+| ES2026 | `Array.fromAsync`、`Error.isError`、`Math.sumPrecise`、`Uint8Array` base64/hex、`Iterator.concat`、`JSON.rawJSON`、Map `getOrInsert` |
+| ES2027 候选 | `using`/`await using`、DisposableStack、SuppressedError、`Atomics.pause`、`Iterator.zip`、Temporal |
+
+> 用法铁律：**`typeof fn === 'function'` 特性检测 → 降级分支**；语法特性（如 `using`）用 `new Function` 试解析；语法靠 Babel/SWC 转译，API 靠 polyfill/运行时，两者不同。配套检测与降级封装示例：[examples/01-36](./examples/01-36-es2026-2027-compat.ts)。详见 [1.12](./01-javascript-advanced.md#_1-12-es-版本特性演进-2022–2027)。
+
+## Set / Map / Weak 选型
+
+| 需求 | 选择 |
+| ---- | ---- |
+| 值去重、交集并集（ES2025 七个数学方法） | `Set` |
+| 任意类型键（含对象）、要遍历/`size`/插入序 | `Map` |
+| 给 DOM 节点/实例挂元数据，对象没了数据自动消失 | `WeakMap`（不可遍历） |
+| 给对象打"已处理"标记 | `WeakSet` |
+
+> 比较算法 SameValueZero（`NaN` 相等）；普通对象键会被 `toString`，对象键必须 Map。详见 [1.11](./01-javascript-advanced.md#_1-11-symbol-与集合类型)。
+
+## 迭代协议与惰性管线
+
+```
+iterable  [Symbol.iterator]() → iterator { next(): {value,done}, return()? }
+generator function*  —— 双协议自动实现;yield 暂停、yield* 委托、next(x) 回灌"上一条 yield"
+异步版   async function* + Symbol.asyncIterator + for await...of
+yield*   委托内层序列;表达式值 = 内层 return 值(for...of 拿不到);break 沿委托链逐层触发 return()
+高阶模式 yield* 递归遍历树(惰性剪枝) / it.throw() 暂停点注入 / next(x) 消费者驱动背压 / yield* next() 洋葱模型
+ES2025   Iterator.from(xs).map().filter().take(n).toArray()  // 无中间数组,可喂无限序列
+```
+
+> 有状态的迭代器只能消费一次，要可重复遍历就实现 iterable 工厂；持资源必须实现 `return()`。详见 [1.14](./01-javascript-advanced.md#_1-14-iterator、generator-与惰性管线)。
+
+## 正则高级用法速查
+
+```
+量词  贪婪 * + ? {m,n} ←加?变惰性→ *? +? ?? {m,n}?   贪婪先吃满再回吐,惰性满足即停
+分组  (x)捕获   (?:x)只分组不存   (?<n>x)命名 → m.groups.n
+引用  匹配侧 \1 数字 / \k<n> 命名;replace 侧 $1 / $<n>   引"实际匹配到的文本",成对结构靠它
+断言  (?=x)右满足  (?!x)右不满足  (?<=x)左满足  (?<!x)左不满足   零宽只看不吃的"位置条件"
+```
+
+| 场景 | 正则 |
+| ---- | ---- |
+| 千分位 | `'12345678'.replace(/\B(?=(\d{3})+(?!\d))/g, ',')` → 12,345,678 |
+| 密码强度（大小写+数字、≥8 位） | `/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)\S{8,}$/`（并列 `(?=)` = AND） |
+| 成对标签 / 配对引号 | `/<(h[1-6]\|b)>(.*?)<\/\1>/g`、`/(?<q>["']).*?\k<q>/g` |
+| 取前缀后的值 | `/(?<=\$)\d+/g` 提取 `$100` 的 100（JS 后行断言支持变长） |
+
+> 贪婪遇嵌套会越界吞并（`<.+>` 吃到行尾最后 `>`），截取用惰性或排除类 `[^>]+`；负向先行挡不住回溯截尾（`'100元'.match(/\d+(?!元)/g)` 得 `['10']`）；嵌套量词 `(a+)+` 是 ReDoS 炸弹。详见 [1.15](./01-javascript-advanced.md#_1-15-正则高级用法)。
+
+## 常用库速查（29–33）
+
+### RxJS 拍平操作符选型
+
+```
+switchMap   新事件到来 → 取消上一个内层流   搜索联想 / 路由参数 / 自动保存（只关心最新）
+concatMap   排队串行，前一个完成再发下一个   下单 / 顺序上传（保序、不可并发）
+mergeMap   并发执行，不保证顺序           批量请求 / 并行上传（要并发）
+exhaustMap  内层未完成时忽略新事件         提交按钮防重复 / 登录（忙时丢弃）
+```
+
+```ts
+import { fromEvent, debounceTime, map, switchMap, catchError, of, takeUntil } from 'rxjs';
+
+const search$ = fromEvent<InputEvent>(input, 'input').pipe(
+    debounceTime(300),
+    map((e) => (e.target as HTMLInputElement).value.trim()),
+    switchMap((kw) => api.search(kw).pipe(catchError(() => of([])))), // 旧请求自动取消
+    takeUntil(destroy$), // 组件销毁必须收口，否则订阅泄漏
+);
+const sub = search$.subscribe(render);
+// sub.unsubscribe() / destroy$.next() 二选一
+```
+
+> 冷流每次订阅都重新执行；多订阅共享结果用 `shareReplay({ bufferSize: 1, refCount: true })`。详见 [29](./29-rxjs.md)。
+
+### Lodash 高频与边界
+
+```ts
+import { groupBy, orderBy, uniqBy, get, debounce, cloneDeep, merge } from 'lodash-es';
+
+groupBy(list, 'region');                       // 按字段分组
+orderBy(list, ['amount', 'createdAt'], ['desc', 'asc']); // 多字段排序
+uniqBy(list, (x) => x.id);                     // 按 key 去重
+get(obj, 'a.b[0].c', fallback);                // 深路径安全读取（类型仍需你保证）
+const save = debounce(fn, 500); save.cancel(); save.flush(); // 取消防抖 / 立即执行
+```
+
+```
+cloneDeep     函数、DOM、Map/Set 语义、循环引用都要单独验证；结构化数据优先 structuredClone
+merge         不可信输入先过滤 __proto__ / constructor / prototype，否则原型污染
+体积           lodash-es + 具名导入；简单数组操作优先原生（map/filter/groupBy/toSorted）
+```
+
+> 详见 [30](./30-lodash.md)。
+
+### XLSX 读写骨架
+
+```ts
+import * as XLSX from 'xlsx';
+
+// JSON → 多 Sheet 工作簿 → Buffer（浏览器可换 type: 'array' + Blob 下载）
+const wb = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), '订单');
+const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+// 读回来：cellDates 让日期变 Date；defval 补空单元格
+const back = XLSX.read(buf, { type: 'buffer', cellDates: true });
+const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(back.Sheets['订单']!, { defval: '' });
+```
+
+```
+模型    Workbook → Worksheet → Cell(t=类型, v=原始值, w=显示值, f=公式, z=格式)
+安全    CSV 公式注入：= + - @ 开头的单元格导出时转义；导入限制大小/行数并校验
+性能    大数据量移 Worker + 分块；超过约 5 万行优先服务端生成
+```
+
+> 详见 [31](./31-xlsx.md)。
+
+### Day.js 插件与边界
+
+```ts
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+import relativeTime from 'dayjs/plugin/relativeTime';
+import 'dayjs/locale/zh-cn';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(customParseFormat);
+dayjs.extend(relativeTime);
+dayjs.locale('zh-cn');
+
+dayjs('2024-02-29', 'YYYY-MM-DD', true).isValid(); // 严格解析，非法日期直接 false
+dayjs.utc('2024-01-01T00:00:00Z').tz('Asia/Shanghai').format(); // 展示层再转时区
+dayjs('2024-01-01').add(1, 'month').endOf('month').format('YYYY-MM-DD'); // 月末边界
+```
+
+```
+存储   统一 UTC / ISO 字符串；业务日期（生日、账期）用日期字符串，别用时间戳
+插件   按需 extend + 按需 import locale；插件不注册 = 方法 undefined
+DST    跨时区先 tz(zone, true) 归一化，再计算；测试注入固定 now
+```
+
+> 详见 [32](./32-dayjs.md)。
+
+### Zod 边界校验
+
+```ts
+import { z } from 'zod';
+
+const UserSchema = z.object({
+    email: z.string().email(),
+    age: z.coerce.number().int().min(0).default(0), // 表单字符串转数字
+    role: z.enum(['admin', 'user']).catch('user'),   // 非法值回退
+});
+type User = z.infer<typeof UserSchema>; // 类型从 Schema 推导，单一事实来源
+
+const r = UserSchema.safeParse(input); // 外部数据永远 safeParse，不把异常当控制流
+if (!r.success) {
+    const byField = r.error.flatten().fieldErrors; // 字段 → 消息[]
+}
+```
+
+```
+组合   discriminatedUnion 做联合类型；intersection 合并；z.lazy 做递归树
+增强   transform 规范化；refine 跨字段业务规则；preprocess 先清洗再校验
+性能   Schema 模块级创建一次，不要放进 render；大流量边界避免重复 parse
+```
+
+> 详见 [33](./33-zod.md)。
+
+---
+
+> [返回总目录](./README.md)

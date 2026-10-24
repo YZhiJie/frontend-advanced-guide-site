@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>最小 SSR 与岛屿 hydration 协议 · 在线预览</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#2a2f3a;--tx:#dde1e8;--dim:#8b93a3;--brand:#5eead4;--err:#f87171;--ok:#86efac;--info:#93c5fd}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--bg);color:var(--tx);font:14px/1.6 ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;padding:16px 18px 28px}
+h1{font-size:16px;margin-bottom:2px}
+header p{color:var(--dim);font-size:12px;margin-bottom:12px}
+.sec{margin-top:16px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.sec h2{font-size:13px;margin-bottom:8px;color:var(--brand)}
+.hint{font-size:12px;color:var(--dim);margin:-4px 0 8px}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+button{font:12px/1 inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:#1f2430;color:var(--tx);cursor:pointer}
+button:hover{border-color:var(--brand);color:var(--brand)}
+button.primary{background:var(--brand);border-color:var(--brand);color:#06281f;font-weight:600}
+button.danger{border-color:#7f1d1d;color:var(--err)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.in,.ta{width:100%;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0c0e13;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.ta{resize:vertical;white-space:pre}
+.out{background:#0c0e13;border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-height:300px;overflow:auto;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
+.ln{white-space:pre-wrap;word-break:break-all}
+.ln.ok{color:var(--ok)}.ln.err{color:var(--err)}.ln.dim{color:var(--dim)}.ln.info{color:var(--info)}
+.blk{white-space:pre-wrap;word-break:break-all;color:var(--tx)}
+.blk.ok{color:var(--ok)}.blk.err{color:var(--err)}.blk.dim{color:var(--dim)}
+.tbl .tr{display:flex;gap:10px;padding:1px 0}
+.tbl code{color:var(--info);min-width:140px;flex-shrink:0}
+footer{margin-top:14px;color:var(--dim);font-size:11px}
+footer a{color:var(--brand)}
+</style>
+</head>
+<body>
+<div id="app">
+<header><h1>🎯 最小 SSR 与岛屿 hydration 协议</h1><p>实战案例在线预览 · cases/13-ssr-island-lab · 完整源码见仓库 cases/13-ssr-island-lab 目录（cases.md 有直达锚点）</p></header>
+</div>
+<script>(()=>{var j=new TextEncoder,O=new TextDecoder("utf-8");function b(e){return{createConnection(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)},request(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)}}}var S=b("node:http"),A=b("node:https"),q={...S,...A};function k(){let e=0;return{islands:[],nextId:()=>`island-${e++}`}}var D={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};function h(e){return e.replace(/[&<>"']/g,n=>D[n]??n)}var w="island",M="islandId",H=new Set([w,M]);function u(e,n,...t){return{type:e,props:n??{},children:t}}function V(e,n=k()){return x(e,n)}function x(e,n){return e==null||typeof e=="boolean"?"":typeof e=="string"?h(e):typeof e=="number"?h(String(e)):Array.isArray(e)?e.map(t=>x(t,n)).join(""):B(e,n)}function B(e,n){if(e.props[w]===!0)return P(e,n);let t=U(e.props),r=e.children.map(o=>x(o,n)).join("");return`<${e.type}${t}>${r}</${e.type}>`}function P(e,n){let t=e.props[M],r=typeof t=="string"&&t.length>0?t:n.nextId(),o={};for(let[s,i]of Object.entries(e.props))H.has(s)||(o[s]=i);return n.islands.push({id:r,name:e.type,props:o}),`<div data-island-id="${h(r)}"></div>`}function U(e){let n="";for(let[t,r]of Object.entries(e))if(!H.has(t)&&!(r==null||r===!1)){if(r===!0){n+=` ${t}`;continue}(typeof r=="string"||typeof r=="number")&&(n+=` ${t}="${h(String(r))}"`)}return n}function L(e){let n=k();return{html:V(e,n),islands:n.islands}}function C(e,n,t,r={}){let o=[],s=[];for(let i of e){let p=n[i.name];if(p===void 0){if(r.requireAll===!0)throw new Error(`\u672A\u6CE8\u518C\u7684\u5C9B\u5C7F\u7EC4\u4EF6\uFF1A${i.name}\uFF08id=${i.id}\uFF09`);s.push(i.id);continue}let f=t(i.id);if(f===null){s.push(i.id);continue}p(i.props,f),o.push(i.id)}return{mounted:o,skipped:s}}function c(e){if(typeof e=="string")return e;if(e==null||typeof e=="number"||typeof e=="boolean")return String(e);if(e instanceof Error)return`${e.name}: ${e.message}`;if(e instanceof Date)return e.toISOString();if(e instanceof Map)return`Map(${e.size}) { ${[...e.entries()].map(([n,t])=>`${c(n)} => ${c(t)}`).join(", ")} }`;if(e instanceof Set)return`Set(${e.size}) { ${[...e].map(n=>c(n)).join(", ")} }`;try{return JSON.stringify(e,(n,t)=>typeof t=="bigint"?String(t):t,2)??String(e)}catch{return String(e)}}function $(e,n=""){let t=document.createElement("section");t.className="sec";let r=document.createElement("h2");if(r.textContent=e,t.appendChild(r),n){let o=document.createElement("p");o.className="hint",o.textContent=n,t.appendChild(o)}return document.body.querySelector("#app").appendChild(t),t}function R(e){let n=document.createElement("div");return n.className="btn-row",e.appendChild(n),n}function y(e,n,t,r=""){let o=document.createElement("button");return o.textContent=n,r&&(o.className=r),o.addEventListener("click",()=>{try{t()}catch(s){l(e,`\u2717 ${c(s)}`,"err")}}),e.appendChild(o),o}function N(e){let n=document.createElement("div");return n.className="out",e.appendChild(n),n}function E(e){if(e?.classList.contains("out"))return e;let n=e?.querySelectorAll(":scope > .out");if(n&&n.length)return n[n.length-1];let t=document.querySelectorAll("#app .out");return t[t.length-1]}function l(e,n,t=""){let r=E(e),o=document.createElement("div");o.className=`ln ${t}`,o.textContent=c(n),r.appendChild(o),r.scrollTop=r.scrollHeight}function T(e,n,t=""){let r=E(e),o=document.createElement("pre");o.className=`blk ${t}`,o.textContent=c(n),r.appendChild(o),r.scrollTop=r.scrollHeight}function I(e,n){let t=E(e),r=document.createElement("div");r.className="tbl";for(let[o,s]of n){let i=document.createElement("div");i.className="tr";let p=document.createElement("code");p.textContent=o;let f=document.createElement("span");f.textContent=c(s),i.append(p,f),r.appendChild(i)}return t.appendChild(r),t.scrollTop=t.scrollHeight,r}var g=$("\u670D\u52A1\u7AEF\u6E32\u67D3","\u6574\u9875 renderToString\uFF1A\u9759\u6001\u90E8\u5206\u76F4\u51FA HTML\uFF0C\u4EA4\u4E92\u5C9B\u5C7F\u53EA\u7559\u5360\u4F4D + \u6E05\u5355"),a=N(g),d=null;R(g);y(g,"\u2460 \u670D\u52A1\u7AEF renderPage",()=>{d=L(u("html",null,u("body",null,u("header",null,"\u9759\u6001\u5934\u90E8\uFF08\u65E0\u9700 JS\uFF09"),u("section",{island:"Counter",islandId:"hero-counter",initial:3}),u("main",null,"\u9759\u6001\u6B63\u6587\uFF1A\u6587\u7AE0\u5185\u5BB9\u76F4\u51FA"),u("aside",{island:"ChatWidget",islandId:"chat-1",collapsed:!0}),u("footer",null,"\u9759\u6001\u9875\u811A")))),T(a,d.html,"ok"),l(a,`\u5C9B\u5C7F\u6E05\u5355\uFF1A${d.islands.map(e=>`${e.id}(${e.name})`).join("\u3001")}`,"info")});y(g,"\u2461 \u5BA2\u6237\u7AEF hydrateIslands\uFF08\u5360\u4F4D\u8282\u70B9\u53EF\u89E3\u6790\uFF09",()=>{if(!d)return l(a,"\u5148\u6267\u884C\u670D\u52A1\u7AEF\u6E32\u67D3","err");let e=new Map(d.islands.map(t=>[t.id,{id:t.id}])),n=C(d.islands,{Counter:(t,r)=>l(a,`mount Counter#${r.id} props=${JSON.stringify(t)} \u2192 \u7ED1\u5B9A\u70B9\u51FB\u8BA1\u6570`,"ok"),ChatWidget:(t,r)=>l(a,`mount ChatWidget#${r.id} props=${JSON.stringify(t)} \u2192 \u5EFA\u7ACB\u957F\u8FDE\u63A5`,"ok")},t=>e.get(t)??null);I(a,[["\u5DF2\u6302\u8F7D",n.mounted.join("\u3001")],["\u8DF3\u8FC7",n.skipped.length?n.skipped.join("\u3001"):"\uFF08\u65E0\uFF09"]]),l(a,"\u53EA\u6709\u4E24\u4E2A\u5C9B\u5C7F\u6267\u884C\u4E86 JS\uFF0C\u9875\u9762\u7684\u5176\u4F59\u90E8\u5206\u4FDD\u6301\u7EAF\u9759\u6001\u2014\u2014\u8FD9\u5C31\u662F\u5C9B\u5C7F\u67B6\u6784\u7684\u6309\u9700\u6FC0\u6D3B","info")});y(g,"\u2462 \u6F0F\u6CE8\u518C\u573A\u666F\uFF08requireAll:false \u8DF3\u8FC7\u5E76\u8BB0\u5F55\uFF09",()=>{if(!d)return l(a,"\u5148\u6267\u884C\u670D\u52A1\u7AEF\u6E32\u67D3","err");let e=new Map(d.islands.map(t=>[t.id,{id:t.id}])),n=C(d.islands,{Counter:()=>l(a,"mount Counter\uFF08ChatWidget \u672A\u6CE8\u518C\uFF09","ok")},t=>e.get(t)??null);l(a,`mounted=${n.mounted} skipped=${n.skipped}`,n.skipped.length?"err":"ok")});})();
+</script>
+</body>
+</html>

@@ -1,0 +1,2633 @@
+# 第二十二部分：前端常用数据结构与算法（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/22-frontend-data-structures
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第二十二部分：前端常用数据结构与算法
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[1.5 异步编程与事件循环](./01-javascript-advanced.md) · [第四部分 Fiber 与响应式](./04-frameworks.md) · [19.5 树结构数据处理](./19-business-snippets.md#_19-5-树结构数据处理)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-26" target="_blank" rel="noopener">EP.26《栈与队列》</a>、<a href="/comics/index.html#ep-27" target="_blank" rel="noopener">EP.27《链表指针舞》</a>、<a href="/comics/index.html#ep-28" target="_blank" rel="noopener">EP.28《哈希表一秒定位》</a>、<a href="/comics/index.html#ep-29" target="_blank" rel="noopener">EP.29《二叉搜索树》</a>、<a href="/comics/index.html#ep-30" target="_blank" rel="noopener">EP.30《图与堆》</a>、<a href="/comics/index.html#ep-31" target="_blank" rel="noopener">EP.31《排序大比武》</a>、<a href="/comics/index.html#ep-32" target="_blank" rel="noopener">EP.32《动态规划五步法》</a>
+>
+> 🎬 配套漫画剧场：[EP.26 栈与队列](./comics/EP.26-ds-stack-queue.md) · [EP.27 链表指针舞](./comics/EP.27-ds-linked-list.md) · [EP.28 哈希表一秒定位](./comics/EP.28-ds-hash-table.md) · [EP.29 二叉搜索树](./comics/EP.29-ds-tree.md) · [EP.30 图与堆](./comics/EP.30-ds-graph-heap.md) · [EP.31 排序大比武](./comics/EP.31-ds-sorting.md) · [EP.32 动态规划五步法](./comics/EP.32-ds-dp.md)
+>
+> 📦 专用资源目录：[data-structures/](./data-structures/README.md)（可运行示例 · 面试专项 · 静态资源）
+
+## 本部分内容
+
+- [22.1 复杂度分析：前端的第一性原理](#_22-1-复杂度分析-前端的第一性原理)
+- [22.2 栈与队列：LIFO 与 FIFO](#_22-2-栈与队列-lifo-与-fifo)
+- [22.3 链表：指针编织的结构](#_22-3-链表-指针编织的结构)
+- [22.4 哈希表：O(1) 的魔法](#_22-4-哈希表-o-1-的魔法)
+- [22.5 树与二叉搜索树：层级之美](#_22-5-树与二叉搜索树-层级之美)
+- [22.6 堆与优先级队列](#_22-6-堆与优先级队列)
+- [22.7 图：依赖与关系的世界](#_22-7-图-依赖与关系的世界)
+- [22.8 排序算法：十大排序全景](#_22-8-排序算法-十大排序全景)
+- [22.9 动态规划：把算过的记住](#_22-9-动态规划-把算过的记住)
+- [22.10 高频面试题通关与自测](#_22-10-高频面试题通关与自测)
+- [22.11 本章避坑清单](#_22-11-本章避坑清单)
+- [22.12 交互实验室](#_22-12-交互实验室)
+
+## 知识地图
+
+```mermaid
+flowchart TD
+    Base[复杂度分析：大 O · 时间/空间<br/>22.1]
+    subgraph 结构层
+        Linear[栈与队列<br/>22.2]
+        Linked[链表<br/>22.3]
+        Hash[哈希表<br/>22.4]
+        Tree[树 · BST · AVL<br/>22.5]
+        Heap[堆与优先级队列<br/>22.6]
+        Graph[图<br/>22.7]
+    end
+    subgraph 算法层
+        Sort[十大排序<br/>22.8]
+        DP[动态规划<br/>22.9]
+    end
+    Final[高频面试题通关与自测<br/>22.10]
+
+    Base --> Linear & Linked & Hash & Tree & Heap & Graph
+    Linear --> Sort
+    Tree --> Heap
+    Heap --> Sort
+    Linked --> Graph
+    Tree --> Graph
+    Sort --> DP
+    Linear --> Final
+    Linked --> Final
+    Hash --> Final
+    Tree --> Final
+    Heap --> Final
+    Graph --> Final
+    DP --> Final
+```
+
+---
+
+> 前端工程师常被问「写业务还需要学数据结构吗」——答案藏在每天都在踩的坑里：数组 `shift()` 为什么慢、`Map` 为什么比 `{}` 更适合做缓存、React Fiber 为什么是链表、LRU 淘汰为什么要配双向链表、十万行列表怎么渲染不卡。这些问题的背后都是同一套语言：**复杂度与数据结构**。
+>
+> 本章共十节，22.1 先立起「复杂度分析」这把尺子；22.2~22.7 按「线性 → 链表 → 哈希 → 树 → 堆 → 图」的顺序讲六大常用结构；22.8~22.9 讲两类高频算法思想（排序、动态规划）；22.10 集中通关自测。每节统一按五个维度展开：**概念解析 → 技术对比 → 应用实践 → 代码实现 → 面试指导**；面试题库分三级——L1 基础概念题、L2 原理理解题、L3 综合应用题，每题给出「回答框架 / 评分要点 / 常见误区 / 加分项」。所有代码使用 TypeScript 严格类型（接口 + 泛型类）编写，可在 [data-structures/examples/](./data-structures/README.md) 中用 `npx tsx` 直接运行。
+
+---
+
+## 22.1 复杂度分析：前端的第一性原理
+
+### 22.1.1 概念解析
+
+**复杂度分析**是脱离具体机器、具体语言，对算法「随输入规模增长，资源消耗增长多快」的数学估计。它是算法世界的第一性原理：不看绝对耗时（那受 CPU、负载、JIT 影响），只看**增长趋势**。
+
+#### 大 O 表示法（Big-O Notation）
+
+`T(n) = O(f(n))` 表示：当输入规模 `n` 足够大时，算法耗时（或耗空间）的上界与 `f(n)` **同阶增长**。三条计算规则：
+
+1. **常数系数忽略**：`O(3n)` → `O(n)`，`O(2n² + 5n + 100)` → `O(n²)`（只留最高阶）；
+2. **加法取最大**：顺序执行的两段代码，复杂度相加取高阶，`O(n) + O(1) = O(n)`；
+3. **乘法看嵌套**：嵌套循环/递归相乘，`n` 次循环里各做一次 `O(n)` 查找就是 `O(n²)`。
+
+```typescript
+// O(n)：执行次数随 n 线性增长
+function sum(arr: number[]): number {
+  let total = 0;
+  for (let i = 0; i < arr.length; i++) total += arr[i];
+  return total;
+}
+// O(n²)：两层嵌套，规模翻倍耗时变四倍
+function hasDuplicate(arr: number[]): boolean {
+  for (let i = 0; i < arr.length; i++)
+    for (let j = i + 1; j < arr.length; j++)
+      if (arr[i] === arr[j]) return true; // 比较次数 ≈ n(n-1)/2
+  return false;
+}
+```
+
+#### 时间复杂度 vs 空间复杂度
+
+| 维度 | 关注什么 | 前端典型例子 |
+| ---- | ---- | ---- |
+| 时间复杂度 | 指令执行次数的增长级别 | 嵌套循环渲染、深拷贝、排序 |
+| 空间复杂度 | **额外**申请内存的增长级别 | 递归调用栈 `O(h)`、缓存对象 `O(n)`、原地交换 `O(1)` |
+
+> 注意「额外」二字：函数入参本身占的内存不计入，只算为了运算临时申请的空间。原地排序（如快排分区）额外空间 `O(log n)`，而归并排序需要 `O(n)` 的辅助数组。
+
+#### 最好 / 最坏 / 平均时间复杂度
+
+同一段代码，数据不同耗时也不同，以在长度为 `n` 的数组中查找目标为例：
+
+- **最好情况**：第一个就是目标，`O(1)`；
+- **最坏情况**：目标在末尾或不存在，`O(n)`；
+- **平均情况**：目标等概率出现在每个位置，期望比较 `(n+1)/2` 次，仍记 `O(n)`。
+
+工程上默认讨论**最坏时间复杂度**——它给出性能承诺的下限保证，也是面试中的默认口径。此外还有**摊还复杂度**：动态数组 `push` 单次扩容是 `O(n)`，但扩容不常发生，把扩容成本平摊到每次 `push` 上，摊还复杂度仍是 `O(1)`（JS 数组的 `push/pop` 即如此）。
+
+#### 复杂度阶梯与 n = 10 万的直觉对照
+
+增长速度由慢到快：`O(1) < O(log n) < O(n) < O(n log n) < O(n²) < O(2ⁿ)`。
+
+| 复杂度 | n=10 时 | **n=10 万时** | 含义直觉 |
+| ---- | ---- | ---- | ---- |
+| `O(1)` | 1 | **1** | 按下标取数组元素，数据多大都一下 |
+| `O(log n)` | ≈3 | **≈17** | 二分查找，10 万个数只需 17 次比较 |
+| `O(n)` | 10 | **100,000** | 线性扫描，数据翻倍耗时翻倍 |
+| `O(n log n)` | ≈33 | **≈1,700,000** | 归并/快排，10 万数据排序毫秒级 |
+| `O(n²)` | 100 | **100 亿** | 双重循环，10 万数据直接卡死页面 |
+| `O(2ⁿ)` | 1024 | **2 的 10 万次方** | 天文数字，只存在于小 n 的暴力搜索 |
+
+记住这张表的关键直觉：**log n ≈ 常数**（2³⁰ 已约 10 亿），**n² 在万级数据就开始危险**，而指数复杂度永远不要在真实数据量下运行。
+
+### 22.1.2 技术对比：顺序查找 vs 二分查找
+
+| 对比维度 | 顺序查找 | 二分查找 |
+| ---- | ---- | ---- |
+| 前提条件 | 无要求，无序可查 | **必须有序** |
+| 查找方式 | 从头到尾逐个比较 | 每次与中间值比较，砍掉一半区间 |
+| 时间复杂度 | `O(n)` | **`O(log n)`** |
+| 空间复杂度 | `O(1)` | 迭代版 `O(1)` / 递归版 `O(log n)` |
+| 适合结构 | 数组、链表都行 | 随机访问结构（数组），链表上退化为 `O(n)` |
+| 工程定位 | 小数据量、惰性数据 | 大数组、预排序后多次查询 |
+
+用浏览器原生 `performance.now()`（微秒级精度，`Date.now()` 只有毫秒级）实测对比，可直接 `npx tsx` 运行：
+
+```typescript
+/** 顺序查找：遍历数组，找到返回下标，没找到返回 -1 */
+function sequentialSearch(nums: number[], target: number): number {
+  for (let i = 0; i < nums.length; i++) if (nums[i] === target) return i;
+  return -1;
+}
+
+/** 二分查找：仅针对有序序列 */
+function binarySearch(nums: number[], target: number): number {
+  let left = 0, right = nums.length - 1;
+  while (left <= right) {
+    const mid = left + ((right - left) >> 1); // 防溢出写法，等价 floor((l+r)/2)
+    if (nums[mid] === target) return mid;
+    if (nums[mid] < target) left = mid + 1; // 目标在右半区
+    else right = mid - 1; // 目标在左半区
+  }
+  return -1;
+}
+
+const N = 1_000_000;
+const nums = Array.from({ length: N }, (_, i) => i); // 0~999999 有序数组
+const target = N >> 1; // 找中间值，对顺序查找是最坏情况
+let start = performance.now();
+sequentialSearch(nums, target);
+console.log('顺序查找耗时(ms)：', performance.now() - start); // 数 ms 级
+start = performance.now();
+binarySearch(nums, target);
+console.log('二分查找耗时(ms)：', performance.now() - start); // 0.0x ms，数据量越大差距越明显
+```
+
+> ⚠️ 微基准受 JIT 预热、GC 干扰，应多次执行取中位数（对照 [examples/09-08-bench.ts](./examples/09-08-bench.ts)）；面试重点是用大 O 解释趋势。
+
+### 22.1.3 应用实践：复杂度尺子在前端的三个落点
+
+1. **十万行列表渲染**：朴素写法一次性生成 10 万个 DOM 节点，插入与布局成本 `O(n)` 且首屏被阻塞；虚拟滚动只渲染可视区的 `k` 个节点，把 DOM 规模从 `O(n)` 降到 `O(k)`。配合按 id 建立 `Map` 索引，把每次「根据 id 找行」从 `arr.find()` 的 `O(n)` 降到 `O(1)`。
+2. **render 里的隐形 O(n²)**：列表渲染的回调中对同一批数据反复调用 `includes/indexOf/find`，外层 `O(n)` × 内层 `O(n)` = `O(n²)`，数据上千就卡顿。典型解法是渲染前先用 `new Map(arr.map(item => [item.id, item]))` 预处理一次（`O(n)`），渲染中全部 `O(1)` 命中。
+3. **框架 diff**：两棵虚拟 DOM 树无约束地对比是 `O(n³)`（节点对匹配是排列问题）；React/Vue 通过「同层比较 + key 复用」把复杂度压到 `O(n)`——这正是 key 不能用数组下标乱序渲染的根本原因：下标 key 会破坏复用假设。
+
+| 前端日常写法 | 复杂度 | 更优替代 |
+| ---- | ---- | ---- |
+| `arr.includes(id)` 查存在 | `O(n)` | `Set.has(id)`：`O(1)` |
+| `arr.find(i => i.id === id)` | `O(n)` | `map.get(id)`：`O(1)` |
+| `arr.shift()/unshift()` 频繁操作头部 | `O(n)` | 环形队列 / 链表 / 偏移指针 |
+| 双重循环去重 | `O(n²)` | `Set` / `Map` 一次扫描 `O(n)` |
+| 深嵌套递归处理树 | 时间 `O(n)`，注意递归栈深度 `O(h)` | 改迭代 + 栈，防爆栈 |
+
+### 22.1.4 代码实现
+
+复杂度分析不需要封装类，更常用的是给代码做复杂度标注训练。下面是数据结构题的母题——**当 O(n²) 成为瓶颈时，先用哈希表 O(n) 空间换 O(n) 时间**：
+
+```typescript
+// 求数组中出现次数最多的元素
+
+// 思路一：双层循环逐个统计 —— O(n²) 时间、O(1) 额外空间
+function majorityBrute(nums: number[]): number | null {
+  let best: number | null = null, bestCount = 0;
+  for (let i = 0; i < nums.length; i++) {
+    let count = 0;
+    for (let j = 0; j < nums.length; j++) if (nums[j] === nums[i]) count++;
+    if (count > bestCount) { bestCount = count; best = nums[i]; }
+  }
+  return best;
+}
+// 思路二：一次扫描 + Map 计数 —— O(n) 时间、O(n) 空间（空间换时间）
+function majorityWithMap(nums: number[]): number | null {
+  const freq = new Map<number, number>();
+  let best: number | null = null, bestCount = 0;
+  for (const num of nums) {
+    const next = (freq.get(num) ?? 0) + 1; // Map 读写均为 O(1)
+    freq.set(num, next);
+    if (next > bestCount) { bestCount = next; best = num; }
+  }
+  return best;
+}
+```
+
+### 22.1.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：什么是大 O？O(n) 里的 n 指什么？说一下常见复杂度从好到坏的排序。**
+
+- 回答框架：定义（随输入规模增长的资源上界，忽略常数与低阶项）→ `n` 是数据规模（数组长度/节点数/字符串长度）→ 阶梯 `O(1) < O(log n) < O(n) < O(n log n) < O(n²) < O(2ⁿ)`，各举一例（取下标 / 二分 / 遍历 / 快排 / 双重循环 / 子集枚举）。
+- 评分要点：说出「增长趋势而非绝对时间」「只看最高阶」；能给 log n 一个具体直觉（n=10 亿时 log₂n≈30）。
+- 常见误区：把大 O 说成「精确执行次数」；认为 O(2n) 和 O(n) 有本质区别；把空间复杂度忘了。
+- 加分项：补充最好/最坏/平均三种口径、动态数组的摊还 O(1)。
+
+#### L2 原理理解题
+
+**Q2：为什么大 O 里对数可以省略底数？O(log₂n) 和 O(log₁₀n) 一样吗？**
+
+- 回答框架：给换底公式 `log_b n = log_a n / log_a b`，两种底数只相差一个**常数系数** `1/log_a b`，而大 O 忽略常数 → 同记 `O(log n)`。
+- 评分要点：必须写出或口述换底公式，点出「差常数倍」。
+- 常见误区：回答「因为底数不影响结果」却说不出为什么；误以为省略的是对数本身。
+- 加分项：联系二分查找——每次「砍一半」是 log₂n，每次「砍成三分之一」是 log₃n，但砍的次数只差常数倍，复杂度同级。
+
+#### L3 综合应用题
+
+**Q3：一个十万行数据的表格页面线上卡顿，你如何用复杂度思路分层排查与优化？**
+
+- 回答框架：① **测量**：Performance 面板定位是脚本、布局还是重绘，先量化再优化；② **JS 层查 O(n²)**：渲染回调中是否有 `find/includes` 反复全表扫描（→ 建 `Map/Set` 索引降 O(1)）、是否用了 O(n²) 排序、深拷贝深度；③ **DOM 层降规模**：全量渲染改虚拟滚动只挂载可视区 O(k) 个节点，或时间分片分批插入；④ **框架与数据层**：检查列表 key 稳定性避免错误复用；评估十万条是否应服务端分页/区间拉取。
+- 评分要点：体现「先定位瓶颈再谈方案」，能指出具体代码模式（嵌套查找、全量 DOM）与其复杂度。
+- 常见误区：上来就说「上防抖节流」（那只降频率不降单次复杂度）；只谈加硬件；把卡顿全归因于框架。
+- 加分项：提到空间换时间的取舍（Map 索引多占 O(n) 内存）、时间分片本质是把 O(n) 的长任务切成可中断的小块（总时间不变但不阻塞交互）。
+
+---
+
+## 22.2 栈与队列：LIFO 与 FIFO
+
+### 22.2.1 概念解析
+
+**栈（Stack）** 和 **队列（Queue）** 是两种「操作受限的线性表」——它们不是新存储结构，而是在数组/链表之上**限制了存取位置**，换来了语义清晰和 O(1) 的核心操作。
+
+- **栈：LIFO（Last In First Out，后进先出）**。只允许在**栈顶（top）**一端插入（`push`）和删除（`pop`），`peek` 看一眼栈顶不移除。可以类比一摞餐盘：最后放上去的最先被拿走。
+- **队列：FIFO（First In First Out，先进先出）**。一端入队（`enqueue`，队尾 rear），另一端出队（`dequeue`，队头 front）。类比食堂排队：先来先打饭。
+
+| 操作 | 栈（Stack） | 队列（Queue） |
+| ---- | ---- | ---- |
+| 入 | `push` 栈顶，O(1) | `enqueue` 队尾，O(1) |
+| 出 | `pop` 栈顶，O(1) | `dequeue` 队头，O(1) |
+| 窥 | `peek` 栈顶，O(1) | `front` 队头，O(1) |
+| 判空 | `isEmpty`，O(1) | `isEmpty`，O(1) |
+
+两个高频变体先建立概念（22.6 会再见到优先级队列）：**双端队列（Deque）** 两端都能进出，兼具栈和队列的能力，是滑动窗口、单调队列题的标配；**优先级队列（Priority Queue）** 出队不看先来后到而看优先级，通常用堆实现（入队 O(log n)、取最值 O(1)）。
+
+### 22.2.2 技术对比
+
+#### 三种底层实现
+
+| 实现方式 | 入队/入栈 | 出队/出栈 | 关键问题 |
+| ---- | ---- | ---- | ---- |
+| 数组（push/shift 模拟队列） | `push` 摊还 O(1) | **`shift` 是 O(n)**：元素整体前移、下标重排 | 数据量大时出队极慢，仅适合小数据 |
+| 数组 + 头尾指针（**环形队列**） | **O(1)** | **O(1)** | 容量固定；需处理取模回绕与空/满判定 |
+| 链表 | 头尾指针操作 **O(1)** | **O(1)** | 每个节点多存一个指针，内存开销大、无缓存局部性 |
+
+> ⚠️ 重点坑：JS 数组的 `push/pop` 操作尾部是摊还 O(1)，但 `shift/unshift` 操作头部是 **O(n)**（V8 内部会移动全部元素并重排索引，个别版本有特化优化但绝不能当作复杂度契约依赖）。所以「数组 push + shift 当队列用」在万级以上数据是性能陷阱，正确姿势是环形队列或链表队列。
+
+#### 栈与队列选型对照
+
+| 维度 | 栈 | 队列 |
+| ---- | ---- | ---- |
+| 顺序语义 | 后进先出，天然表达「嵌套、撤销、回溯」 | 先进先出，天然表达「排队、缓冲、调度」 |
+| 前端名场面 | 函数调用栈、括号匹配、路由回退、undo | 宏任务/微任务队列、事件处理、消息列表 |
+| 遍历树的角色 | DFS 深度优先 | BFS 层序遍历 |
+| 实现要点 | 一个栈顶指针 | 环形队列需两个指针 + 空满判定 |
+
+### 22.2.3 应用实践
+
+- **JavaScript 调用栈（Call Stack）**：每调用一个函数就压入一个栈帧，函数返回时弹出。递归没有收敛条件会无限压栈，直到超出引擎上限抛 `RangeError: Maximum call stack size exceeded`——这就是「栈溢出」，本质是栈空间 O(递归深度)。
+- **宏任务队列与微任务队列**：事件循环中，宏任务（setTimeout 回调、I/O）进入宏任务队列；每个宏任务执行完，引擎把微任务队列（Promise.then、MutationObserver）**整队清空**再渲染。它们都是 FIFO 队列，区别在调度时机（详见 [1.5 异步编程与事件循环](./01-javascript-advanced.md)）。
+- **浏览器历史与撤销重做**：后退栈 + 前进栈两个栈协同（从历史中间访问新页面时前进栈必须清空）；编辑器的 Undo/Redo 同理用两个栈保存命令（对照 [11.5 撤销重做](./11-patterns-architecture.md)）。
+- **词法/语法解析**：编译器用栈匹配括号、HTML 解析器用栈校验标签嵌套——前端构建工具每天都在跑栈算法。
+
+### 22.2.4 代码实现
+
+#### ① IStack 接口 + ArrayStack 泛型类
+
+```typescript
+/** 栈的抽象接口：只允许在栈顶操作，LIFO */
+interface IStack<T> {
+  push(element: T): void;
+  pop(): T | undefined;
+  peek(): T | undefined;
+  isEmpty(): boolean;
+  readonly size: number;
+}
+
+/** 基于数组的栈：push/pop 走数组尾部，摊还 O(1)，内存连续缓存友好 */
+class ArrayStack<T> implements IStack<T> {
+  // private 封装：栈的正确性依赖「只能动栈顶」，挡住外部按下标乱改
+  protected data: T[] = [];
+  push(element: T): void { this.data.push(element); }
+  pop(): T | undefined { return this.data.pop(); } // 空栈返回 undefined，交由调用方定语义
+  peek(): T | undefined { return this.data[this.data.length - 1]; }
+  isEmpty(): boolean { return this.data.length === 0; }
+  get size(): number { return this.data.length; }
+}
+```
+
+#### ② 应用：有效的括号（LeetCode 20）
+
+```typescript
+/** 左括号入栈；遇右括号时栈顶必须是配对的左括号。时间 O(n)、空间 O(n) */
+function isValidBrackets(s: string): boolean {
+  const stack = new ArrayStack<string>();
+  const pairs = new Map<string, string>([ [')', '('], [']', '['], ['}', '{'] ]); // 右括号 -> 左括号，O(1)
+  for (const ch of s) {
+    if (ch === '(' || ch === '[' || ch === '{') stack.push(ch);
+    // 右括号：栈不能为空，且栈顶必须配对
+    else if (pairs.has(ch) && (stack.isEmpty() || stack.pop() !== pairs.get(ch))) return false;
+  }
+  return stack.isEmpty(); // 扫完栈必须为空：每个左括号都被闭合
+}
+```
+
+#### ③ 环形队列要点（头尾指针 + 取模回绕）
+
+```typescript
+/**
+ * 环形队列：固定容量数组 + head/tail 双指针
+ * 要点：出入队都 O(1)，靠 (指针+1)%capacity 回绕不搬元素；浪费一个槽位区分空/满（也可维护 count）
+ */
+class CircularQueue<T> {
+  private data: (T | undefined)[];
+  private head = 0; private tail = 0; // 队头下标 / 队尾的下一个空位
+  constructor(private readonly capacity: number) { this.data = new Array<T | undefined>(capacity); }
+  enqueue(item: T): boolean {
+    if (this.isFull()) return false;
+    this.data[this.tail] = item;
+    this.tail = (this.tail + 1) % this.capacity; // 回绕
+    return true;
+  }
+  dequeue(): T | undefined {
+    if (this.isEmpty()) return undefined;
+    const item = this.data[this.head]!;
+    this.data[this.head] = undefined; // 释放引用，避免内存泄漏
+    this.head = (this.head + 1) % this.capacity;
+    return item;
+  }
+  isEmpty(): boolean { return this.head === this.tail; } // 两指针相遇 = 空
+  isFull(): boolean { return (this.tail + 1) % this.capacity === this.head; } // 再走一步碰头 = 满
+}
+```
+
+> 完整可运行示例：[data-structures/examples/22-01-stack.ts](./data-structures/examples/22-01-stack.ts)、[22-02-queue.ts](./data-structures/examples/22-02-queue.ts)（npx tsx 直跑）
+
+### 22.2.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：栈和队列的区别是什么？各自举一个前端中的真实例子。**
+
+- 回答框架：LIFO vs FIFO → 操作端点不同（栈单端、队列双端）→ 例子：函数调用栈 / 事件循环任务队列（或消息推送缓冲）。
+- 评分要点：语义准确 + 至少一个引擎级例子，而不是只说「数组的 push/pop」。
+- 常见误区：把栈/队列说成与数组并列的存储结构（它们是受限线性表）；举不出前端例子。
+- 加分项：补充双端队列、优先级队列两个变体；点出数组 `shift` 是 O(n)。
+
+#### L2 原理理解题
+
+**Q2：如何用两个栈实现一个队列？各操作复杂度是多少？**
+
+- 回答框架：入队栈 `inStack` 只负责进；出队时若出队栈 `outStack` 为空，把 `inStack` 全部倒进 `outStack`（顺序恰好翻转），再从 `outStack` 弹；非空直接弹。
+- 评分要点：写出「仅在 outStack 空时才倒」这个关键条件；每个元素最多进栈两次、出栈两次，**摊还 O(1)**，而不是单次最坏 O(n) 就草率下结论。
+- 常见误区：每次 dequeue 都来回倒（最坏 O(n) 且实现拧巴）；倒栈时弹栈顺序搞反。
+- 加分项：指出 JS 中「push+shift 队列」的 O(n) 陷阱，说明两栈方案在纯栈语义环境下（如不允许头部操作）的价值；再追问「两个队列实现栈」也能答（入空队列再把旧队列入过来）。
+
+```typescript
+class TwoStackQueue<T> {
+  private inStack: T[] = []; private outStack: T[] = []; // 入队栈 / 出队栈
+  enqueue(item: T): void { this.inStack.push(item); }
+  dequeue(): T | undefined { this.transferIfNeeded(); return this.outStack.pop(); } // out 空了才整体倒一次：摊还 O(1)
+  peek(): T | undefined { this.transferIfNeeded(); return this.outStack[this.outStack.length - 1]; }
+  get size(): number { return this.inStack.length + this.outStack.length; }
+  private transferIfNeeded(): void {
+    if (this.outStack.length === 0)
+      while (this.inStack.length > 0) this.outStack.push(this.inStack.pop()!);
+  }
+}
+```
+
+#### L3 综合应用题
+
+**Q3：滑动窗口最大值（LeetCode 239）：数组 nums 和窗口大小 k，返回每个窗口的最大值。**
+
+- 回答框架：
+  1. 暴力是每个窗口扫描 k 个数，O(nk)；
+  2. 维护一个**单调递减双端队列**，队列中存下标、对应值单调递减，队头永远是窗口最大值；
+  3. 新元素入队前，从队尾弹出所有比它小的（它们不可能再成为最大值）；
+  4. 队头下标滑出窗口（`<= i - k`）时从队头移除；
+  5. 从第 `k-1` 个元素起，每轮收集队头。
+- 评分要点：每个下标至多入队、出队各一次 → **O(n)**，额外空间 O(k)；必须讲清「存下标」才能判断过期。
+- 常见误区：用普通数组 `shift` 导致退化 O(n²) 还以为是 O(n)；队列里存值导致无法判断是否已出窗口；忘记窗口形成前（i < k-1）不产出。
+- 加分项：说明单调队列是「双端队列 + 单调性维护」的通用套路，可迁移到滑动窗口最小值、固定长度区间的最大差值等题；指出 JS 可用数组 + 头尾指针模拟 deque 避免 shift。
+
+```typescript
+function maxSlidingWindow(nums: number[], k: number): number[] {
+  const deque: number[] = []; // 存下标，对应值单调递减
+  const result: number[] = []; // 每个窗口的最大值
+  for (let i = 0; i < nums.length; i++) {
+    // 队尾所有比当前值小的都弹出：当前元素更新、更大，它们再无出头之日
+    while (deque.length > 0 && nums[i] >= nums[deque[deque.length - 1]]) deque.pop();
+    deque.push(i);
+    while (deque[0] <= i - k) deque.shift(); // 队头滑出窗口则移除
+    if (i >= k - 1) result.push(nums[deque[0]]); // 窗口形成，队头即最大值
+  }
+  return result;
+}
+```
+
+---
+
+## 22.3 链表：指针编织的结构
+
+### 22.3.1 概念解析
+
+**链表（Linked List）** 是用一组不要求连续的内存节点存放数据，每个节点由「数据域 + 指针域」组成，节点之间靠指针串接。它与数组的核心分歧是：**数组靠「位置（下标）」访问，链表靠「指针跳转」访问**。
+
+三种常见形态：
+
+| 形态 | 结构特征 | 能力 |
+| ---- | ---- | ---- |
+| 单向链表 | 每节点只有 `next`，尾节点指向 `null` | 只能向前走，找前驱要从头遍历 |
+| 双向链表 | 节点同时有 `next` 和 `prev`，头尾通常为 `null` | O(1) 找前驱，删除给定节点不用先找爸爸（LRU 的关键） |
+| 循环链表 | 尾节点的 `next` 指回头节点（双向循环则头 `prev` 指尾） | 适合环形资源调度（轮询、约瑟夫环） |
+
+### 22.3.2 技术对比：数组 vs 链表（五维）
+
+| 维度 | 数组（动态数组） | 链表 |
+| ---- | ---- | ---- |
+| 随机访问（按下标取第 k 个） | **O(1)**：地址 = 首地址 + k × 元素大小 | **O(n)**：必须从头走 k 步 |
+| 头部插入 / 删除 | **O(n)**：全部元素后移/前移（`unshift/shift`） | **O(1)**：改一两个指针 |
+| 中间插入 / 删除（已定位到节点） | **O(n)**：挪动后续元素 | **O(1)**：改指针即可；但「定位」本身平均 O(n) |
+| 内存局部性 | **连续存储**，预取友好，遍历快 | 节点散落各处，跳转易缓存未命中 |
+| 缓存友好度 / 额外开销 | 高；无额外指针开销，但可能有预分配空位 | 低；每节点多一个（双向两个）指针，约 20%~50% 头开销 |
+
+一句话选型：**多读少改、按下标访问 → 数组；频繁头尾增删、无需随机访问 → 链表**。JS 业务代码中手写链表远少于数组，但理解链表是理解 Fiber、LRU、原型链的前提。
+
+### 22.3.3 应用实践
+
+- **React Fiber：链表化的可中断遍历**。Fiber 节点之间通过 `child / sibling / return` 三个指针把虚拟 DOM 树组织成「深度优先 + 兄弟链表」的结构，渲染从递归改成**可中断的链表遍历**：每做完一个单元就可以挂起，让浏览器先响应高优先级任务，下一帧从断点继续。这是链表「随时可在任意节点暂停、恢复」特性的教科书应用（详见 [第四部分 Fiber 与响应式](./04-frameworks.md)）。
+- **LRU 缓存 = 哈希表 + 双向链表**。哈希表负责 O(1) 找到节点，双向链表负责 O(1) 把节点挪到「最近使用」端、O(1) 淘汰最久未用端。少了双向链表，删除最久节点要遍历；少了哈希表，找节点要遍历（22.4 有完整实现）。
+- **keep-alive 与原型链**：Vue `<keep-alive>` 缓存实例、超出 `max` 时按 LRU 思想淘汰；对象属性查找沿 `__proto__` 指针逐级上跳，本质是链表式遍历，这也是过深原型链有性能成本的原因。
+
+### 22.3.4 代码实现
+
+#### ① Node 节点与 LinkedList 泛型类核心
+
+```typescript
+/** 链表节点：数据域 value + 指针域 next，尾节点的 next 为 null */
+class Node<T> {
+  next: Node<T> | null = null;
+  constructor(public value: T) {}
+}
+
+class LinkedList<T> {
+  protected head: Node<T> | null = null;
+  protected count = 0;
+  get length(): number { return this.count; }
+
+  /** 尾部追加：O(n)（若维护 tail 指针可降到 O(1)） */
+  append(value: T): void {
+    const newNode = new Node(value);
+    if (!this.head) { this.head = newNode; return; } // 空链表：新节点直接做头
+    let current = this.head;
+    while (current.next) current = current.next; // 走到最后一个节点
+    current.next = newNode;
+    this.count++;
+  }
+
+  /** 按位置插入：O(n) 定位 + O(1) 改指针，核心是 prev/current 双指针 */
+  insert(position: number, value: T): boolean {
+    if (position < 0 || position > this.count) return false; // 越界保护
+    const newNode = new Node(value);
+    if (position === 0) {
+      newNode.next = this.head; // 先连后断，顺序反了会丢链
+      this.head = newNode;
+    } else {
+      const prev = this.getNodeAt(position - 1)!;
+      newNode.next = prev.next; // 新节点先接住后半段
+      prev.next = newNode;      // 前半段再接新节点
+    }
+    this.count++;
+    return true;
+  }
+
+  /** 按下标取节点：链表随机访问 O(n) 的体现 */
+  private getNodeAt(index: number): Node<T> | null {
+    let current = this.head;
+    for (let i = 0; i < index && current; i++) current = current.next;
+    return current;
+  }
+}
+```
+
+> 🚨 头号误区：**改指针前不保存 next 导致丢链**。一旦先执行 `current.next = xxx`，原后继的引用就永久丢失，后半条链从内存中「消失」。心法四步：**先存 next → 再改指针 → 前驱前移 → 当前前移**。
+
+#### ② 反转链表：迭代版与递归版（LeetCode 206）
+
+```typescript
+/** 迭代（三指针）：O(n) 时间、O(1) 空间 */
+function reverseIterative<T>(head: Node<T> | null): Node<T> | null {
+  let prev: Node<T> | null = null, current: Node<T> | null = head;
+  while (current) {
+    const next: Node<T> | null = current.next; // ① 先存 next，防止丢链
+    current.next = prev; // ② 反向指
+    prev = current; current = next; // ③ 前驱前移 ④ 当前前移
+  }
+  return prev; // prev 即新头
+}
+
+/** 递归：O(n) 时间、O(n) 栈空间。相信子链已被反转好，只需掉头 head 与后继两个节点 */
+function reverseRecursive<T>(head: Node<T> | null): Node<T> | null {
+  if (head === null || head.next === null) return head; // 递归出口：空或单节点
+  const newHead = reverseRecursive(head.next); // 子链反转后的新头（原尾节点）
+  head.next.next = head; head.next = null; // 后继指回自己；自己当新尾必须置空，否则成环
+  return newHead;
+}
+```
+
+> 完整可运行示例：[data-structures/examples/22-03-linked-list.ts](./data-structures/examples/22-03-linked-list.ts)（npx tsx 直跑）
+
+### 22.3.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：如何判断单链表是否有环？**
+
+- 回答框架：哈希集合法（遍历过的节点存 Set，再次遇到即有环，O(n) 空间）→ **快慢指针法**（慢指针走 1 步、快指针走 2 步，有环必相遇，无环快指针先到 null），O(1) 空间。
+- 评分要点：能写出相遇条件 `slow === fast` 并解释为什么必然相遇（相对速度为 1，快指针在环里每轮缩短一格距离）；能答环入口的扩展问法（相遇后头与相遇点同速再相遇即入口）。
+- 常见误区：只记住「快慢相等就是环」却漏掉循环条件 `fast && fast.next`（导致快指针取 `next.next` 报错）；认为快指针走 3 步也行（可以但证明更复杂，2 步最稳）。
+- 加分项：对比 Set 法的时空取舍；说出求环长度（相遇后再走一圈计数）与中间节点（同手法，快指针到尾时慢指针正好在中点）。
+
+```typescript
+function hasCycle<T>(head: Node<T> | null): boolean {
+  let slow: Node<T> | null = head, fast: Node<T> | null = head;
+  while (fast && fast.next) {
+    slow = slow!.next;
+    fast = fast.next.next;
+    if (slow === fast) return true; // 环内追及
+  }
+  return false; // 快指针到达尾部，无环
+}
+```
+
+#### L2 原理理解题
+
+**Q2：手写反转链表（迭代 + 递归），并说明复杂度与边界。**
+
+- 回答框架：迭代三指针四步走（见 22.3.4，边写边念「存 next → 反指 → 双前移」）；递归版「相信子问题 + 掉头两个节点」。
+- 评分要点：边界三测——`null`、单节点、普通多节点；反转后原头 `next` 必须是 `null`（递归版尤其容易漏）；复杂度 O(n)/O(1) 与 O(n)/O(n) 说清。
+- 常见误区：不存 `next` 直接改指针丢链；递归版忘了把 `head.next = null`，结果尾部出现环。
+- 加分项：指出递归受调用栈深度限制，超长链表应改迭代（呼应 22.2 调用栈溢出）；能用栈辅助法作为第三种解法。
+
+#### L3 综合应用题
+
+**Q3：一趟扫描删除链表倒数第 N 个节点（LeetCode 19）。**
+
+- 回答框架：
+  1. 朴素两趟：先求长度 L，再删第 L-N 个；
+  2. 进阶一趟：**快指针先走 N 步**，再与慢指针（保持 N 个节点间距）同步走，快指针到尾时慢指针正好停在待删节点前驱；
+  3. 特殊情况：快指针先走 N 步后为 `null`，说明删的是头节点，直接返回 `head.next`（也可用虚拟头节点统一处理）。
+- 评分要点：一趟 O(n)、O(1) 空间；显式处理删头节点；删除操作仍是「先接后断」`slow.next = slow.next.next`。
+- 常见误区：用两趟扫描却声称一趟；快指针先走 `n+1`/`n-1` 步数搞错导致慢指针定位偏一位；不处理单节点链表删头的情况。
+- 加分项：主动提出虚拟头节点（dummy）统一分支，代码无 if；指出该题与「找链表中点」「判环」同属**快慢指针/双指针家族**，并能推广到删除有序链表重复项、K 个一组翻转。
+
+```typescript
+function removeNthFromEnd<T>(head: Node<T> | null, n: number): Node<T> | null {
+  if (!head) return null;
+  let fast: Node<T> | null = head, slow: Node<T> | null = head;
+  for (let i = 0; i < n; i++) fast = fast!.next; // 快指针先走 n 步
+  if (!fast) return head.next; // 特例：删除的是头节点
+  while (fast.next) { fast = fast.next; slow = slow!.next; } // 慢停在待删节点前驱
+  slow!.next = slow!.next!.next; // 跨过待删节点
+  return head;
+}
+```
+
+---
+
+## 22.4 哈希表：O(1) 的魔法
+
+### 22.4.1 概念解析
+
+**哈希表（Hash Table，也叫散列表）** 通过一个**哈希函数**把任意键映射成数组下标，从而把「查找」从树的 O(log n)、链表的 O(n) 直接拉到平均 **O(1)**。它是前端工程中出镜率最高的数据结构——JS 里的 `Object`、`Map`、`Set`、`WeakMap` 底层都是哈希思想。三个术语先对齐：**哈希化**是把大数字压缩到下标范围内的过程；**哈希函数**是「键 → 大整数 hashCode → 取模 → 下标」的整套映射；**哈希冲突**指不同键映射到同一下标，无法回避，只能解决。
+
+#### 多项式滚动哈希：h = h × 31 + code
+
+字符串不能直接取模，先按**霍纳法则（Horner's Rule）** 滚动累加出 hashCode，本质是「31 进制多项式」，无需 `Math.pow`：
+
+```typescript
+function hashFunc(key: string, max: number): number {
+  let hashCode = 0;
+  for (let i = 0; i < key.length; i++) {
+    hashCode = 31 * hashCode + key.charCodeAt(i); // 31 为底滚动累加
+  }
+  return hashCode % max; // 压缩到 [0, max) 下标范围
+}
+```
+
+为什么底数与容量都偏爱**质数**：① **底数 31** 是质数，乘积因子分布更均匀、冲突更少，且 31 可被 JIT 优化为 `(x << 5) - x`（乘 32 减自身），这是 Java String 长期选用 31 的工程原因；② **容量（模数）取质数**——若模数与 hashCode 步长有公因子，下标会集中在某几个桶，质数让取模分布更均匀（`hashFunc('abc', 8)` 与 `hashFunc('cba', 8)` 撞下标，换成质数 7 即分开）。
+
+### 22.4.2 技术对比
+
+#### 冲突解决：链地址法 vs 开放寻址法
+
+| 维度 | 链地址法（拉链法） | 开放寻址法（线性探测） |
+| ---- | ---- | ---- |
+| 做法 | 每个桶挂一条链（数组/链表），冲突元素追加到链上 | 冲突后按规则（+1/+2/二次函数/双哈希）找下一个空位 |
+| 存储 | 桶数组 + 链节点，有指针开销 | 只用一个数组，省内存、缓存友好 |
+| 装载因子 | 可 > 1（链可无限长） | 必须 < 1，越接近 1 探测越久 |
+| 删除 | 直接删链节点 | 删除需打「墓碑标记」，否则探测链断裂 |
+| 最坏查找 | O(n)（全部挤进一条桶） | O(n)（全表探测） |
+| 典型实现 | Java HashMap、本教程封装 | Python 早期 dict、ThreadLocalMap |
+
+#### 负载因子与扩缩容
+
+- **负载因子 loadFactor = 已存元素数 / 桶数量**。越大冲突越密集、O(1) 越退化。
+- 经典阈值：插入后 **> 0.75 触发扩容**（容量 ×2 后取最近质数，全部元素重新哈希）；删除后 **< 0.25 触发缩容**，避免空表占大数组。
+- **再哈希（rehash）**：容量变了，每个键的下标 `hashCode % newLength` 全部要重算，不能把桶整体搬过去。单次扩容 O(n)，但不常发生，摊还仍是 O(1)（与动态数组同理）。
+
+#### Object vs Map vs Set vs WeakMap
+
+| 维度 | `Object` | `Map` | `Set` | `WeakMap` |
+| ---- | ---- | ---- | ---- | ---- |
+| 键类型 | 字符串 / Symbol（**其他类型被 toString**） | **任意类型**（对象也能当键） | 值即键（去重集合） | **仅对象**，弱引用 |
+| 长度获取 | 手动数 `Object.keys`（含原型坑） | `size` 直接 O(1) | `size` | 无 `size` |
+| 遍历顺序 | 字符串键整数优先、顺序诡异 | **严格按插入顺序** | 按插入顺序 | 不可遍历 |
+| 原型污染 | 有风险（`constructor/toString`） | 无 | 无 | 无 |
+| 性能 | 小对象、静态形状被引擎深度优化 | 频繁增删的大规模键值对更稳 | 去重/判存在 O(1) | 同 Map 子集 |
+| GC 行为 | 强引用 | 强引用 | 强引用 | **键对象无其他引用时自动回收**，防内存泄漏 |
+| 典型用途 | 静态配置、JSON 数据 | 运行时缓存、id→实体索引 | 去重、白名单判存在 | DOM/对象关联私有数据、响应式依赖表 |
+
+选型口诀：**JSON/静态形状 → Object；运行时增删的任意键字典 → Map；只关心存在性 → Set；给对象挂「附属数据」又不想阻止回收 → WeakMap**。
+
+### 22.4.3 应用实践
+
+- **接口数据缓存**：以 id 为键建 `Map`，详情回显、合并列表都 O(1)；配合 TTL/容量上限就是一个业务缓存。
+- **词频统计 / 两数之和（LeetCode 1）**：词频一次扫描 `map.set(word, (map.get(word) ?? 0) + 1)` 即 O(n) 完成；两数之和边扫描边查「补数是否已见过」，把暴力 O(n²) 降到 O(n)，都是「空间换时间」的头号例题。
+- **LRU 缓存**：`Map` 的迭代顺序即插入顺序，JS 中可以极简实现最近最少淘汰（见代码）。
+- **响应式系统的依赖存储**：Vue 3 用 `WeakMap<目标对象, Map<键, Set<副作用>>>` 三层结构存依赖，对象被销毁时依赖表自动回收，无需手动解绑。
+
+> 🚨 头号误区：**把对象当 Object 的键**。`obj[{}] = 1` 实际执行 `obj['[object Object]'] = 1`，所有对象键全部撞成同一个字符串键。需要对象做键时必须用 `Map/WeakMap`。
+
+### 22.4.4 代码实现
+
+#### ① 链地址法 HashTable：put 与扩容
+
+```typescript
+class HashTable<T = unknown> {
+  // storage[index] 是一个桶，桶内是 [key, value] 元组数组（链地址法）
+  private storage: [string, T][][] = [];
+  private length = 7; private count = 0; // 桶数量（初始质数）/ 已存元素个数；比值即装载因子
+
+  /** 多项式滚动哈希：h = h * 31 + code，再对桶数取模 */
+  private hashFunc(key: string, max: number): number {
+    let hashCode = 0;
+    for (let i = 0; i < key.length; i++) hashCode = 31 * hashCode + key.charCodeAt(i);
+    return hashCode % max; // 霍纳法则滚动累加后取模
+  }
+
+  /** 插入 / 修改：同 key 已存在则覆盖，否则挂到桶链尾部 */
+  put(key: string, value: T): void {
+    const index = this.hashFunc(key, this.length);
+    let bucket = this.storage[index];
+    if (!bucket) { bucket = []; this.storage[index] = bucket; }
+    let isUpdate = false;
+    for (const tuple of bucket) {
+      if (tuple[0] === key) { tuple[1] = value; isUpdate = true; break; } // 命中同 key：更新
+    }
+    if (!isUpdate) { bucket.push([key, value]); this.count++; } // 新 key：挂链
+    if (this.count / this.length > 0.75) this.resize(this.nextPrime(this.length * 2)); // 超 0.75 扩容
+  }
+
+  /** 扩缩容：换桶数组后把旧元素逐个 put，完成 rehash */
+  private resize(newLength: number): void {
+    const oldStorage = this.storage;
+    this.storage = []; this.length = newLength; this.count = 0; // put 会重新计数
+    for (const bucket of oldStorage) if (bucket) for (const [k, v] of bucket) this.put(k, v);
+  }
+
+  /** 取 >= n 的最小质数作为新容量（×2 后取质数，分布更均匀） */
+  private nextPrime(n: number): number {
+    const isPrime = (x: number): boolean => {
+      if (x < 2) return false;
+      for (let i = 2; i * i <= x; i++) if (x % i === 0) return false;
+      return true;
+    };
+    let candidate = n;
+    while (!isPrime(candidate)) candidate++;
+    return candidate;
+  }
+}
+```
+
+#### ② Map 版 LRU 缓存（LeetCode 146）
+
+```typescript
+/**
+ * LRU：get / put 都要 O(1)。Map 键严格按插入顺序迭代：删了再 set
+ * 就刷新到最新端，keys().next().value 永远是最久未使用的键
+ */
+class LRUCache<K, V> {
+  private cache = new Map<K, V>();
+  constructor(private readonly capacity: number) {}
+
+  get(key: K): V | undefined {
+    if (!this.cache.has(key)) return undefined;
+    const value = this.cache.get(key)!;
+    this.cache.delete(key); this.cache.set(key, value); // 先删后插，提到「最近使用」端
+    return value;
+  }
+
+  put(key: K, value: V): void {
+    if (this.cache.has(key)) this.cache.delete(key); // 已存在：删旧值再重插以刷新顺序
+    else if (this.cache.size >= this.capacity) {
+      this.cache.delete(this.cache.keys().next().value as K); // 迭代序第一个 = 最久未用
+    }
+    this.cache.set(key, value);
+  }
+}
+```
+
+> 面试中若要求从零实现（不许用 Map 的顺序特性），标准答案是 **HashMap + 手写双向链表**：哈希表 O(1) 定位节点，双向链表 O(1) 摘除/头插，删除尾节点也不用遍历——这正是 22.3 双向链表价值的落点。
+
+> 完整可运行示例：[data-structures/examples/22-04-hash-table.ts](./data-structures/examples/22-04-hash-table.ts)（npx tsx 直跑）
+
+### 22.4.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：什么是哈希冲突？怎么解决？**
+
+- 回答框架：冲突成因（键空间无限、桶数量有限，鸽巢原理 + 取模碰撞）→ 两大流派：链地址法（桶挂链）与开放寻址（线性/二次探测找空位）→ 工程缓解：好哈希函数（质数、滚动多项式）+ 负载因子扩容。
+- 评分要点：明确「冲突不可避免只能化解」；能对比两种方案的删除难度与负载因子限制。
+- 常见误区：认为选个好哈希函数就能「消灭」冲突；把冲突和 bug 混为一谈。
+- 加分项：说出最坏情况 O(n)（所有键挤一个桶）与平均 O(1) 的区别；提 Java HashMap 链表过长转红黑树的工程演进。
+
+#### L2 原理理解题
+
+**Q2：Map 和 Object 怎么选？Map 为什么适合做缓存？**
+
+- 回答框架：键类型（Object 键会 toString，Map 支持任意键且无原型污染）→ size 与插入顺序 → 大规模频繁增删的性能稳定性 → 结论：静态 JSON 形状用 Object，运行时字典/缓存用 Map，对象附属数据用 WeakMap。
+- 评分要点：能举出对象键被 `toString` 的具体事故；提到 `size` O(1)、遍历顺序确定。
+- 常见误区：说「Map 一定比 Object 快」（小而静态的对象被隐藏类/Hidden Class 优化得很好）；不知道 WeakMap 的弱引用价值。
+- 加分项：讲出 WeakMap 防内存泄漏的 GC 语义（键对象失去引用即回收，适合给 DOM/组件挂私有数据）；说明 JSON 序列化只认 Object 是 Map 的落地限制。
+
+#### L3 综合应用题
+
+**Q3：设计并实现 LRU（最近最少使用）缓存，要求 get / put 都是 O(1)。**
+
+- 回答框架：① 拆需求：读要 O(1) → 哈希表；淘汰最旧与刷新最新要 O(1) → 双向链表（单向链表删节点找不到前驱）；② 结构：`Map<键, 双向链表节点>` + 带 dummy 头尾的双向链表，头部最新、尾部最旧；③ get：哈希表定位 → 摘下头插（refresh）；④ put：存在则改值并 refresh，不存在则头插并写映射，超容量先删尾并删映射；⑤ JS 简化：利用 Map 插入顺序（删后重 set 刷新、`keys().next().value` 淘汰）。
+- 评分要点：主动说出「为什么必须是**双向**链表」（O(1) 删除给定节点）与「为什么还要哈希表」（链表定位是 O(n)）；四个操作都 O(1)。
+- 常见误区：只用数组维护顺序（删除/刷新是 O(n)，不达标）；只用 Map 但更新时不重插导致淘汰顺序错误；删尾后忘了同步删哈希键造成悬挂引用。
+- 加分项：扩展到 LFU（按访问频次淘汰，需频次桶 + 双向链表）；线程安全/TTL 过期策略；联系 keep-alive、HTTP 缓存、Redis maxmemory-policy 的真实应用。
+
+---
+
+## 22.5 树与二叉搜索树：层级之美
+
+### 22.5.1 概念解析
+
+**树（Tree）** 是 n 个节点的有限层次集合：有且仅有一个**根（root）**，其余节点分成若干互不相交的子树。树是天然表达「包含、归属、层级」的结构——DOM、目录、菜单、路由都是树。
+
+#### 术语表
+
+| 术语 | 含义 |
+| ---- | ---- |
+| 根节点 / 叶子节点 | 没有父节点的节点 / 没有子节点的节点 |
+| 度（degree） | 节点的子节点个数；树的度取最大值 |
+| 深度（depth） | 根到该节点的**边数**（根深度为 0，也有教材约定从 1 起，面试先对齐约定） |
+| 高度（height） | 该节点到最远叶子的边数；树高 = 根的高度 |
+| 层（level） | 深度 + 1，根在第 1 层 |
+| 二叉树 | 每个节点最多两个孩子（左、右有序，不可互换） |
+| 满二叉树 | 每层节点数都达到最大值 |
+| 完全二叉树 | 除最后一层外全满，最后一层节点从左到右连续（堆的形状） |
+| 二叉搜索树 BST | 左子树所有值 < 根 < 右子树所有值，左右子树也都是 BST |
+
+#### 二叉搜索树（BST）：左 < 根 < 右
+
+BST 在二叉树上加一条约束：**任一节点左子树中所有值都小于它，右子树中所有值都大于它**。中序遍历一棵 BST 得到的恰好是**升序序列**——这是 BST 一切魔法的来源：查找像二分查找一样每次砍一半，平均 O(log n)。
+
+### 22.5.2 技术对比
+
+#### BST 三大操作与删除三情形
+
+- **查找 search**：目标小于当前节点走左子树，大于走右子树，相等命中，走到 null 不存在。平均 O(log n)。
+- **插入 insert**：按同样规则找到第一个空位挂上，天然成为叶子。平均 O(log n)。
+- **删除 remove**，分三种情形：
+  1. **删叶子**：直接摘掉（父节点对应指针置 null）；
+  2. **删只有一个孩子的节点**：让孩子「上位」替换自己；
+  3. **删有两个孩子的节点**：找**中序后继**（右子树中最小的节点）或中序前驱（左子树最大）顶替被删节点的值，再把那个后继从原位置删掉——后继最多只有一个右孩子，递归落入情形 1/2，保证删除后仍是 BST。
+
+#### 四种遍历
+
+| 遍历 | 顺序 | 实现 | 性质 / 用途 |
+| ---- | ---- | ---- | ---- |
+| 前序 Pre-order | **根 → 左 → 右** | 递归或栈 | 复制树、序列化、前缀表达式 |
+| 中序 In-order | **左 → 根 → 右** | 递归或栈 | **BST 上得到升序序列** |
+| 后序 Post-order | **左 → 右 → 根** | 递归或栈 | 删除/释放整棵树、统计目录大小（先孩子后自己） |
+| 层序 Level-order | 逐层从左到右 | **队列**（BFS） | 按层打印、找最近层关系 |
+
+记忆口诀：前中后指的都是**根被访问的位置**，左右顺序永远先左后右。
+
+#### 退化、AVL 与红黑树
+
+- **退化问题**：依次插入 1,2,3,4,5 时 BST 退化成一条链表，查找退化回 O(n)——BST 的 O(log n) 只是「平衡时的平均」，没有最坏保证。
+- **AVL 树**：在每个节点维护**平衡因子 = 左子树高度 − 右子树高度**，插入/删除后若因子绝对值 > 1 就旋转再平衡，严格保证任意节点因子 ∈ {-1, 0, 1}。四种失衡与旋转：
+
+| 失衡类型（节点都在） | 形态 | 调整 |
+| ---- | ---- | ---- |
+| LL | 左子树的**左**侧过重 | 对失衡节点**右旋**一次 |
+| RR | 右子树的**右**侧过重 | 对失衡节点**左旋**一次 |
+| LR | 左子树的**右**侧过重 | 先对左孩子**左旋**、再对自己**右旋** |
+| RL | 右子树的**左**侧过重 | 先对右孩子**右旋**、再对自己**左旋** |
+
+- **红黑树**：AVL 平衡得最严格，但每次删除可能引发多次旋转；红黑树改用「红/黑染色 + 五条性质」只做**近似平衡**（最长路径不超过最短路径 2 倍），插入删除至多 3 次旋转且颜色调整便宜，增删频繁的工程场景更常用（Java HashMap/TreeMap、Linux CFS 调度器）。前端面试对红黑树只要求理解「用染色换更少旋转的近似平衡」，不要求手撕。
+
+#### 数组 / BST / AVL / 哈希表复杂度对照
+
+| 结构 | 按值查找 | 按键/下标 | 插入 | 删除 | 有序性 |
+| ---- | ---- | ---- | ---- | ---- | ---- |
+| 无序数组 | O(n) | 下标 O(1) | 尾部摊还 O(1)，头部 O(n) | O(n) 查找 | 无序 |
+| BST（平衡时平均） | O(log n) | — | O(log n) | O(log n) | **中序有序** |
+| BST（退化最坏） | **O(n)** | — | O(n) | O(n) | 链式 |
+| AVL | **严格 O(log n)** | — | O(log n) | O(log n) | 中序有序 |
+| 哈希表 | 平均 **O(1)** / 最坏 O(n) | — | 平均 O(1) | 平均 O(1) | 无序 |
+
+### 22.5.3 应用实践
+
+- **DOM 树与虚拟 DOM 树**：浏览器把 HTML 解析成多叉 DOM 树；框架的虚拟 DOM 是它的轻量镜像，diff 只做同层比较（树高相关），属性/事件挂在节点上。
+- **级联选择器与树形控件**：省市区、组织架构选择器的数据就是森林，搜索高亮依赖遍历，懒加载依赖按节点挂子树（更多树数据处理套路见 [19.5 树结构数据处理](./19-business-snippets.md#_19-5-树结构数据处理)）。
+- **路由树与菜单树**：嵌套路由 `/user/:id/profile` 是路径前缀树思想；菜单权限过滤是典型的「后序剪枝」——孩子全没权限时父菜单也要摘掉。
+- **AST 与源码映射**：Babel/SWC 把源码解析成语法树，插件在前序/后序访问节点时改写代码；source map、JSON Schema 也都是树。前端很少手写 BST 却处处是树——业务数据的层级天然是树，理解遍历顺序与递归/迭代转换，比背旋转代码更常用。
+
+### 22.5.4 代码实现
+
+#### ① BST：节点、插入与遍历
+
+```typescript
+class TreeNode<T> {
+  left: TreeNode<T> | null = null; right: TreeNode<T> | null = null; // 左右孩子
+  constructor(public value: T) {}
+}
+
+/** 比较器：返回负数 a 在前、0 相等、正数 b 在前；默认支持 number/string */
+type Comparator<T> = (a: T, b: T) => number;
+const defaultCompare = ((a: number | string, b: number | string): number =>
+  a < b ? -1 : a > b ? 1 : 0) as unknown as Comparator<never>;
+
+class BSTree<T> {
+  protected root: TreeNode<T> | null = null;
+  // 传入比较器后，BST 也能存放 Product 等对象（按价格 / id 排序）
+  constructor(private readonly compare: Comparator<T> = defaultCompare as Comparator<T>) {}
+
+  insert(value: T): void {
+    const newNode = new TreeNode(value);
+    if (!this.root) { this.root = newNode; return; } // 空树：新节点即根
+    this.insertNode(this.root, newNode);
+  }
+
+  /** 递归定位空位：小了往左、大了往右，BST 规则的直接体现 */
+  private insertNode(node: TreeNode<T>, newNode: TreeNode<T>): void {
+    const goLeft = this.compare(newNode.value, node.value) < 0;
+    if (goLeft && node.left === null) node.left = newNode;
+    else if (!goLeft && node.right === null) node.right = newNode;
+    else this.insertNode((goLeft ? node.left : node.right)!, newNode);
+  }
+
+  /** 通用 DFS：order 决定根被访问的位置 —— pre 前序 / in 中序 / post 后序 */
+  private dfs(node: TreeNode<T> | null, order: 'pre' | 'in' | 'post', visit: (v: T) => void): void {
+    if (!node) return;
+    if (order === 'pre') visit(node.value);
+    this.dfs(node.left, order, visit);
+    if (order === 'in') visit(node.value); // 中序位置：BST 输出升序
+    this.dfs(node.right, order, visit);
+    if (order === 'post') visit(node.value);
+  }
+  preOrderTraverse(visit: (v: T) => void): void { this.dfs(this.root, 'pre', visit); }
+  inOrderTraverse(visit: (v: T) => void): void { this.dfs(this.root, 'in', visit); }
+  postOrderTraverse(visit: (v: T) => void): void { this.dfs(this.root, 'post', visit); }
+
+  /** 层序遍历：队列驱动的 BFS */
+  levelOrderTraverse(visit: (v: T) => void): void {
+    if (!this.root) return;
+    const queue: TreeNode<T>[] = [this.root];
+    while (queue.length) {
+      const current = queue.shift()!;
+      visit(current.value);
+      if (current.left) queue.push(current.left); if (current.right) queue.push(current.right); // 左右孩子依次入队
+    }
+  }
+}
+```
+
+删除双子节点时，找中序后继顶替：
+
+```typescript
+/** 中序后继：右子树里一路向左的最小值节点（它至多带一个右孩子） */
+function inorderSuccessor<T>(node: TreeNode<T>): TreeNode<T> {
+  let current = node.right!;
+  while (current.left) current = current.left;
+  return current;
+}
+```
+
+#### ② AVL：平衡因子与左/右旋
+
+```typescript
+class AVLTreeNode<T> {
+  left: AVLTreeNode<T> | null = null; right: AVLTreeNode<T> | null = null; // 左右孩子
+  constructor(public value: T) {}
+  /** 子树高度：空树高度 0 */
+  get height(): number { return Math.max(this.left?.height ?? 0, this.right?.height ?? 0) + 1; }
+  /** 平衡因子：左高 - 右高，绝对值 > 1 即失衡 */
+  get balanceFactor(): number { return (this.left?.height ?? 0) - (this.right?.height ?? 0); }
+}
+
+/** 右旋（治 LL）：x 上位成新根，x 的右子树 T2「过继」给 y 当左子树 */
+function rotateRight<T>(y: AVLTreeNode<T>): AVLTreeNode<T> {
+  const x = y.left!;
+  const t2 = x.right;
+  x.right = y; y.left = t2;
+  return x; // 返回新根，供父节点接回
+}
+
+/** 左旋（治 RR）：与右旋镜像 */
+function rotateLeft<T>(x: AVLTreeNode<T>): AVLTreeNode<T> {
+  const y = x.right!;
+  const t2 = y.left;
+  y.left = x; x.right = t2;
+  return y;
+}
+
+/** 插入回溯时再平衡：按因子决定单旋或双旋 */
+function rebalance<T>(node: AVLTreeNode<T>): AVLTreeNode<T> {
+  const factor = node.balanceFactor;
+  if (factor > 1) {
+    if (node.left!.balanceFactor < 0) node.left = rotateLeft(node.left!); // LR：先左旋孩子
+    return rotateRight(node); // LL：右旋自己
+  }
+  if (factor < -1) {
+    if (node.right!.balanceFactor > 0) node.right = rotateRight(node.right!); // RL：先右旋孩子
+    return rotateLeft(node); // RR：左旋自己
+  }
+  return node; // 因子在 -1/0/1，无需调整
+}
+```
+
+> 完整可运行示例：[data-structures/examples/22-05-bst.ts](./data-structures/examples/22-05-bst.ts)、[22-06-avl.ts](./data-structures/examples/22-06-avl.ts)（npx tsx 直跑）
+
+### 22.5.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：说一下二叉树前序 / 中序 / 后序 / 层序遍历的顺序。BST 上中序遍历有什么特殊性？**
+
+- 回答框架：四种顺序（根左右 / 左根右 / 左右根 / 逐层 BFS）+ 各自数据结构（递归/栈 vs 队列）→ 中序遍历 BST = 升序序列。
+- 评分要点：「前中后是根的位置，左右永不变」；层序必须用队列而非递归 DFS。
+- 常见误区：把层序说成「前序」；认为后序是「根右左」；不知道中序有序是 BST 专属性质（普通二叉树中序并不有序）。
+- 加分项：说出用途对应（前序序列化、后序删除、层序按层操作）；能写任一遍历的迭代版本（显式栈），说明递归本质是调用栈。
+
+#### L2 原理理解题
+
+**Q2：BST 如何删除一个节点？重点讲有两个孩子的情况。**
+
+- 回答框架：先查节点与父节点 → 三情形分支：叶子直接摘、单孩子孙子上位、**双子节点找中序后继（右子树最小值）或前驱（左子树最大值）顶替值，再删除那个后继** → 说明后继最多一个右孩子，删除落入前两种情形。
+- 评分要点：后继/前驱的选择与定位路径（一路向左/向右）；顶替的是「值」并删除原后继节点；删除后仍满足 BST 性质。
+- 常见误区：直接把双子节点置空导致两棵子树失联；拿「右孩子」直接顶替（右孩子可能还有左子树，破坏性质）；忘了递归删除后继时的父子指针接回。
+- 加分项：指出递归实现要返回新子树根以接回指针；复杂度 O(h)（h 为树高）；补充删除同样可能导致 AVL/红黑树需要再平衡。
+
+#### L3 综合应用题
+
+**Q3：依次给出一组插入序列，AVL 树在什么情况下需要旋转？如何判断用哪种旋转？**
+
+- 回答框架：① 插入后沿父指针向上回溯，重算各节点**平衡因子**；② 找到第一个失衡节点 z（因子 > 1 或 < -1）；③ 看 z 的「更高孩子」与「更高孩子的更高孩子」的方向组合：LL 右旋、RR 左旋、LR 先左旋孩子再右旋自己、RL 先右旋孩子再左旋自己；④ 旋转只动局部三个节点（含过继子树 T2），之后更新高度。
+- 评分要点：会用「两个方向」判型（失衡方向看 z，插入落点看孩子）；能画出右旋三步骤并正确处理 T2 过继；知道 LR/RL 必须双旋。
+- 常见误区：只看插入节点本身而不回溯找「第一个失衡的祖先」；LR 只做一次右旋（旋完仍失衡）；旋转后忘了更新高度导致后续因子计算错误。
+- 加分项：对比红黑树（近似平衡、染色降低旋转频率，增删多更划算）与 AVL（查找密集型更优）；指出 JS 虽不内置平衡树，但理解旋转有助于理解 HashMap 链表树化、数据库索引（B+ 树）等工程设计。
+---
+
+## 22.6 堆与优先级队列
+
+### 22.6.1 概念解析
+
+**堆（Heap）是一棵用数组存储的完全二叉树**，它不靠左右子节点指针维护关系，而是直接用下标换算父子位置。它同时满足两条性质：
+
+- **结构性质**：除最后一层外全满，最后一层节点靠左排列。正因为「无空洞」，层序遍历的结果才能严丝合缝地铺进一个数组；
+- **堆序性质**：大顶堆每个父节点都 **≥** 两个子节点（堆顶是全局最大值）；小顶堆每个父节点都 **≤** 两个子节点（堆顶是全局最小值）。
+
+下标换算公式（0 基下标，务必背熟）：
+
+| 关系 | 公式 | 说明 |
+| ---- | ---- | ---- |
+| 父节点 | `parent(i) = (i - 1) >> 1` | 右移一位等价于 `Math.floor((i - 1) / 2)` |
+| 左孩子 | `left(i) = 2 * i + 1` | |
+| 右孩子 | `right(i) = 2 * i + 2` | 恒等于左孩子 + 1 |
+| 最后一个非叶子节点 | `(n - 2) >> 1` | 即最后一个节点的父节点，heapify 的起点 |
+
+一棵大顶堆 `[100, 19, 36, 17, 3, 25]` 的树形与数组对应关系：
+
+```text
+        100          ← 数组下标 0（堆顶）
+       /   \
+     19      36      ← 下标 1、2
+    /  \    /
+  17    3  25       ← 下标 3、4、5（最后一层靠左，无空洞）
+```
+
+**四个核心操作**：
+
+1. `insert(value)`：先把元素 `push` 到数组末尾（保证结构性质），再执行 **siftUp（上浮）**——不断与父节点比较，违反堆序就交换，直到根或堆序成立。O(log n)；
+2. `extract()`：取出堆顶后，把**末尾元素补到堆顶**（而不是直接删头，否则 O(n) 搬移），再执行 **siftDown（下沉）**——与「更该在上面的那个孩子」比较交换，直到叶子或堆序成立。O(log n)；
+3. `peek()`：直接返回 `data[0]`。O(1)，这是堆存在的全部意义；
+4. `heapify(arr)`（批量建堆）：把无序数组拷入，从最后一个非叶子节点 `(n-2)>>1` 开始**倒序逐个 siftDown**。整体 **O(n)**。
+
+> 为什么 heapify 是 O(n) 而不是直觉上的 O(n log n)？因为占节点总数近一半的叶子没有孩子、根本不需要下沉；越靠下的节点数量越多、需要下沉的距离反而越短。按层求和 `Σ (该层节点数 × 下沉高度)` 是一个收敛级数，结果小于 2n，即 O(n)。而逐个 `insert` 建堆是 O(n log n)——已知全部元素时，永远首选 heapify。
+
+**最重要的认知纠偏**：堆只保证「堆顶是最值」这条**偏序**，不保证全局有序。数组 `[100, 19, 36, 17, 3, 25]` 并不是降序序列，第二层的 36 就比 19 大。想要全局有序，只能不断 `extract`（即堆排序）。
+
+### 22.6.2 技术对比
+
+「只要最值、不要全序」的需求下，堆、排序数组、二叉搜索树三种载体的对比：
+
+| 维度 | 二叉堆（数组） | 排序数组 | BST / 平衡 BST（AVL、红黑树） |
+| ---- | ---- | ---- | ---- |
+| 取最值 | **O(1)** 看堆顶 | O(1) 看端点 | O(log n) 一路走到最左/右下 |
+| 插入 | **O(log n)** | O(n) 找位置 + 搬移 | O(log n) |
+| 删除最值 | **O(log n)** | O(n) 头删搬移（尾删最值则 O(1)） | O(log n) |
+| 查任意值 | O(n)，不支持有序查找 | **O(log n)** 二分 | O(log n) |
+| 取 TopK | O(n log k)，K 容量堆 | O(n log n) 全排序 | 中序截断，仍需全部插入 O(n log n) |
+| 是否全局有序 | 否，仅堆序 | 是 | 中序遍历有序 |
+| 内存形态 | **数组紧凑、缓存友好** | 数组紧凑 | 每节点对象 + 左右指针，开销大 |
+| 典型场景 | 优先级队列、定时器、TopK | 静态数据、读多写少 | 范围查询、需要有序遍历 |
+
+**选型结论**：只反复消费「最优先的那一个」→ 堆；数据基本不变、偶尔整体排一次 → 排序数组；还要按区间查、按序遍历 → 平衡 BST。前端工程里堆的出场率远高于手写平衡树——需要有序 Map 时直接用语言设施或第三方库，而堆没有语言内建，必须会手写。
+
+### 22.6.3 应用实践
+
+1. **任务调度**。React Scheduler 内部就是一个小顶堆（`SchedulerMinHeap`），按任务的过期时间排序，每次取出**最早该执行**的任务配合 MessageChannel 分片让出主线程。自己实现请求并发池、空闲任务队列时同理：优先级高的先出队，插入与取出都要 O(log n)。
+2. **TopK 热榜**。热搜前 10、直播间贡献榜前 50、日志里报错最多的前 K 类——数据量 n 极大而 K 很小，维护一个 **K 容量小顶堆**，流式扫描一遍即可，不必把上亿条数据全排序。
+3. **定时器最小堆**。事件循环维护定时器时，用最小堆按 `到期时间戳` 组织所有 timer：堆顶就是最近要触发的定时器，epoll/消息循环只需「睡到堆顶到期」；新增/取消定时器 O(log n)，触发后 extract 再看下一个。
+4. **合并 K 个有序列表**（LeetCode 23）。先把 K 个链表的头节点放进小顶堆，每弹出一个最小节点就把它的后继补入堆，总复杂度 O(n log k)。多分片 SQL 结果合并、多日志文件按时间归并、以及 Dijkstra 最短路（每次取距离最小的未访问节点）都是同一套路。
+
+### 22.6.4 代码实现
+
+#### ① MaxHeap 核心实现
+
+```ts
+/** 大顶堆：用数组表示的完全二叉树，堆顶始终是最大值 */
+class MaxHeap {
+  protected data: number[] = [];
+
+  /** 插入：尾插保结构，上浮修堆序。O(log n) */
+  insert(value: number): void {
+    this.data.push(value);
+    this.siftUp(this.data.length - 1);
+  }
+
+  /** 上浮：违反堆序就与父节点交换，一路向上 */
+  private siftUp(i: number): void {
+    while (i > 0) {
+      const parent = (i - 1) >> 1; // 父节点下标
+      if (this.data[parent] >= this.data[i]) break; // 父已更大，堆序成立
+      [this.data[parent], this.data[i]] = [this.data[i], this.data[parent]];
+      i = parent;
+    }
+  }
+
+  /** 弹出堆顶：末位补位 + 下沉。O(log n) */
+  extract(): number | undefined {
+    if (this.data.length === 0) return undefined;
+    const top = this.data[0];
+    const last = this.data.pop()!; // 末尾元素取出（堆大小已 -1）
+    if (this.data.length > 0) {
+      this.data[0] = last; // 末位补到堆顶，避免头删的 O(n) 搬移
+      this.siftDown(0);
+    }
+    return top;
+  }
+
+  /** 下沉：与两个孩子里更大的那个交换，一路向下 */
+  private siftDown(i: number): void {
+    const n = this.data.length;
+    while (true) {
+      const left = 2 * i + 1;
+      const right = 2 * i + 2;
+      let largest = i;
+      if (left < n && this.data[left] > this.data[largest]) largest = left;
+      if (right < n && this.data[right] > this.data[largest]) largest = right;
+      if (largest === i) break; // 父已是三者最大，下沉结束
+      [this.data[i], this.data[largest]] = [this.data[largest], this.data[i]];
+      i = largest;
+    }
+  }
+
+  peek(): number | undefined {
+    return this.data[0]; // 堆顶 O(1)
+  }
+
+  get size(): number {
+    return this.data.length;
+  }
+
+  /** 原地批量建堆 heapify：倒序下沉，整体 O(n) */
+  static from(arr: number[]): MaxHeap {
+    const heap = new MaxHeap();
+    heap.data = [...arr];
+    for (let i = (heap.data.length - 2) >> 1; i >= 0; i--) {
+      heap.siftDown(i); // 从最后一个非叶子节点向前
+    }
+    return heap;
+  }
+}
+```
+
+#### ② 小顶堆与 TopK：同一套骨架，比较方向取反
+
+```ts
+/**
+ * 小顶堆：siftUp / siftDown 骨架与大顶堆完全一致，仅比较方向取反（≥ 变 ≤）。
+ * 工程中通常抽成带 compare 比较器的通用 Heap<T>，大/小顶堆只差一个比较函数。
+ */
+class MinHeap {
+  private data: number[] = [];
+  get size(): number {
+    return this.data.length;
+  }
+  peek(): number | undefined {
+    return this.data[0];
+  }
+
+  insert(value: number): void {
+    this.data.push(value);
+    this.siftUp(this.data.length - 1); // 尾插后上浮
+  }
+
+  extract(): number | undefined {
+    if (this.data.length === 0) return undefined;
+    const top = this.data[0];
+    const last = this.data.pop()!;
+    if (this.data.length > 0) {
+      this.data[0] = last;
+      this.siftDown(0); // 末位补顶后下沉
+    }
+    return top;
+  }
+
+  private siftUp(i: number): void {
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (this.data[parent] <= this.data[i]) break; // 父更小，堆序成立
+      [this.data[parent], this.data[i]] = [this.data[i], this.data[parent]];
+      i = parent;
+    }
+  }
+
+  private siftDown(i: number): void {
+    const n = this.data.length;
+    while (true) {
+      const l = 2 * i + 1;
+      const r = l + 1;
+      let min = i;
+      if (l < n && this.data[l] < this.data[min]) min = l;
+      if (r < n && this.data[r] < this.data[min]) min = r;
+      if (min === i) break;
+      [this.data[i], this.data[min]] = [this.data[min], this.data[i]];
+      i = min;
+    }
+  }
+}
+
+/**
+ * TopK：返回数组中最大的 K 个数（升序）。维护容量 K 的小顶堆，
+ * 堆顶 =「当前 TopK 里最小的元素」，即淘汰门槛，比它大才有资格进堆。
+ * O(n log k) / O(k)，流式数据也能处理，不必持有全量 n。
+ */
+function topK(nums: number[], k: number): number[] {
+  if (k <= 0) return [];
+  const heap = new MinHeap();
+  for (const num of nums) {
+    if (heap.size < k) {
+      heap.insert(num); // 堆没满，直接进
+    } else if (num > heap.peek()!) {
+      heap.extract(); // 淘汰当前第 K 大
+      heap.insert(num);
+    }
+  }
+  const result: number[] = [];
+  while (heap.size > 0) result.push(heap.extract()!); // 依次弹出即升序
+  return result;
+}
+
+topK([3, 2, 1, 5, 6, 4], 3); // [4, 5, 6]
+```
+
+### 22.6.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：说一下堆的两条性质，父节点和左右孩子的下标怎么算？**
+
+- 回答框架：结构性质（完全二叉树、数组无空洞）→ 堆序性质（大顶堆父 ≥ 子 / 小顶堆父 ≤ 子）→ 手写三个公式 `(i-1)>>1`、`2i+1`、`2i+2`。
+- 评分要点：能立刻写出下标公式；明确说「完全二叉树」而不是「二叉树」。
+- 常见误区：把堆说成排好序的数组；只记树形记不住下标换算。
+- 加分项：补一句 heapify 从 `(n-2)>>1` 起步。
+
+**Q2：堆的插入和弹出为什么是 O(log n)？**
+
+- 要点：完全二叉树高 ⌊log n⌋，上浮/下沉每层只比较交换一次；弹出是「末位补堆顶 + 下沉」，不是数组头删。
+- 常见误区：以为 extract 直接删 `data[0]`——那会触发 O(n) 搬移且破坏结构性质。
+
+#### L2 原理理解题
+
+**Q3：求 TopK 为什么用小顶堆？用大顶堆不行吗？**
+
+- 回答框架：我们要随时淘汰「当前 TopK 中最弱的元素」→ 这个值必须 O(1) 拿到 → 容量 K 的小顶堆堆顶正好是它 → 每个元素最多一次入堆，O(n log k)。
+- 评分要点：说清堆顶扮演「门槛」；对比全排序 O(n log n) 与空间 O(n)。
+- 常见误区：求最大的 K 个就想当然用大顶堆——大顶堆堆顶是最大值，无法快速知道「第 K 大」是多少，要么全量入堆 O(n log n)，要么卡住。
+- 加分项：指出小顶堆方案天然支持**数据流/无限流**（内存里只留 K 个），这是热榜类系统的真实形态。
+
+**Q4：heapify 为什么是 O(n)？**
+
+- 要点：叶子占近一半节点且零下沉；越下层节点越多、下沉高度越小；按层求和收敛到 < 2n。对比逐个 insert 的 O(n log n)。
+
+#### L3 综合应用题
+
+**Q5：数据流中的中位数（LeetCode 295），持续加数、随时返回中位数，怎么设计？**
+
+- 回答框架：一个堆只能看一个极值，中位数需要同时盯住「中间靠左」和「中间靠右」两个值 → **双堆**：
+  - `low`：大顶堆，存较小的一半，堆顶是这一半的最大值；
+  - `high`：小顶堆，存较大的一半，堆顶是这一半的最小值；
+  - 维持 `low.size === high.size` 或 `low.size === high.size + 1`；
+  - 偶数个时中位数为两堆顶均值，奇数个时为 `low` 堆顶。
+- 插入规则（关键采分点）：先与 `low` 堆顶比较决定进哪个堆，再按 size 差搬运堆顶再平衡，每次 insert O(log n)，查中位数 O(1)。
+
+```ts
+class MedianFinder {
+  private low = new MaxHeap(); // 较小的一半（大顶堆）
+  private high = new MinHeap(); // 较大的一半（小顶堆）
+
+  addNum(num: number): void {
+    if (this.low.size === 0 || num <= this.low.peek()!) {
+      this.low.insert(num);
+    } else {
+      this.high.insert(num);
+    }
+    // 再平衡：low 最多比 high 多 1 个
+    if (this.low.size > this.high.size + 1) {
+      this.high.insert(this.low.extract()!);
+    }
+    if (this.high.size > this.low.size) {
+      this.low.insert(this.high.extract()!);
+    }
+  }
+  findMedian(): number {
+    if (this.low.size === this.high.size) {
+      return (this.low.peek()! + this.high.peek()!) / 2; // 偶数个：两堆顶均值
+    }
+    return this.low.peek()!; // 奇数个：中位数在 low 堆顶
+  }
+}
+```
+
+- 常见误区：试图用一个排序数组维护，插入 O(n) 在数据流场景崩盘；两堆不做再平衡导致取错值。
+- 加分项：提「堆顶懒删除」应对带删除的数据流（先删队列记失效值，取堆顶时弹出失效项）；推广到「数据流第 K 大/滑动窗口中位数」。
+
+> 完整可运行示例：[data-structures/examples/22-07-heap.ts](./data-structures/examples/22-07-heap.ts)（npx tsx 直跑）
+
+---
+
+## 22.7 图：依赖与关系的世界
+
+### 22.7.1 概念解析
+
+线性表是一对一、树是一对多，而**图（Graph）是多对多**——它描述任意两个实体之间的关系。前端工程里「模块 A 依赖模块 B」「路由从页面 C 能跳到页面 D」「用户 E 关注了用户 F」，都是图。
+
+| 术语 | 含义 |
+| ---- | ---- |
+| 顶点（Vertex） | 图中的实体，如模块、页面、用户 |
+| 边（Edge） | 两个顶点间的关系 |
+| 有向图 / 无向图 | 边是否有方向：依赖、关注是有向的；好友关系是无向的 |
+| 权重（Weight） | 边上的代价，如距离、耗时、调用频次；不带权重叫无权图 |
+| 度（Degree） | 与顶点相连的边数；有向图细分为**入度**（指向它的边）与**出度**（它指出去的边） |
+| 路径 / 环 | 顶点序列；起点终点重合的路径叫环，含环的依赖图就是「循环依赖」 |
+| 连通分量 | 无向图中彼此可达的顶点集合；有向图对应强连通分量 |
+| DAG | 有向无环图——拓扑排序存在的前提，也是健康依赖图应有的形态 |
+
+图的两大遍历是所有图算法的地基：
+
+- **BFS（广度优先搜索）**：用**队列**，从起点开始一圈一圈向外扩散，先访问距离 1 的所有顶点，再访问距离 2 的。无权图的最短路径、层级关系、「N 度好友」必用 BFS；
+- **DFS（深度优先搜索）**：用**栈**（显式栈或递归调用栈），一条路走到黑再回溯。适合路径搜索、拓扑排序、找环、连通性判断。
+
+两者都要用 `Set` 记录已访问顶点——图可以有环，不做标记会死循环。
+
+### 22.7.2 技术对比
+
+图有两种经典存储方式：
+
+| 维度 | 邻接矩阵（V×V 二维数组） | 邻接表（`Map<T, T[]>`） |
+| ---- | ---- | ---- |
+| 空间复杂度 | **O(V²)** | **O(V + E)** |
+| 判断 u、v 是否相邻 | O(1) 直接看 `matrix[u][v]` | O(degree(u)) 扫邻居表 |
+| 枚举一个顶点的全部邻居 | O(V)，要扫一整行 | O(degree)，有几个扫几个 |
+| 新增一条边 | O(1) | O(1) 摊销 |
+| 顶点类型 | 只能用整数下标 | **Map 键可以是字符串等任意类型**（模块名直接用） |
+| 适合的图 | 稠密图（E 接近 V²）、需频繁判邻接 | **稀疏图**（绝大多数工程图） |
+
+前端的模块依赖图、社交图都是典型**稀疏图**（一个模块通常只依赖几个到几十个模块，而不是全部模块），邻接矩阵的 V² 空间完全无法接受。因此工程实现几乎清一色**邻接表**：`Map<顶点, 邻居数组>`，稀疏时空间 O(V+E)，还能用字符串模块名直接做键。
+
+### 22.7.3 应用实践
+
+1. **打包器的模块依赖图**。webpack / Vite(Rollup) 从 entry 出发解析 `import`，构建一张有向图：每个模块是顶点，`import` 是边。tree-shaking 判断「不可达顶点」，按 **拓扑排序**决定模块的执行与拼接顺序（被依赖的必须先执行）。
+2. **循环依赖检测**。ESM 虽然允许部分循环引用（live binding），但初始化期互相取值会拿到 `undefined`，是线上疑难杂症的常客。构建工具（madge、circular-dependency-plugin）本质就是在依赖图上跑 DFS 三色标记或 Kahn 算法找环。
+3. **路由关系与页面跳转**。路由表是一张有向图：权限守卫判断「从登录页到目标页是否可达」，面包屑/导航前置关系是图上路径，埋点系统统计的页面流向是加权边。
+4. **社交关系与推荐**。好友是无向图、关注是有向图；「二度好友」= BFS 两层；「可能认识的人」= 找与你共同邻居最多的未连接顶点；信息流扩散可达性也是图遍历。低代码工作流、CI 任务 DAG 的编排与关键路径同理。
+
+### 22.7.4 代码实现
+
+```ts
+/**
+ * 邻接表有向/无向图：Map<T, T[]>
+ * 泛型 T 让顶点可以是字符串模块名，不必先映射成整数
+ */
+class Graph<T> {
+  private adjacencyList = new Map<T, T[]>();
+  addVertex(vertex: T): void {
+    if (!this.adjacencyList.has(vertex)) {
+      this.adjacencyList.set(vertex, []);
+    }
+  }
+  /** 加边；directed=false（默认）时双向加边，表示无向图 */
+  addEdge(from: T, to: T, directed = false): void {
+    this.addVertex(from);
+    this.addVertex(to);
+    this.adjacencyList.get(from)!.push(to);
+    if (!directed) {
+      this.adjacencyList.get(to)!.push(from);
+    }
+  }
+  /** BFS：队列逐层扩散，返回访问顺序 */
+  bfs(start: T): T[] {
+    const result: T[] = [];
+    if (!this.adjacencyList.has(start)) return result;
+    const visited = new Set<T>([start]);
+    const queue: T[] = [start];
+    while (queue.length > 0) {
+      const vertex = queue.shift()!;
+      result.push(vertex);
+      for (const neighbor of this.adjacencyList.get(vertex)!) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor); // 入队即标记，防止同一顶点重复入队
+          queue.push(neighbor);
+        }
+      }
+    }
+    return result;
+  }
+  /**
+   * DFS：显式栈迭代版（万级顶点的深图递归会爆调用栈）。
+   * 栈是 LIFO，想保持邻居原序访问，需要逆序压栈。
+   */
+  dfs(start: T): T[] {
+    const result: T[] = [];
+    if (!this.adjacencyList.has(start)) return result;
+    const visited = new Set<T>();
+    const stack: T[] = [start];
+    while (stack.length > 0) {
+      const vertex = stack.pop()!;
+      if (visited.has(vertex)) continue; // 栈中可能残留重复项
+      visited.add(vertex);
+      result.push(vertex);
+      const neighbors = this.adjacencyList.get(vertex)!;
+      for (let i = neighbors.length - 1; i >= 0; i--) {
+        if (!visited.has(neighbors[i])) stack.push(neighbors[i]); // 逆序压栈
+      }
+    }
+    return result;
+  }
+  /**
+   * Kahn 拓扑排序（只对有向图有意义）：
+   * 1. 统计每个顶点的入度，入度为 0 的入队（没有前置依赖）；
+   * 2. 弹出顶点即输出，并把它所有邻居的入度 -1，归零者入队；
+   * 3. 输出数 < 顶点总数 → 存在环（环上顶点入度永远降不到 0）。
+   */
+  topologicalSort(): T[] | null {
+    const inDegree = new Map<T, number>();
+    for (const vertex of this.adjacencyList.keys()) {
+      inDegree.set(vertex, 0);
+    }
+    for (const neighbors of this.adjacencyList.values()) {
+      for (const neighbor of neighbors) {
+        inDegree.set(neighbor, (inDegree.get(neighbor) ?? 0) + 1);
+      }
+    }
+    const queue: T[] = [];
+    for (const [vertex, degree] of inDegree) {
+      if (degree === 0) queue.push(vertex);
+    }
+    const result: T[] = [];
+    while (queue.length > 0) {
+      const vertex = queue.shift()!;
+      result.push(vertex);
+      for (const neighbor of this.adjacencyList.get(vertex)!) {
+        const nextDegree = inDegree.get(neighbor)! - 1;
+        inDegree.set(neighbor, nextDegree);
+        if (nextDegree === 0) queue.push(neighbor); // 前置依赖全部完成
+      }
+    }
+    return result.length === this.adjacencyList.size ? result : null; // 不等即有环
+  }
+}
+
+// demo：模块依赖图。app 依赖 router/store，router、store 依赖 utils
+const deps = new Graph<string>();
+deps.addEdge("utils", "store", true); // 反向建边：被依赖者 → 依赖者
+deps.addEdge("utils", "router", true);
+deps.addEdge("store", "router", true);
+deps.addEdge("router", "app", true);
+deps.addEdge("store", "app", true);
+deps.topologicalSort(); // ['utils', 'store', 'router', 'app'] —— 合法的打包/执行顺序
+```
+
+### 22.7.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：BFS 和 DFS 分别用什么数据结构？各自适合什么问题？**
+
+- 回答框架：BFS 配队列、逐层扩散 → 无权最短路径、层级遍历；DFS 配栈/递归、一条路走到底 → 路径搜索、拓扑排序、找环。两者都要 visited 集合。
+- 评分要点：说队列与栈；说出至少一个各自的典型问题。
+- 常见误区：BFS 在出队时才标记 visited——同一顶点可能被重复入队多次，正确做法是**入队即标记**。
+- 加分项：补一句 BFS 第一次到达某顶点的层数就是无权最短距离。
+
+**Q2：什么情况下选邻接表而不是邻接矩阵？**
+
+- 要点：稀疏图（工程常态）邻接表 O(V+E) 省空间，枚举邻居不浪费；稠密图或要 O(1) 判邻接才考虑矩阵。
+
+#### L2 原理理解题
+
+**Q3：如何判断一个有向图有没有环？讲讲拓扑排序的原理。**
+
+- 回答框架：建入度表 → 入度 0 的顶点入队 → 逐个输出并削减邻居入度 → 输出数不足顶点数即有环。
+- 评分要点：解释清「环上顶点入度永远 ≥1，永远进不了队」；输出序列就是拓扑序。
+- 常见误区：只在无向图上讨论拓扑排序（无意义，拓扑序是有向图专属）；把「有环时排序结果为空」说错——Kahn 会输出环外的部分，必须靠数量比对判环。
+- 加分项：补 DFS 版拓扑（递归返回后压栈，结果逆序即拓扑序，递归中遇到「在当前递归栈中」的顶点即有环）。
+
+#### L3 综合应用题
+
+**Q4：课程表（LeetCode 207 / 210）：numCourses 门课，prerequisites 给先修关系，能否完成？能则给一个学习顺序。**
+
+- 建模：课程是顶点，`[a, b]`（a 依赖 b，必须先修 b）建边 `b → a`，对 a 计入度。这就是典型的多源 BFS——初始可能有多个入度 0 的顶点同时入队。
+
+```ts
+function findOrder(numCourses: number, prerequisites: [number, number][]): number[] {
+  const graph: number[][] = Array.from({ length: numCourses }, () => []);
+  const inDegree = new Array<number>(numCourses).fill(0);
+  for (const [course, pre] of prerequisites) {
+    graph[pre].push(course); // pre -> course
+    inDegree[course]++;
+  }
+  const queue: number[] = [];
+  for (let i = 0; i < numCourses; i++) {
+    if (inDegree[i] === 0) queue.push(i); // 没有先修课，可直接学
+  }
+  const order: number[] = [];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    order.push(cur);
+    for (const next of graph[cur]) {
+      if (--inDegree[next] === 0) queue.push(next); // 先修课全部完成
+    }
+  }
+  return order.length === numCourses ? order : []; // 有环返回空（207 题即判是否非空）
+}
+```
+
+- 复杂度：O(V + E)，每个顶点每条边各处理一次。
+- 常见误区：DFS 递归写法在课程数上万时直接 `RangeError: Maximum call stack size exceeded`——V8 默认调用栈深度约 1 万层，**深图必须改写为显式栈迭代**；边方向建反会导致整张图入度全错。
+- 加分项：指出拓扑序可能不唯一（同层多个入度 0 顶点顺序任意），加优先级可用小顶堆替换队列得到字典序/优先级拓扑序；延伸到「并行任务的最早完成时间（关键路径）」。
+
+> 完整可运行示例：[data-structures/examples/22-08-graph.ts](./data-structures/examples/22-08-graph.ts)（npx tsx 直跑）
+
+---
+
+## 22.8 排序算法：十大排序全景
+
+### 22.8.1 概念解析
+
+排序是面试与工程中出现频率最高的算法话题。先把两个贯穿全节的定性概念讲准：
+
+- **稳定性（Stable）**：排序前后，**值相等**的两个元素相对顺序保持不变。它不是「排得对不对」的问题，而是**多关键字排序**能否成立的前提。例如先按姓名排、再用稳定排序按部门排，同部门内仍保持姓名有序；若第二步不稳定，第一趟的成果会被打散。
+- **原地排序（In-place）**：只借助 O(1) 额外空间完成排序。快排、堆排、插入排序原地；归并排序需要 O(n) 临时数组，非原地。
+
+另外两个分类口径：**内部排序**（数据全部在内存中）vs **外部排序**（数据量大到放不下内存，要借助磁盘分片归并，见 L3）；**比较排序**（决策树决定了比较排序下界 O(n log n)）vs **非比较排序**（计数/桶/基数，靠数据本身的整数性质突破下界，但有前提条件）。
+
+### 22.8.2 技术对比
+
+#### 十大排序总表
+
+| 排序算法 | 平均时间 | 最坏时间 | 空间 | 稳定 | 核心思想与适用场景 |
+| ---- | ---- | ---- | ---- | ---- | ---- |
+| 冒泡 Bubble | O(n²) | O(n²)（最好 O(n)） | O(1) | ✅ | 相邻逆序则交换；教学意义为主 |
+| 选择 Selection | O(n²) | O(n²) | O(1) | ❌ | 每轮选最小值与轮首交换；**交换次数 O(n)**，写代价贵的场景可用 |
+| 插入 Insertion | O(n²) | O(n²)（最好 O(n)） | O(1) | ✅ | 像理扑克牌；**小数据/近乎有序时极快** |
+| 希尔 Shell | O(n^1.3) 量级 | O(n²)（依赖增量序列） | O(1) | ❌ | 分组插入、增量递减；中等数据 |
+| 归并 Merge | O(n log n) | **O(n log n)** | O(n) | ✅ | 分治合并；要稳定、链表排序、外部排序 |
+| 快排 Quick | **O(n log n)** | O(n²)（极罕见） | O(log n) 栈 | ❌ | 基准分区；**通用比较排序的默认答案** |
+| 堆排 Heap | O(n log n) | O(n log n) | **O(1)** | ❌ | heapify + 反复取堆顶；内存受限场景 |
+| 计数 Counting | O(n + k) | O(n + k) | O(k) | ✅ | 统计频次；**非负整数、值域 k 不大** |
+| 桶 Bucket | O(n + k) | O(n²)（全挤一桶） | O(n + k) | 取决于桶内算法 | 值域分桶、桶内再排；数据**均匀分布** |
+| 基数 Radix | O(d(n + k)) | O(d(n + k)) | O(n + k) | ✅ | 按位稳定排序 d 轮；定长整数/字符串 |
+
+几条必须能脱口而出的结论：
+
+1. 三个 O(n²) 算法（冒泡/选择/插入）只适合教学与极小数据；其中插入排序在**近乎有序**时是 O(n)，这是 Timsort 在小段内使用它的原因；
+2. O(n log n) 三剑客里：快排平均最快、常数小且原地；归并**稳定且最坏也是 O(n log n)**；堆排原地且最坏有保证，但缓存局部性差；
+3. 计数/桶/基数不是比较排序，能突破 O(n log n) 下界，但都有前提——数据是（或可映射为）范围可控的整数且分布合适，不能排任意可比较对象。
+
+### 22.8.3 应用实践
+
+- **V8 的 `Array.prototype.sort` 是 Timsort**（V8 7.0 起；ES2019 起规范强制稳定性）：短数组（run 长度阈值约 22）直接用**插入排序**，长数组划分成若干自然有序段（run）再用**归并排序**合并。它不是快排——面试说「JS 的 sort 底层是快排」是过时答案。
+- **业务代码不要手写排序**，直接 `Array.prototype.sort`；但有三条铁律：
+  1. **数字必传比较器** `(a, b) => a - b`。默认比较器把元素转成字符串按 UTF-16 码元排序，`[10, 2, 1].sort()` 得到 `[1, 10, 2]`；
+  2. **sort 是原地修改**。不想改原数组要先浅拷贝：`[...arr].sort((a, b) => a - b)`，React 状态更新尤其注意，直接 sort state 会造成不可变数据被破坏；
+  3. 对象排序显式传 key：`users.sort((a, b) => a.age - b.age)`；需要多关键字时链式比较 `a.age - b.age || a.name.localeCompare(b.name)`，不要依赖「sort 稳定所以分两次排」这种隐式行为，链式比较一眼可读。
+- 大数据量排序（几万行表格）优先**服务端排序 + 分页/虚拟滚动**；万不得已在前端排，丢进 Web Worker，避免长任务卡死主线程（见第十八部分）。
+
+### 22.8.4 代码实现
+
+#### ① 快速排序：双指针 partition（源目录经典写法）
+
+```ts
+/**
+ * 快排：选基准 pivot，把区间切成「≤ pivot」与「≥ pivot」两段再递归。
+ * 本实现浅拷贝输入，原地分区内部数组；平均 O(n log n)。
+ */
+function quickSort(arr: number[]): number[] {
+  const a = [...arr];
+
+  function partition(left: number, right: number): void {
+    if (left >= right) return; // 递归出口：区间至多一个元素
+    const pivot = a[right]; // 取最右元素作基准
+    let i = left; // i 从左端起，j 从基准前一位起，双指针对向扫描
+    let j = right - 1;
+
+    while (i <= j) {
+      while (a[i] < pivot) i++; // 从左找第一个 ≥ pivot 的元素（基准自身兜底，不会越界）
+      while (a[j] > pivot) j--; // 从右找第一个 ≤ pivot 的元素
+      if (i <= j) {
+        [a[i], a[j]] = [a[j], a[i]]; // 大的甩右边、小的甩左边
+        i++;
+        j--;
+      }
+    }
+    [a[i], a[right]] = [a[right], a[i]]; // i 是 pivot 的最终归位点
+    partition(left, j); // 左段（j 停在小区间最右）
+    partition(i + 1, right); // 右段
+  }
+
+  partition(0, a.length - 1);
+  return a;
+}
+```
+
+> 最坏 O(n²) 出现在「数组已有序 + 总取端点基准」——每轮分区 0 比 n-1，递归退化成链表。工程上用**随机选基准**或**三数取中**规避；重复元素极多时改用三路分区（`< pivot / = pivot / > pivot`）。
+
+#### ② 归并排序：分治 + 双指针合并
+
+```ts
+/** 归并排序：二分拆解 → 各自有序 → 双指针合并。稳定，最坏也是 O(n log n) */
+function mergeSort(arr: number[]): number[] {
+  if (arr.length <= 1) return [...arr]; // 递归出口
+  const mid = arr.length >> 1;
+  const left = mergeSort(arr.slice(0, mid)); // 分：O(log n) 层
+  const right = mergeSort(arr.slice(mid));
+  return merge(left, right); // 治：每层总合并成本 O(n)
+}
+
+/** 合并两个有序数组：谁小取谁，相等时先取左段 —— 稳定性的关键一行 */
+function merge(left: number[], right: number[]): number[] {
+  const result: number[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < left.length && j < right.length) {
+    if (left[i] <= right[j]) {
+      result.push(left[i++]); // 取等号放左边：相等元素保留原相对顺序
+    } else {
+      result.push(right[j++]);
+    }
+  }
+  while (i < left.length) result.push(left[i++]); // 一侧耗尽，另一侧整条接上
+  while (j < right.length) result.push(right[j++]);
+  return result;
+}
+```
+
+### 22.8.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：讲一下快排的原理和复杂度。**
+
+- 回答框架：选基准 → 双指针分区（小的左、大的右）→ 基准归位 → 递归左右两段。平均 O(n log n)、最坏 O(n²)、空间 O(log n) 递归栈、不稳定。
+- 评分要点：partition 一次让一个元素找到**最终位置**；递归出口 `left >= right`。
+- 常见误区：把最坏情况说成常态；漏掉「基准选端点 + 已有序」这个具体触发条件。
+- 加分项：提随机基准 / 三数取中 / 三路分区三个优化。
+
+**Q2：哪些排序是稳定的？稳定性有什么用？**
+
+- 稳定：冒泡、插入、归并、计数、基数；不稳定：选择、希尔、快排、堆排。用途：多关键字排序、相等元素保序（如订单同金额按下单时间展示）。
+
+#### L2 原理理解题
+
+**Q3：快排平均 O(n log n)，归并也是，为什么工程上快排更常用？**
+
+- 要点：快排**原地**（归并要 O(n) 额外内存与拷贝）、分区内交换的**缓存局部性**好、常数因子更小；归并的胜场是要**稳定**、要**最坏有保证**、排**链表**（无需额外空间）和外部排序。
+
+**Q4：为什么选择排序不稳定？举个会翻车的例子。**
+
+- 要点：长距离交换会跨过相等元素。如 `[5a, 5b, 2]`，第一轮 2 与 5a 交换后变成 `[2, 5b, 5a]`，两个 5 的相对顺序被破坏。对比插入排序只挪动不跨相等元素交换，所以稳定。
+
+#### L3 综合应用题
+
+**Q5：10GB 的日志文件按时间戳排序，内存只有 1GB，怎么排？**
+
+- 回答框架（外部排序 = 分块 + 多路归并）：
+  1. **分片内排**：把文件切成约 1GB 的块，逐块读入内存用快排/归并排好，落盘成 10+ 个有序临时文件；
+  2. **K 路归并**：每个文件维护一个读缓冲区 + 当前游标，用**最小堆**装各文件当前首条记录，弹最小写入输出缓冲，再从对应文件补一条（就是 22.6 的合并 K 有序列表）；
+  3. 缓冲区调优：顺序读写打满磁盘吞吐；文件过多时先做多轮层级归并（每轮合并 K 个）。
+- 复杂度：每条记录参与 log 层级别的归并，整体 O(n log n) 次比较，瓶颈其实在磁盘 IO，所以**顺序读写与缓冲区大小**是优化重点。
+- 常见误区：硬套内存快排；忽略外部排序的主要成本是 IO 而不是比较次数。
+- 加分项：提 Spark 的 shuffle sort、数据库外部归并都是同一思想；变体题「1 亿个整数找最大的 100 个」应答 K 容量小顶堆 O(n log 100)，而不是外部排序。
+
+> 完整可运行示例：[data-structures/examples/22-09-sorting.ts](./data-structures/examples/22-09-sorting.ts)（npx tsx 直跑，内含十大排序实现与万级数据实测）
+
+---
+
+## 22.9 动态规划：把算过的记住
+
+### 22.9.1 概念解析
+
+**动态规划（Dynamic Programming，DP）** 的核心思想一句话：**把重复计算的子问题答案记下来，每个状态只算一次**。它不是某种固定代码模板，而是一种「自底向上填表」的解题范式。能用 DP 的问题通常同时具备三要素：
+
+| 要素 | 含义 | 反例/检验方法 |
+| ---- | ---- | ---- |
+| 重叠子问题 | 递归求解时同一个子问题被反复计算（斐波那契递归树指数膨胀） | 子问题互不重叠 → 普通分治（如归并排序），用不上 DP |
+| 最优子结构 | 大问题的最优解能由子问题的最优解组合出来 | 子问题最优组合不出全局最优（如带环图的某些路径问题）则不成立 |
+| 无后效性 | 状态一旦确定，未来的决策只依赖当前状态值，与「怎么走到这个状态的路径」无关 | 如果到达路径会影响后续选择，说明状态定义缺维度，需要扩状态 |
+
+#### DP 五步法（面试时按这五步讲，条理即分数）
+
+1. **定义状态**：`dp[i]`（或 `dp[i][j]`）到底表示什么？必须精确到「以 i 结尾 / 前 i 个元素 / 第 i 天某状态」；
+2. **推导转移方程**：`dp[i]` 如何由更早的状态推出，如 `dp[i] = dp[i-1] + dp[i-2]`；
+3. **初始化**：base case 是什么（`dp[0]`、首行首列），初始化错全盘错；
+4. **确定遍历顺序**：保证算 `dp[i]` 时它依赖的状态已经算完（正序、倒序、先列后行因题而异）；
+5. **明确返回值**：是 `dp[n]`、`max(dp)`，还是表中某个位置。
+
+### 22.9.2 技术对比
+
+以斐波那契为载体，看四种解法的演进：
+
+| 维度 | 暴力递归 | 记忆化递归（Memo） | 自底向上 DP | 状态压缩 DP |
+| ---- | ---- | ---- | ---- | ---- |
+| 方向 | 自顶向下 | 自顶向下 | 自底向上填表 | 自底向上 |
+| 时间 | **O(2ⁿ)** | O(n) | O(n) | O(n) |
+| 空间 | O(n) 调用栈 | O(n) memo + 栈 | O(n) dp 表 | **O(1)** 滚动变量 |
+| 重复计算 | 指数级重复 | Map 命中即剪枝 | 无 | 无 |
+| 工程风险 | n=40 就卡顿、深递归爆栈 | 仍有递归深度问题 | 无递归，最稳 | 可读性略降，需看出依赖关系 |
+| 适用 | 理解题意的第一版 | 状态转移复杂、填表难写时 | DP 标准写法 | 转移只依赖前 1~2 行时 |
+
+**记忆化与 DP 的关系**：记忆化是「带缓存的递归」，DP 是「换个方向迭代」，两者消除的是同一批重叠子问题。转移方程简单时优先自底向上（无递归开销、方便压缩）；状态依赖稀疏（只访问表中少数格子）时记忆化反而少算。
+
+### 22.9.3 应用实践
+
+1. **编辑器/代码 Diff 的 LCS 思想**。Git diff、VS Code 内联对比、React 列表 key 的最小移动，底层都绕不开**最长公共子序列 / 编辑距离**这张二维 DP 表：`dp[i][j]` 表示两段文本前缀的最优匹配，字符相等则对角线 +1，否则取上方/左方最优。
+2. **瀑布流与排版**。多列瀑布流选「当前最矮的列」放置卡片是贪心；带约束的排版（如文字换行最小 raggedness、图片固定行高求最小空白）则是一维 DP：每一行的选择依赖前面所有可能断行点。
+3. **路径与资源规划**。网格路径数、带障碍的最短路、地图导航的成本最优、音视频码率自适应的收益最大化，本质都是带权 DAG 上的 DP；级联回填、跨步骤表单合并等前端状态处理也隐含「子问题结果复用」的思路。
+
+### 22.9.4 代码实现
+
+#### ① 斐波那契四解：看清 DP 的演进路线
+
+```ts
+// 解法 1：暴力递归 —— O(2^n)，f(50) 就肉眼可见地卡
+function fibRecursive(n: number): number {
+  if (n <= 1) return n;
+  return fibRecursive(n - 1) + fibRecursive(n - 2); // 子问题指数级重复
+}
+// 解法 2：记忆化递归（自顶向下）—— Map 缓存，每个 n 只算一次，O(n)
+function fibMemo(n: number): number {
+  const memo = new Map<number, number>();
+  const dfs = (k: number): number => {
+    if (k <= 1) return k;
+    const hit = memo.get(k);
+    if (hit !== undefined) return hit; // 命中缓存，剪掉整棵子树
+    const value = dfs(k - 1) + dfs(k - 2);
+    memo.set(k, value);
+    return value;
+  };
+  return dfs(n);
+}
+// 解法 3：自底向上 DP 数组 —— 无递归，O(n) 时间 / O(n) 空间
+function fibDP(n: number): number {
+  if (n <= 1) return n;
+  const dp: number[] = [0, 1]; // 初始化
+  for (let i = 2; i <= n; i++) {
+    dp[i] = dp[i - 1] + dp[i - 2]; // 转移方程：算 i 时前两项必已就绪
+  }
+  return dp[n];
+}
+// 解法 4：状态压缩 —— dp[i] 只依赖前两项，滚动两个变量即可，O(1) 空间
+function fibCompressed(n: number): number {
+  if (n <= 1) return n;
+  let prev = 0;
+  let curr = 1;
+  for (let i = 2; i <= n; i++) {
+    [prev, curr] = [curr, prev + curr];
+  }
+  return curr;
+}
+```
+
+#### ② 跳台阶（LeetCode 70）
+
+```ts
+/**
+ * 跳台阶：dp[i] = 到第 i 级的方法数；最后一步从 i-1 跨 1 级或从 i-2 跨 2 级
+ * → dp[i] = dp[i-1] + dp[i-2]，本质是位移一位的斐波那契，直接状态压缩
+ */
+function climbStairs(n: number): number {
+  if (n <= 2) return n;
+  let prev = 1; // dp[1]
+  let curr = 2; // dp[2]
+  for (let i = 3; i <= n; i++) {
+    [prev, curr] = [curr, prev + curr];
+  }
+  return curr;
+}
+```
+
+#### ③ 买卖股票（LeetCode 121，两态 DP）
+
+```ts
+/**
+ * 只买卖一次求最大利润。
+ * 状态：hold = 当天结束持股的最大利润；cash = 当天结束不持股的最大利润
+ * 转移：cash = max(继续不持, 今天卖出)；hold = max(继续持有, 今天买入)
+ * 每天只依赖前一天 → 两变量状态压缩，O(n) 时间 O(1) 空间
+ */
+function maxProfit(prices: number[]): number {
+  if (prices.length === 0) return 0;
+  let hold = -prices[0]; // 第一天买入，利润为负
+  let cash = 0; // 不持股
+  for (let i = 1; i < prices.length; i++) {
+    cash = Math.max(cash, hold + prices[i]); // 卖或不卖
+    hold = Math.max(hold, -prices[i]); // 买或继续持有
+  }
+  return cash;
+}
+```
+
+#### ④ 最大子数组和（LeetCode 53，Kadane 算法）
+
+```ts
+/**
+ * 状态：dp[i] = 以 nums[i] 结尾的最大连续子数组和（注意「以 i 结尾」这个限定）
+ * 转移：dp[i] = max(nums[i], dp[i-1] + nums[i])——前段是负资产就自立门户，否则并入
+ * 返回：max(dp)（答案结尾位置不确定，要取全程最大）
+ */
+function maxSubArray(nums: number[]): number {
+  const dp = new Array<number>(nums.length);
+  dp[0] = nums[0]; // 初始化：只有一个元素，子数组只能是它自己
+  let result = dp[0];
+  for (let i = 1; i < nums.length; i++) {
+    dp[i] = Math.max(nums[i], dp[i - 1] + nums[i]);
+    result = Math.max(result, dp[i]);
+  }
+  return result;
+}
+```
+
+dp 表手推示例（面试常被要求现场填表），输入 `[-2, 1, -3, 4, -1, 2, 1, -5, 4]`：
+
+| i | nums[i] | dp[i] = max(nums[i], dp[i-1]+nums[i]) | 决策 |
+| ---- | ---- | ---- | ---- |
+| 0 | -2 | **-2** | 初始化 |
+| 1 | 1 | **1** | max(1, -2+1)=1，自立门户 |
+| 2 | -3 | **-2** | max(-3, 1-3)=-2，并入 |
+| 3 | 4 | **4** | max(4, -2+4)=4，自立门户（对应子数组起点 `[4,...]`） |
+| 4 | -1 | **3** | 并入：4-1 |
+| 5 | 2 | **5** | 并入：3+2 |
+| 6 | 1 | **6** | 并入：5+1，全程最大值 |
+| 7 | -5 | **1** | 并入：6-5 |
+| 8 | 4 | **5** | 并入：1+4 |
+
+答案 **6**，对应子数组 `[4, -1, 2, 1]`。继续压缩：dp 只需要前一个值，一个滚动变量即可 O(1) 空间，这就是 Kadane 算法。
+
+### 22.9.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：什么问题适合用 DP？说一下你的解题步骤。**
+
+- 回答框架：三要素（重叠子问题、最优子结构、无后效性）→ 五步法（定义状态 → 转移方程 → 初始化 → 遍历顺序 → 返回值）。
+- 评分要点：状态定义要敢说全（「以 i 结尾」还是「前 i 个」差别巨大）；能指出无后效性是检验状态定义是否缺维度的标尺。
+- 常见误区：上来就写转移方程，状态含义说不清；初始化漏掉 `dp[0]` 或首行首列。
+- 加分项：主动区分自顶向下记忆化与自底向上 DP 的取舍。
+
+**Q2：贪心和 DP 有什么区别？**
+
+- 要点：贪心每步只取眼前最优、不回头（瀑布流选最矮列）；DP 枚举所有可达状态再取最优，保留反悔余地。贪心要求「局部最优必然推出全局最优」的严格性质，不成立时贪心会错而 DP 不会。
+
+#### L2 原理理解题
+
+**Q3：买卖股票只交易一次，怎么设计状态？**
+
+- 要点：两态——持股 / 不持股；`cash = max(cash, hold + price)`、`hold = max(hold, -price)`；最后答案取不持股状态。说清「为什么持有态利润是负的」（买入花了钱）即过关。
+- 常见误区：用双重循环枚举买卖日 O(n²) 交差；忘记只能买一次而写成可多次买卖的转移。
+
+**Q4：写 DP 时遍历顺序怎么确定？**
+
+- 要点：看转移依赖——一维依赖前几项就正序；0/1 背包选与不选依赖「上一行同列」时容量必须**倒序**防同一件物品重复选取；区间 DP 按长度递增；依赖左上邻居的二维表先行后列。顺序错的症状是算到当前格时依赖项还是初始值。
+
+#### L3 综合应用题
+
+**Q5：最长递增子序列 LIS（LeetCode 300），给出 O(n²) 和 O(n log n) 两种解法。**
+
+解法一：经典 DP，`dp[i]` = 以 `nums[i]` 结尾的 LIS 长度，枚举前驱 j：
+
+```ts
+function lengthOfLIS_DP(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const dp = new Array<number>(nums.length).fill(1); // 每个元素自身构成长度 1
+  let best = 1;
+  for (let i = 1; i < nums.length; i++) {
+    for (let j = 0; j < i; j++) {
+      if (nums[j] < nums[i]) {
+        dp[i] = Math.max(dp[i], dp[j] + 1); // 接在更短的递增序列后面
+      }
+    }
+    best = Math.max(best, dp[i]);
+  }
+  return best; // O(n²) 时间 / O(n) 空间
+}
+```
+
+解法二：贪心 + 二分。维护 `tails[k]` = 长度为 k+1 的递增子序列的**最小结尾元素**：
+
+```ts
+function lengthOfLIS_Greedy(nums: number[]): number {
+  const tails: number[] = [];
+  for (const num of nums) {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      // 二分找 tails 中第一个 >= num 的位置（lowerBound）
+      const mid = (lo + hi) >> 1;
+      if (tails[mid] < num) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo === tails.length) tails.push(num); // 比所有结尾都大，序列延长
+    else tails[lo] = num; // 否则替换：压低该长度的结尾，给后续元素留延长空间
+  }
+  return tails.length; // O(n log n)；注意 tails 内容不一定是真实 LIS，长度才是
+}
+```
+
+- 采分点：能解释「为什么相同长度要让结尾尽量小」（结尾越小，后面能接上的数越多——这是贪心正确性的直觉）；主动说明 tails **长度等于答案但数组本身不是那条子序列**。
+- 常见误区：初始化漏 `fill(1)`；把严格递增写成 `nums[j] <= nums[i]` 变成非递减；二分解里误以为 tails 就是 LIS 本体。
+- 加分项：要求还原真实 LIS 时在二分解中额外维护 `prev` 前驱数组；推广到俄罗斯套娃信封（二维 LIS，先排序降维）。
+
+> 完整可运行示例：[data-structures/examples/22-10-dp.ts](./data-structures/examples/22-10-dp.ts)（npx tsx 直跑，内含四解对拍与 dp 推导打印）
+
+---
+
+## 22.10 高频面试题通关与自测
+
+### 22.10.1 高频题速查表
+
+下表汇总本部分最高频的 14 道手写题，按所属结构归类。「核心套路」列是面试时脱口而出的解题签名，详细代码均在对应示例文件中。
+
+| # | 题目（LeetCode） | 所属结构 | 核心套路 | 示例文件 |
+| ---- | ---- | ---- | ---- | ---- |
+| 1 | 有效的括号（20） | 栈 | 遇左括号压对应右括号；遇右括号与栈顶比对，不等即非法；最后栈须空 | [22-01](./data-structures/examples/22-01-stack.ts) |
+| 2 | 逆波兰表达式求值（150） | 栈 | 遇数压栈；遇运算符弹两个操作数计算后压回；注意减法/除法顺序 | [22-01](./data-structures/examples/22-01-stack.ts) |
+| 3 | 两栈实现队列（232） | 栈 + 队列 | in 栈管入、out 栈管出；out 空时把 in 整体倒入，均摊 O(1) | [22-02](./data-structures/examples/22-02-queue.ts) |
+| 4 | 滑动窗口最大值（239） | 单调双端队列 | 队头恒为最大；新元素从队尾淘汰更小者；队头滑出窗口则出队，O(n) | [22-02](./data-structures/examples/22-02-queue.ts) |
+| 5 | 击鼓传花 / 约瑟夫环 | 队列 | 数到者出队，其余队首循环接到队尾；剩最后一个即答案 | [22-02](./data-structures/examples/22-02-queue.ts) |
+| 6 | 反转链表（206） | 链表 | 三指针迭代（prev/cur/next）或递归；返回新头 | [22-03](./data-structures/examples/22-03-linked-list.ts) |
+| 7 | 环形链表（141/142） | 链表 | 快慢指针同起点，快走 2 慢走 1，相遇即有环；找入口再同步走 | [22-03](./data-structures/examples/22-03-linked-list.ts) |
+| 8 | 删除倒数第 N 个节点（19） | 链表 | 快指针先走 N 步，再与慢指针同速走；虚拟头节点统一删除头部情形 | [22-03](./data-structures/examples/22-03-linked-list.ts) |
+| 9 | LRU 缓存（146） | 哈希表 + 双向链表 | Map 定位节点 O(1)，链表维护访问序；get 移到表头，超容删表尾 | [22-04](./data-structures/examples/22-04-hash-table.ts) |
+| 10 | 数组第 K 大 / TopK（215） | 堆 | K 容量**小顶堆**做门槛，O(n log k)；另可答快排 partition 选择算法 | [22-07](./data-structures/examples/22-07-heap.ts) |
+| 11 | 课程表 I/II（207/210） | 图 | Kahn 拓扑排序：入度表 + 队列；输出数不足即有环 | [22-08](./data-structures/examples/22-08-graph.ts) |
+| 12 | 最长递增子序列（300） | DP / 贪心+二分 | DP O(n²) 枚举前驱；tails 数组 + 二分 O(n log n) | [22-10](./data-structures/examples/22-10-dp.ts) |
+| 13 | 最大子数组和（53） | DP | Kadane：`dp[i]=max(nums[i], dp[i-1]+nums[i])`，滚动变量 O(1) | [22-10](./data-structures/examples/22-10-dp.ts) |
+| 14 | 买卖股票最佳时机（121） | DP | 持有/不持两态滚动；或维护历史最低价取最大差值 | [22-10](./data-structures/examples/22-10-dp.ts) |
+
+### 22.10.2 答题五段论模板
+
+算法面试不是「跑通就行」，**讲述结构本身就是评分项**。建议固定按以下五段推进，哪怕题目很熟也走完，能稳住节奏、暴露边界思考：
+
+| 段落 | 要做什么 | 加分动作 |
+| ---- | ---- | ---- |
+| ① 澄清题意 | 确认输入类型与范围、是否有重复值、是否有序、空输入返回什么、数据规模（n=100 还是 1 亿决定解法） | 主动复述一遍题目，说出 2~3 个边界用例 |
+| ② 暴力解 | 先说最朴素的解法并给复杂度，证明自己理解了问题，也给优化立靶子 | 一句话说明暴力为什么慢（哪部分重复了） |
+| ③ 优化 | 基于暴力的瓶颈选武器：重复子问题→记忆化/DP；反复取最值→堆；区间最值+滑动→单调队列；判环/倒数→快慢指针 | 讲清「为什么这个数据结构能消除瓶颈」，而不是凭记忆甩答案 |
+| ④ 复杂度分析 | 时间、空间各给出并**说明来源**（堆高 log n、双指针每元素一次、dp 表 n² 个格子） | 对比优化前后；说明是否原地、是否稳定（排序题） |
+| ⑤ 边界测试 | 空数组 / 单元素 / 全相同 / 全逆序 / n=K / 有环无环 / 大数溢出，主动跑两个用例验证 | 指出代码里为边界做的特殊处理（虚拟头节点、`k<=0` 守卫等） |
+
+口述时的两个高频建议：写代码前先用 30 秒说思路获得面试官确认；卡住时说出当前想法而不是沉默——面试考察的是推导过程，不是读心术。
+
+### 22.10.3 自测十二题（先自答再看答案）
+
+<details>
+<summary><b>1. 【基础】O(log n) 和 O(n log n) 分别长在什么操作上？各举一个前端熟悉的例子。</b></summary>
+
+O(log n) 来自「每步排除一半」，如二分查找、堆/平衡树的单次插入；O(n log n) 是 n 个元素各付 log n，如归并/快排/堆排。判断技巧是看「几层」与「每层扫几个」。
+
+</details>
+
+<details>
+<summary><b>2. 【基础】「有效的括号」为什么栈是最自然的结构？</b></summary>
+
+括号匹配要求「最后打开的最先闭合」，正是 LIFO；左括号压栈、右括号与栈顶配对，扫描结束栈恰好为空才合法。多种括号时栈中压「对应的右括号」可省掉映射比对。
+
+</details>
+
+<details>
+<summary><b>3. 【进阶】两个栈实现队列，为什么均摊复杂度是 O(1)？</b></summary>
+
+入队永远进 in 栈；出队时 out 栈为空才把 in 全部倒入 out。每个元素在两个栈中各至多被压/弹固定次数，摊到每次操作 O(1)；out 非空时直接弹，O(1)。
+
+</details>
+
+<details>
+<summary><b>4. 【基础】反转链表的迭代写法里三根指针怎么配合？</b></summary>
+
+`prev=null、cur=head`；循环中先存 `next=cur.next`（否则断链找不到后继），再 `cur.next=prev` 反转指针，然后 `prev=cur、cur=next` 同步后移；cur 为 null 时 prev 即新头。
+
+</details>
+
+<details>
+<summary><b>5. 【进阶】如何用 O(1) 额外空间判断单链表有环？怎么求环的入口？</b></summary>
+
+快慢指针同起点，快走 2 步慢走 1 步，有环必在环内相遇，无环快指针先到 null。找入口：相遇后把其中一个指针放回表头，两指针同速各走 1 步，再次相遇点即入口（数学上两路径等长）。
+
+</details>
+
+<details>
+<summary><b>6. 【进阶】哈希表为什么平均 O(1)？冲突有哪些解法，扩容解决什么？</b></summary>
+
+哈希函数把键映射为数组下标直接寻址；冲突用链地址法（桶挂链表/数组）或开放寻址（线性探测等）。负载因子过高会使桶链变长、退化为 O(n)，到阈值就倍增扩容并重新哈希，把平均链长压回常数。
+
+</details>
+
+<details>
+<summary><b>7. 【挑战】LRU 缓存怎样让 get 和 put 都是 O(1)？</b></summary>
+
+哈希表 + 双向链表：哈希 O(1) 定位节点，双向链表 O(1) 完成摘除与头插以维护访问新旧；get 时把节点移到表头，put 超容量时删表尾最久未用项。JS 中也可借 Map 的插入序（删了重插即变最新，keys().next() 即最旧）近似实现。
+
+</details>
+
+<details>
+<summary><b>8. 【进阶】二叉搜索树的中序遍历有什么性质？删除有两个孩子的节点怎么处理？</b></summary>
+
+BST 中序遍历即升序序列。删双孩子节点时，取左子树最大值（前驱）或右子树最小值（后继）顶替被删节点的值，再递归删掉那个顶替节点——它至多只有一个孩子，落入简单情形。BST 退化成链表时复杂度退化，需 AVL/红黑树保证 O(log n)。
+
+</details>
+
+<details>
+<summary><b>9. 【进阶】求 TopK 为什么用容量 K 的小顶堆，而不是大顶堆？</b></summary>
+
+需要随时淘汰「当前 TopK 中最弱的元素」，容量 K 的小顶堆堆顶 O(1) 给出这个门槛，比它大才替换；总代价 O(n log k)、空间 O(k)，且支持无限数据流。大顶堆堆顶是最大值，无法快速得知第 K 大，全量入堆退化为 O(n log n)。
+
+</details>
+
+<details>
+<summary><b>10. 【进阶】BFS 与 DFS 各用什么数据结构？拓扑排序如何发现环？</b></summary>
+
+BFS 用队列、逐层扩散（无权最短路）；DFS 用显式栈或递归（路径搜索、找环），深图递归会爆栈要改迭代。Kahn 算法输出完后，若已排序顶点数小于图中顶点总数则有环——环上顶点的入度永远降不到 0，始终无法入队。
+
+</details>
+
+<details>
+<summary><b>11. 【基础】什么是排序稳定性？为什么 JS 数字排序必须显式传 `(a, b) => a - b`？</b></summary>
+
+稳定性指相等元素排序后相对顺序不变，多关键字排序依赖它。`Array.prototype.sort` 默认把元素转字符串按 UTF-16 码元比较，`[10, 2].sort()` 得到 `[10, 2]` 式错误结果；另外 sort 原地修改，不改原数组要先 `[...arr]` 浅拷贝。V8 底层是 Timsort（短段插入 + 归并），不是快排。
+
+</details>
+
+<details>
+<summary><b>12. 【进阶】DP 三要素是什么？写出最大子数组和的状态定义与转移方程。</b></summary>
+
+重叠子问题、最优子结构、无后效性。状态 `dp[i]` = 以 `nums[i]` 结尾的最大连续子数组和；转移 `dp[i] = max(nums[i], dp[i-1] + nums[i])`（前段为负就自立门户）；答案为 `max(dp)`，因只依赖前一项可压缩成一个滚动变量，空间 O(1)。
+
+</details>
+
+> 结语：数据结构与算法面试的本质，是看你能不能**从问题的操作特征反推出数据结构**——反复取最值想到堆、先后匹配想到栈、依赖关系想到图、重复子问题想到 DP。把 22.1~22.9 的结构特性与 22.10 的速查表互相对照刷两遍，这些题就从「背诵题」变成了「选择题」。
+
+---
+
+## 22.11 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 链表指针 | 反转、删除节点时先动 `next`，后半段链表直接丢失 | 改指针前先把后继存进临时变量：`const next = cur.next`，再改 `cur.next` |
+| 队列实现 | 用 `push` + `shift` 当队列，出队是 O(n) 整体搬移 | `shift` 会重排索引，批量入出队退化到 O(n²)；改用双指针、环形缓冲做到 O(1) 出队 |
+| 哈希键 | 拿普通对象当字典，键被强转字符串导致 `1` 与 `"1"` 撞车 | 对象键一律转字符串，键含对象、数字、布尔时改用 `Map`（按类型与引用区分，且有 `size`、插入序） |
+| 快速排序 | 取首元素当基准，遇到近乎有序数组退化成 O(n²) | 固定基准对有序输入最差，改用随机基准、三数取中；生产直接用 `sort`（V8 为 Timsort） |
+| 数字排序 | `[10, 2].sort()` 得到错误顺序 | 默认按 UTF-16 码元比较字符串，数字排序必须显式传 `(a, b) => a - b` |
+| 深结构递归 | 深树、深图用递归 DFS，调用栈溢出 | 递归深度受栈限制（约上万层），深结构改显式栈迭代、分治控制深度 |
+| `Map` 选择 | 分不清何时该用 `Map`、何时该用对象 | 需任意类型键、频繁增删、关心顺序与 `size` 时用 `Map`；纯字符串键的配置常量用对象更轻 |
+| 二分查找 | `mid` 与终止条件写错，死循环、漏元素 | 用 `mid = left + ((right - left) >> 1)` 防溢出，并统一区间语义（左闭右开、双闭二选一锁定） |
+
+## 22.12 交互实验室
+
+前 11 节解决的是「看懂」，这一节解决「跑过」。数据结构与算法最难讲清楚的部分不是结论，而是**中间状态**：快排分区时指针怎么走、BST 插入时节点往哪边挂、BFS 队列里还剩谁、DP 表的格子按什么顺序被填。把这些中间状态交给页面回放，比看静态代码有效得多。
+
+### 22.12.1 可行性分析
+
+结论：**四项能力都可以集成，但要用「构建期转译 + Worker 执行 + 帧协议」而不是在浏览器里塞一个完整 IDE。**
+
+| 能力 | 可行性 | 落地方案 | 代价与边界 |
+| --- | --- | --- | --- |
+| 在线运行 | ✅ 已有基建 | 构建期用 esbuild 把 `examples/*.ts` 转成 ESM，写入 `public/playground.json`；页面按钮在 Web Worker 里执行 | 只能跑**无 import 的自包含代码**；依赖 `node:crypto` 的示例标记为 Node 专属 |
+| 在线编辑 | ✅ 本节新增 | `<textarea>` 编辑 JavaScript + `new Function` 在 Worker 内执行 | 浏览器里不引入 TypeScript 编译器（`typescript` 约 8MB、`esbuild-wasm` 约 1MB），所以编辑区只接受 JS；不支持 `import` |
+| 执行过程可视化 | ✅ 本节新增 | 算法每完成一个关键动作就 `emit` 一帧状态快照，UI 按帧回放 | 需要在算法里埋点；帧上限 500，超长过程会被截断 |
+| 输出 | ✅ 本节新增 | Worker 把 `log()`、`return`、异常统一回传，主线程渲染到输出面板 | Worker 没有 DOM / Cookie / 网络，不能做副作用操作 |
+| TS / 第三方包在线运行 | ❌ 不建议 | 静态站点没有编译服务；引入 wasm 编译器首屏代价过高 | 需要完整 IDE 时用 StackBlitz / CodeSandbox 外链，不在本站内实现 |
+
+> 为什么不直接嵌 Monaco / CodeMirror：本章的目标是「看清执行过程」，不是「做在线 IDE」。一个带行号的 `textarea` 加帧回放，已经能覆盖 90% 的学习场景；编辑器内核会把体积和复杂度都推高一个量级。
+
+### 22.12.2 为什么是 Worker + 帧协议
+
+```mermaid
+sequenceDiagram
+    participant U as 浏览器（主线程）
+    participant W as Web Worker
+    participant V as 可视化视图
+    U->>W: postMessage({ code, input })
+    W->>W: new Function("input","emit","log", code)
+    loop 每个关键动作
+        W->>W: emit(frame) 收集状态快照
+    end
+    W->>U: postMessage({ frames, logs, result })
+    U->>V: frames + 播放游标
+    V-->>U: 播放 / 暂停 / 单步 / 调速
+```
+
+三层职责必须分开，否则会互相拖累：
+
+1. **执行层（Worker）**：没有 DOM、没有 Cookie，用户代码写错也污染不了页面；主线程设 2 秒硬超时，死循环直接 `terminate()`。
+2. **协议层（帧）**：算法只负责 `emit({ type, ...state, msg })`，不关心怎么画。同一份帧可以接 SVG、Canvas，甚至导出成 GIF。
+3. **渲染层（Vue）**：只读帧数组与游标，渲染数组柱状图 / 树 / 图 / DP 表。渲染器崩溃不会影响算法结果。
+
+关键约束：**帧必须是深拷贝或不可变快照**。如果把节点引用塞进帧，后续插入会修改历史帧，回放时整棵树会「提前长完」。
+
+### 22.12.3 使用方式与帧协议
+
+实验室内置四种模式，每种都有可编辑的默认源码：
+
+| 模式 | 输入格式 | 帧类型 | 可视化 |
+| --- | --- | --- | --- |
+| 排序 · 冒泡 | `5, 2, 9, 1` | `array` | 柱状图 + 活跃/已归位配色 |
+| 二叉搜索树 | `8, 3, 10, 1` | `tree` | 节点 + 连线，按中序布局 |
+| 图 · BFS | `A-B, A-C, B-D` | `graph` | 环形布局，访问/当前节点配色 |
+| 动态规划 · LIS | `10, 9, 2, 5` | `dp` | nums / dp 两行表格，高亮 i、j |
+
+算法代码里可以调用三个注入函数：
+
+```js
+emit({ type: "array", values: [...], active: [i, j], sorted: [], msg: "比较 ..." });
+log("任意调试信息"); // 输出到日志面板
+return "最终结果";   // 输出到结果面板
+```
+
+完整交互组件如下（可直接切换模式、编辑源码、单步回放）：
+
+<AlgoLab />
+
+### 22.12.4 完整示例代码
+
+下面四个示例与 `examples/` 下的文件一致，既可页内点「▶ 运行」，也可在本地跑：
+
+> 运行方式：`npx tsx examples/22-11-sort-visualization.ts`、`npx tsx examples/22-12-bst-visualization.ts`、`npx tsx examples/22-13-graph-visualization.ts`、`npx tsx examples/22-14-dp-visualization.ts`
+
+#### 排序：冒泡 / 插入 / 快排 / 归并的帧序列
+
+```ts
+// 文件: examples/22-11-sort-visualization.ts
+// ============ 排序可视化：把每一次比较、交换、归位记录成「帧」 ============
+// 可视化的本质不是画图，而是「让算法把中间状态交出来」：
+//   每完成一个关键动作就 push 一帧 { values, active, sorted, msg }，
+//   UI 只负责按帧回放，算法本身仍是纯函数、可单测、可换渲染器。
+// 本示例实现冒泡 / 插入 / 快排 / 归并四种排序的埋点版本，并打印帧序列。
+// 运行方式：npx tsx examples/22-11-sort-visualization.ts
+
+interface Frame {
+  values: number[];
+  active: number[]; // 当前正在比较/交换的下标
+  sorted: number[]; // 已确定最终位置的下标
+  msg: string;
+}
+
+interface Traced {
+  frames: Frame[];
+  result: number[];
+}
+
+const range = (from: number, to: number): number[] =>
+  Array.from({ length: Math.max(to - from, 0) }, (_, i) => from + i);
+
+/** 冒泡：相邻逆序则交换；每轮把最大值推到末尾，可提前结束 */
+function bubbleSort(input: number[]): Traced {
+  const a = [...input];
+  const frames: Frame[] = [];
+  const mark = (active: number[], sorted: number[], msg: string): void => {
+    frames.push({ values: [...a], active, sorted, msg });
+  };
+  mark([], [], `初始数组：[${a.join(", ")}]`);
+  for (let i = 0; i < a.length - 1; i++) {
+    let swapped = false;
+    for (let j = 0; j < a.length - 1 - i; j++) {
+      mark([j, j + 1], range(a.length - i, a.length), `比较 ${a[j]} 与 ${a[j + 1]}`);
+      if (a[j] > a[j + 1]) {
+        [a[j], a[j + 1]] = [a[j + 1], a[j]];
+        mark([j, j + 1], range(a.length - i, a.length), `交换 → ${a[j]}, ${a[j + 1]}`);
+        swapped = true;
+      }
+    }
+    mark([], range(a.length - i - 1, a.length), `第 ${i + 1} 轮结束，下标 ${a.length - 1 - i} 归位`);
+    if (!swapped) {
+      mark([], range(0, a.length), "本轮无交换，数组已有序，提前结束");
+      break;
+    }
+  }
+  return { frames, result: a };
+}
+
+/** 插入：像理扑克牌，把当前牌插到左侧有序区的正确位置 */
+function insertionSort(input: number[]): Traced {
+  const a = [...input];
+  const frames: Frame[] = [];
+  const mark = (active: number[], msg: string): void => {
+    frames.push({ values: [...a], active, sorted: [], msg });
+  };
+  mark([], `初始数组：[${a.join(", ")}]`);
+  for (let i = 1; i < a.length; i++) {
+    const current = a[i];
+    let j = i - 1;
+    mark([i], `取出 ${current}，准备插入左侧有序区`);
+    while (j >= 0 && a[j] > current) {
+      a[j + 1] = a[j];
+      mark([j, j + 1], `${a[j]} 大于 ${current}，后移一位`);
+      j--;
+    }
+    a[j + 1] = current;
+    mark([j + 1], `${current} 落位下标 ${j + 1}`);
+  }
+  return { frames, result: a };
+}
+
+/** 快排：双指针分区；每一帧记录区间与基准归位 */
+function quickSort(input: number[]): Traced {
+  const a = [...input];
+  const frames: Frame[] = [];
+  const mark = (active: number[], msg: string): void => {
+    frames.push({ values: [...a], active, sorted: [], msg });
+  };
+  const partition = (left: number, right: number): void => {
+    if (left > right) return;
+    if (left === right) {
+      mark([left], `单元素 ${a[left]} 自然归位`);
+      return;
+    }
+    const pivot = a[right];
+    let i = left;
+    let j = right - 1;
+    mark([left, right], `分区 [${left}, ${right}]，基准 ${pivot}`);
+    while (i <= j) {
+      while (a[i] < pivot) i++;
+      while (a[j] > pivot) j--;
+      if (i <= j) {
+        [a[i], a[j]] = [a[j], a[i]];
+        mark([i, j], `交换 ${a[j]} 与 ${a[i]}，继续向中间收缩`);
+        i++;
+        j--;
+      }
+    }
+    [a[i], a[right]] = [a[right], a[i]];
+    mark([i], `基准 ${pivot} 归位下标 ${i}`);
+    partition(left, j);
+    partition(i + 1, right);
+  };
+  partition(0, a.length - 1);
+  return { frames, result: a };
+}
+
+/** 归并：自底向上两两合并，帧记录每次合并后的完整数组 */
+function mergeSort(input: number[]): Traced {
+  const a = [...input];
+  const frames: Frame[] = [];
+  const mark = (left: number, right: number, msg: string): void => {
+    frames.push({ values: [...a], active: [left, Math.max(right - 1, left)], sorted: [], msg });
+  };
+  for (let width = 1; width < a.length; width *= 2) {
+    for (let left = 0; left < a.length; left += width * 2) {
+      const mid = Math.min(left + width, a.length);
+      const right = Math.min(left + width * 2, a.length);
+      const merged: number[] = [];
+      let i = left;
+      let j = mid;
+      while (i < mid && j < right) merged.push(a[i] <= a[j] ? a[i++] : a[j++]);
+      while (i < mid) merged.push(a[i++]);
+      while (j < right) merged.push(a[j++]);
+      for (let k = 0; k < merged.length; k++) a[left + k] = merged[k];
+      mark(left, right, `合并 [${left}, ${mid}) 与 [${mid}, ${right})`);
+    }
+  }
+  return { frames, result: a };
+}
+
+const input = [5, 2, 9, 1, 5, 6, 3, 8];
+
+for (const [name, sorter] of [
+  ["冒泡", bubbleSort],
+  ["插入", insertionSort],
+  ["快排", quickSort],
+  ["归并", mergeSort],
+] as const) {
+  const { frames, result } = sorter(input);
+  console.log(`\n=== ${name}排序（${frames.length} 帧）===`);
+  for (const [i, f] of frames.entries()) {
+    console.log(
+      `#${String(i).padStart(2, "0")} [${f.values.join(",")}] 活跃[${f.active.join(",")}] ${f.msg}`,
+    );
+  }
+  const expected = [...input].sort((x, y) => x - y);
+  if (JSON.stringify(result) !== JSON.stringify(expected))
+    throw new Error(`${name}排序结果错误：${result.join(",")}`);
+  if (result.length !== input.length) throw new Error(`${name}排序丢元素`);
+}
+
+console.log("\n✓ 四种排序结果一致，帧序列可供 UI 回放");
+```
+
+#### 二叉搜索树：插入 / 查找 / 中序的路径帧
+
+```ts
+// 文件: examples/22-12-bst-visualization.ts
+// ============ 二叉搜索树可视化：插入 / 查找 / 遍历的路径帧 ============
+// 树的帧必须交出一棵「可序列化的快照」，而不是节点引用：
+//   引用在回放时早已被后续插入修改，历史帧会一起变化（典型的可变状态陷阱）。
+// 本示例每次关键动作都深拷贝整棵树，UI 按帧就能看到节点逐个长出来。
+// 运行方式：npx tsx examples/22-12-bst-visualization.ts
+
+interface BSTNode {
+  value: number;
+  left: BSTNode | null;
+  right: BSTNode | null;
+}
+
+/** 深拷贝：只保留 value/left/right，避免把方法或循环引用带进帧 */
+function snapshot(node: BSTNode | null): BSTNode | null {
+  if (!node) return null;
+  return { value: node.value, left: snapshot(node.left), right: snapshot(node.right) };
+}
+
+interface TreeFrame {
+  tree: BSTNode | null;
+  active: number | null;
+  found: number[];
+  msg: string;
+}
+
+class TracedBST {
+  root: BSTNode | null = null;
+  readonly frames: TreeFrame[] = [];
+
+  private mark(active: number | null, found: number[], msg: string): void {
+    this.frames.push({ tree: snapshot(this.root), active, found, msg });
+  }
+
+  insert(value: number): void {
+    this.root = this.insertAt(this.root, value);
+    this.mark(value, [], `插入 ${value}`);
+  }
+
+  private insertAt(node: BSTNode | null, value: number): BSTNode {
+    if (!node) return { value, left: null, right: null };
+    if (value < node.value) node.left = this.insertAt(node.left, value);
+    else if (value > node.value) node.right = this.insertAt(node.right, value);
+    // 相等值不重复插入：BST 的「键唯一」约束
+    return node;
+  }
+
+  search(target: number): boolean {
+    let node = this.root;
+    const path: number[] = [];
+    while (node) {
+      path.push(node.value);
+      this.mark(node.value, [], `访问 ${node.value}（路径 ${path.join(" → ")}）`);
+      if (node.value === target) {
+        this.mark(node.value, [target], `命中 ${target}`);
+        return true;
+      }
+      node = target < node.value ? node.left : node.right;
+    }
+    this.mark(null, [], `未找到 ${target}`);
+    return false;
+  }
+
+  inorder(): number[] {
+    const out: number[] = [];
+    const walk = (node: BSTNode | null): void => {
+      if (!node) return;
+      walk(node.left);
+      out.push(node.value);
+      this.mark(node.value, out, `中序访问 ${node.value}`);
+      walk(node.right);
+    };
+    walk(this.root);
+    return out;
+  }
+
+  height(node: BSTNode | null = this.root): number {
+    return node ? 1 + Math.max(this.height(node.left), this.height(node.right)) : 0;
+  }
+}
+
+const values = [8, 3, 10, 1, 6, 14, 4, 7, 13];
+const bst = new TracedBST();
+for (const v of values) bst.insert(v);
+
+console.log("=== 插入帧（每次插入后整棵树快照）===");
+console.log(`共 ${bst.frames.length} 帧，根节点 ${bst.root?.value}`);
+
+const before = bst.frames.length;
+console.log("\n=== 查找 7 ===");
+console.log("查找结果:", bst.search(7));
+console.log("查找 99:", bst.search(99));
+
+console.log("\n=== 中序遍历（即升序）===");
+const ordered = bst.inorder();
+console.log("中序:", ordered.join(", "));
+
+console.log("\n=== 最近 3 帧 ===");
+for (const f of bst.frames.slice(-3)) {
+  console.log(`活跃 ${f.active ?? "-"}：${f.msg}`);
+}
+
+const expected = [...new Set(values)].sort((a, b) => a - b);
+if (JSON.stringify(ordered) !== JSON.stringify(expected))
+  throw new Error(`中序遍历不是升序：${ordered.join(",")}`);
+if (bst.height() !== 4) throw new Error(`树高应为 4，实际 ${bst.height()}`);
+if (bst.search(7) !== true || bst.search(99) !== false) throw new Error("查找结果错误");
+if (bst.frames.length <= before) throw new Error("查找过程没有产生帧");
+
+console.log("\n✓ 插入/查找/遍历帧完整，中序升序，树高正确");
+```
+
+#### 图：BFS / DFS / 拓扑排序
+
+```ts
+// 文件: examples/22-13-graph-visualization.ts
+// ============ 图遍历可视化：BFS / DFS / Kahn 拓扑排序 ============
+// 图的可视化帧只需要交三样东西：已访问集合、当前节点、队列/栈内容。
+// 节点坐标由 UI 负责布局，算法不关心画在哪——职责分离后，同一份帧可以换任何渲染器。
+// 运行方式：npx tsx examples/22-13-graph-visualization.ts
+
+type Adjacency = Record<string, string[]>;
+
+interface GraphFrame {
+  visited: string[];
+  active: string | null;
+  frontier: string[];
+  msg: string;
+}
+
+function buildGraph(edges: [string, string][]): Adjacency {
+  const adj: Adjacency = {};
+  const add = (from: string, to: string): void => {
+    (adj[from] ??= []).push(to);
+    adj[to] ??= [];
+  };
+  for (const [a, b] of edges) add(a, b);
+  return adj;
+}
+
+/** BFS：队列逐层扩散，首次到达即最短（无权图） */
+function bfs(adj: Adjacency, start: string): GraphFrame[] {
+  const frames: GraphFrame[] = [];
+  const visited = new Set<string>([start]);
+  const queue = [start];
+  const mark = (active: string | null, msg: string): void => {
+    frames.push({ visited: [...visited], active, frontier: [...queue], msg });
+  };
+  mark(null, `起点 ${start} 入队`);
+  while (queue.length) {
+    const current = queue.shift()!;
+    mark(current, `出队并访问 ${current}`);
+    for (const next of adj[current] ?? []) {
+      if (visited.has(next)) continue;
+      visited.add(next);
+      queue.push(next);
+      mark(next, `${next} 首次到达，入队`);
+    }
+  }
+  return frames;
+}
+
+/** DFS：显式栈（逆序压栈保证按邻接表顺序访问），避免深图递归爆栈 */
+function dfs(adj: Adjacency, start: string): GraphFrame[] {
+  const frames: GraphFrame[] = [];
+  const visited = new Set<string>();
+  const stack = [start];
+  const mark = (active: string | null, msg: string): void => {
+    frames.push({ visited: [...visited], active, frontier: [...stack], msg });
+  };
+  mark(null, `起点 ${start} 压栈`);
+  while (stack.length) {
+    const current = stack.pop()!;
+    if (visited.has(current)) {
+      mark(current, `${current} 已访问，跳过`);
+      continue;
+    }
+    visited.add(current);
+    mark(current, `访问 ${current}`);
+    const neighbors = adj[current] ?? [];
+    for (let i = neighbors.length - 1; i >= 0; i--) {
+      if (!visited.has(neighbors[i])) stack.push(neighbors[i]);
+    }
+  }
+  return frames;
+}
+
+/** Kahn：反复取出入度 0 的节点；输出不足 n 个即存在环 */
+function topoSort(adj: Adjacency): { order: string[]; cycle: boolean } {
+  const indegree = new Map<string, number>();
+  for (const node of Object.keys(adj)) indegree.set(node, 0);
+  for (const nexts of Object.values(adj))
+    for (const next of nexts) indegree.set(next, (indegree.get(next) ?? 0) + 1);
+
+  const queue = [...indegree.entries()].filter(([, d]) => d === 0).map(([n]) => n);
+  const order: string[] = [];
+  while (queue.length) {
+    const current = queue.shift()!;
+    order.push(current);
+    for (const next of adj[current] ?? []) {
+      const d = (indegree.get(next) ?? 0) - 1;
+      indegree.set(next, d);
+      if (d === 0) queue.push(next);
+    }
+  }
+  return { order, cycle: order.length !== indegree.size };
+}
+
+const edges: [string, string][] = [
+  ["A", "B"],
+  ["A", "C"],
+  ["B", "D"],
+  ["C", "D"],
+  ["D", "E"],
+];
+const adj = buildGraph(edges);
+
+const bfsFrames = bfs(adj, "A");
+console.log(`=== BFS（${bfsFrames.length} 帧）===`);
+for (const f of bfsFrames) console.log(`访问[${f.visited.join(",")}] 队列[${f.frontier.join(",")}] ${f.msg}`);
+
+const dfsFrames = dfs(adj, "A");
+console.log(`\n=== DFS（${dfsFrames.length} 帧）===`);
+for (const f of dfsFrames) console.log(`访问[${f.visited.join(",")}] 栈[${f.frontier.join(",")}] ${f.msg}`);
+
+const dag: Adjacency = buildGraph([
+  ["先装依赖", "编译"],
+  ["下载源码", "编译"],
+  ["编译", "打包"],
+  ["打包", "部署"],
+]);
+const topo = topoSort(dag);
+console.log(`\n=== 拓扑排序 ===\n顺序: ${topo.order.join(" → ")}，有环: ${topo.cycle}`);
+
+const cyclic = buildGraph([
+  ["A", "B"],
+  ["B", "C"],
+  ["C", "A"],
+]);
+const cyclicTopo = topoSort(cyclic);
+console.log(`循环依赖检测: 有环 ${cyclicTopo.cycle}，能排出的节点 ${cyclicTopo.order.length}`);
+
+if (bfsFrames.at(-1)!.visited.length !== 5) throw new Error("BFS 未访问全部节点");
+if (dfsFrames.at(-1)!.visited.length !== 5) throw new Error("DFS 未访问全部节点");
+if (topo.cycle || topo.order.length !== 5) throw new Error("DAG 拓扑排序错误");
+if (!cyclicTopo.cycle) throw new Error("循环依赖未被识别");
+
+console.log("\n✓ BFS/DFS 全覆盖，DAG 可拓扑排序，环可检测");
+```
+
+#### 动态规划：LIS / 最大子数组 / 斐波那契
+
+```ts
+// 文件: examples/22-14-dp-visualization.ts
+// ============ 动态规划可视化：把 dp 表的每一次写入记录成帧 ============
+// DP 难在「看不见」：递归树指数展开、转移方程抽象。把 dp 表每个格子的
+// 计算过程 emit 出来，状态定义、初始化、遍历顺序、返回值五步就都能被肉眼检查。
+// 本示例覆盖 LIS（O(n²) 填表）、最大子数组和（滚动变量）、斐波那契（双变量）。
+// 运行方式：npx tsx examples/22-14-dp-visualization.ts
+
+interface DPFrame {
+  row: number[]; // 当前数组
+  dp: number[];
+  i: number;
+  j: number;
+  msg: string;
+}
+
+/** 最长递增子序列：dp[i] = 以 nums[i] 结尾的最长长度 */
+function lis(nums: number[]): { length: number; frames: DPFrame[] } {
+  const dp = new Array<number>(nums.length).fill(1);
+  const frames: DPFrame[] = [];
+  const mark = (i: number, j: number, msg: string): void => {
+    frames.push({ row: [...nums], dp: [...dp], i, j, msg });
+  };
+  mark(-1, -1, "初始化 dp 全为 1（每个元素自成长度 1）");
+  for (let i = 0; i < nums.length; i++) {
+    for (let j = 0; j < i; j++) {
+      mark(i, j, `比较 nums[${j}]=${nums[j]} 与 nums[${i}]=${nums[i]}`);
+      if (nums[j] < nums[i] && dp[j] + 1 > dp[i]) {
+        dp[i] = dp[j] + 1;
+        mark(i, j, `更新 dp[${i}] = ${dp[i]}（接到 dp[${j}] 后面）`);
+      }
+    }
+  }
+  return { length: Math.max(...dp), frames };
+}
+
+/** 最大子数组和：dp[i] = max(nums[i], dp[i-1] + nums[i])，只留一个滚动变量 */
+function maxSubArray(nums: number[]): number {
+  let prev = nums[0];
+  let best = prev;
+  for (let i = 1; i < nums.length; i++) {
+    prev = Math.max(nums[i], prev + nums[i]);
+    best = Math.max(best, prev);
+  }
+  return best;
+}
+
+/** 斐波那契：dp[i] 只依赖前两项，两个滚动变量 + 一次交换即可 O(1) 空间 */
+function fib(n: number): number {
+  let prev = 0;
+  let current = 1;
+  for (let i = 2; i <= n; i++) {
+    const next = prev + current;
+    prev = current;
+    current = next;
+  }
+  return n === 0 ? 0 : current;
+}
+
+const nums = [10, 9, 2, 5, 3, 7, 101, 18];
+const { length: lisLength, frames: lisFrames } = lis(nums);
+
+console.log(`=== LIS 帧序列（${lisFrames.length} 帧）===`);
+for (const [k, f] of lisFrames.entries()) {
+  console.log(
+    `#${String(k).padStart(2, "0")} dp=[${f.dp.join(",")}] 活跃(${f.i},${f.j}) ${f.msg}`,
+  );
+}
+
+const maxFrame = lisFrames.filter((f) => f.i >= 0).at(-1)!;
+console.log(`\n最终 dp=[${maxFrame.dp.join(", ")}]，LIS 长度 ${lisLength}`);
+
+console.log("\n=== 最大子数组和 ===");
+const sub = maxSubArray([-2, 1, -3, 4, -1, 2, 1, -5, 4]);
+console.log("[-2,1,-3,4,-1,2,1,-5,4] →", sub);
+
+console.log("\n=== 斐波那契（滚动变量）===");
+console.log("fib(0..10):", Array.from({ length: 11 }, (_, i) => fib(i)).join(", "));
+
+if (lisLength !== 4) throw new Error(`LIS 长度应为 4，实际 ${lisLength}`);
+if (sub !== 6) throw new Error(`最大子数组和应为 6，实际 ${sub}`);
+if (fib(10) !== 55) throw new Error(`fib(10) 应为 55，实际 ${fib(10)}`);
+if (lisFrames.length < 20) throw new Error("帧数过少，dp 过程没有被记录");
+
+console.log("\n✓ LIS / 最大子数组 / 斐波那契结果正确，dp 帧可回放");
+```
+
+### 22.12.5 能力边界与坑点
+
+| 坑 | 现象 | 避法 |
+| --- | --- | --- |
+| 帧里塞节点引用 | 回放到第 2 帧时树已经长满，历史帧被后续修改 | 每帧深拷贝快照，或让算法全程使用不可变结构 |
+| 用户代码死循环 | 页面白屏、主线程卡死 | Worker + 2 秒 `setTimeout` + `worker.terminate()` |
+| 在浏览器里跑 TS | 首屏多下载数 MB 编译器，离线不可用 | 构建期 esbuild 转译；编辑区只接受 JS |
+| Worker 里访问 DOM | 报错 `document is not defined` | 算法与渲染彻底分离，只通过 `emit` 通信 |
+| 帧太密 | 播放像快进，用户看不清 | 合并同质步骤（如连续未交换的比较），或提供调速与单步 |
+| 只可视化结果 | 看不到「为什么」这一步这样走 | 每帧附带 `msg`，把比较/交换/入队的语义写出来 |
+| 可视化逻辑侵入算法 | 算法被 UI 依赖，无法单测 | 采用「帧收集器」注入：生产传空实现，测试传数组收集器 |
+
+> 一句话：**可视化不是给算法加特效，而是让算法把中间状态交出来。** 帧协议定好之后，排序、树、图、DP 只是四种渲染器，算法本身仍可单测、可复用。回看 [22.8](#_22-8-排序算法-十大排序全景)、[22.9](#_22-9-动态规划-把算过的记住) 的复杂度推导，再用实验室跑一遍，抽象结论会落到具体的每一步上。

@@ -1,0 +1,458 @@
+# 第二十八部分 · 手写浏览器内核（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/28-mini-browser-engine
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第二十八部分 · 手写浏览器内核
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第十部分 · 浏览器原理与渲染性能](./10-browser-rendering.md) · [第十二部分 · CSS 工程化与现代 CSS](./12-css-engineering.md) · [第二十七部分 · 手写前端框架](./27-mini-framework.md)
+>
+> 🎬 配套漫画剧场：[EP.47 CSS 字符串变盒子](./comics/EP.47-mini-css-parser.md) · [EP.48 .a .b 为啥慢](./comics/EP.48-mini-selector.md) · [EP.49 flex 主轴交叉轴那点事](./comics/EP.49-mini-flex-layout.md)
+
+> 💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。配套工程见 [case 12：手写浏览器渲染引擎](./cases.md#case-12-mini-browser-engine-lab)（70 个测试用例）。
+
+## 本部分内容
+
+- [28.1 mini-css-parser：CSS 字符串变盒子](#_28-1-mini-css-parser-css-字符串变盒子)
+- [28.2 mini-selector：selector 匹配从哪一头开始](#_28-2-mini-selector-selector-匹配从哪一头开始)
+- [28.3 mini-flex-layout：flex 主轴交叉轴](#_28-3-mini-flex-layout-flex-主轴交叉轴)
+- [28.4 mini-cascade：specificity 与层叠](#_28-4-mini-cascade-specificity-与层叠)
+- [28.5 mini-box-model：盒模型与 block flow](#_28-5-mini-box-model-盒模型与-block-flow)
+- [28.6 自测题](#_28-6-自测题)
+- [28.7 本章避坑清单](#_28-7-本章避坑清单)
+
+```mermaid
+flowchart LR
+    A[CSS 字符串] --> B[Tokenizer<br/>切 token 流]
+    B --> C[Parser<br/>Rule / AtRule / Declaration AST]
+    C --> D[Selector 解析<br/>+ BOF 匹配]
+    D --> E[Cascade 层叠<br/>!important > specificity > 源码顺序]
+    E --> F[Box Model<br/>盒模型计算]
+    F --> G[Flex Layout<br/>主轴/交叉轴分配]
+```
+
+---
+
+> 浏览器渲染流水线里，**CSSOM → Style → Layout** 是从"文本"到"盒子坐标"的核心三段。本章用五个独立的 mini 模块把它手写一遍：CSS 解析、选择器匹配、层叠、盒模型、Flex 布局。每个模块只聚焦一个问题，不依赖第三方库。
+
+---
+
+## 28.1 mini-css-parser：CSS 字符串变盒子
+
+### 28.1.1 概念解析
+
+CSS 语法没有显式的"这是 selector"标记——`body` 和 `color` 都是普通标识符，它们的语义完全由**位置关系**决定：遇到 `{` 之前的是 selector，遇到 `:` 之前的 identifier 是 property。因此手写 parser 必须是 **tokenizer + parser 两层**：
+
+1. **Tokenizer**：逐字符扫描，产出有类型的 token 流（`ident` / `string` / `number` / `hash` / `at-keyword` / `{ } ; ,` 等）。空白和注释直接处理，字符串里的标点原样保留。
+2. **Parser**：基于 token 类型做结构化判断——遇到 `{` 前面的 token 序列拼成 selector，花括号内部按 `prop: value;` 解析 declaration。
+
+**三种新手最容易漏的边界**：
+
+| 边界 | 错误做法 | 正确做法 |
+| --- | --- | --- |
+| `content: "}"` | 字符串里的 `}` 被当成 rule 结束 | tokenizer 优先识别字符串，引号内一切原样保留 |
+| `@media { .a { } }` | 丢掉嵌套结构 | parser 识别 at-rule，完整递归 parse 内部 rules |
+| `/* comment */` | 产出 token 干扰结构 | tokenizer 阶段直接跳过，不产出 token |
+
+### 28.1.2 核心代码摘要
+
+```ts
+// 文件: examples/28-01-css-parser.ts
+// Tokenizer：字符串优先识别 → 数字/尺寸 → #hash → @keyword → :pseudo → ident → 单字符标点
+
+class Tokenizer {
+  next(): Token {
+    // 跳过 /* comment */
+    while (this.peek() === "/" && this.peek(1) === "*") {
+      while (!(this.peek() === "*" && this.peek(1) === "/")) this.pos++;
+      this.consume(2);
+    }
+    const c = this.peek();
+    if (/\s/.test(c)) { /* whitespace token */ }
+    if (c === '"' || c === "'") {
+      // 字符串优先：引号内的 } ; : 全部原样保留
+      const quote = this.consume(); let val = "";
+      while (this.peek() !== quote) val += this.consume();
+      this.consume();
+      return { type: "string", value: val };
+    }
+    // ... number / hash / at-keyword / pseudo / ident ...
+  }
+}
+
+// Parser：启发式区分 declaration 与 rule
+// 向前看：遇到 '{' 前先遇到 ':'（且没遇到 ';'）→ declaration；否则是 rule
+parseRuleList(): CssNode[] {
+  while (not EOF && not rbrace) {
+    if (at-keyword) parseAtRule();
+    else if (isDeclaration()) parseDeclaration();
+    else parseRule();
+  }
+}
+
+// AtRule 区分带 block（@media/@keyframes）和不带 block（@import/@charset）
+// parseRule 里 splitTopLevel(prelude, ",") 要跳过括号深度和字符串
+```
+
+> 运行方式：`npx tsx examples/28-01-css-parser.ts`。
+
+**预期输出**：能正确解析 `content: "}"`（字符串边界）、`@media` 嵌套规则、`!important` 标记，且 `body content` 的值是 `}` 而不是提前结束。
+
+### 28.1.3 应用实践
+
+真实项目里**不要自己写 CSS parser**——生产级 CSS parser（PostCSS / csstree）处理了全部 CSS 规范边界（转义、Unicode、`@supports`、自定义属性等）。手写的意义在于理解：**为什么 selector 和 declaration 靠位置区分、为什么字符串必须优先识别**。理解了这两点，调试 PostCSS AST 或写 stylelint 插件时才不会懵。
+
+---
+
+## 28.2 mini-selector：selector 匹配从哪一头开始
+
+### 28.2.1 概念解析
+
+浏览器引擎的 selector matching 通用方向是 **BOF（Bottom-Up Matching，从右向左）**：
+
+```
+selector: body div span.icon
+匹配顺序:  span.icon（最右，直接命中节点）← div（祖先）← body（祖先）
+```
+
+**为什么从右向左**：DOM 节点数通常远大于 selector 片段数。先定位**目标元素集合**（最右片段），集合大小通常远小于全 DOM；再对每个目标节点**向上遍历父链**——父链深度是树高，远好于从根向下全扫 O(N)。
+
+**Combinator 决定候选范围**：
+
+| Combinator | 候选来源 |
+| --- | --- |
+| 后代（空格） | 所有祖先 |
+| 子（`>`） | 直接 parent |
+| 相邻（`+`） | 前一个兄弟 |
+| 兄弟（`~`） | 所有前方兄弟 |
+
+候选集合中**只要有一个命中前序 compound** 就继续向上回溯；整条链走通返回 `true`，任意一步候选为空返回 `false`。
+
+### 28.2.2 核心代码摘要
+
+```ts
+// 文件: examples/28-02-selector.ts
+// AST: SelectorList(逗号) → ComplexSelector(combinator 分隔) → CompoundSelector(tag/id/class/attr/pseudo)
+
+function matchComplex(node: DomNode, cx: Complex): boolean {
+  const parts = cx.parts;
+  // 右端 compound 必须直接命中当前节点
+  if (!matchCompound(node, parts[parts.length - 1].compound)) return false;
+  if (parts.length === 1) return true;
+
+  // 向左回溯：按 combinator 收集候选，只要一个命中就继续
+  let cur: DomNode | undefined = node;
+  for (let i = parts.length - 2; i >= 0; i--) {
+    const { combinator } = parts[i + 1];
+    const prev = parts[i].compound;
+    let cands: DomNode[] = [];
+    if (combinator === "descendant") {
+      let p = cur?.parent; while (p) { cands.push(p); p = p.parent; }
+    } else if (combinator === "child") {
+      if (cur?.parent) cands.push(cur.parent);
+    } else if (combinator === "adjacent") {
+      // 前一个兄弟
+    } else if (combinator === "sibling") {
+      // 所有前方兄弟
+    }
+    const hit = cands.find((c) => matchCompound(c, prev));
+    if (!hit) return false;
+    cur = hit;
+  }
+  return true;
+}
+```
+
+> 运行方式：`npx tsx examples/28-02-selector.ts`。
+
+**预期输出**：12 个 selector 全部匹配正确，包括后代/子/相邻/兄弟四种 combinator、属性选择器 `[data-role="item"]`、伪类 `:first-child` / `:nth-child(2n)`。
+
+### 28.2.3 应用实践
+
+写 CSS 时的性能直觉来自 BOF：
+- **最右片段决定候选集大小**：`.container .item` 比 `div .item` 快（class 集合远小于 tag 集合）；
+- **`*` 通配符在右侧是性能核弹**：每个 DOM 节点都要参与匹配；
+- **后代嵌套别超 3 层**：每层加一次父链遍历；
+- 属性选择器的复杂匹配（`*=` 正则式）开销显著，优先用 class。
+
+---
+
+## 28.3 mini-flex-layout：flex 主轴交叉轴
+
+### 28.3.1 概念解析
+
+Flex 布局的主轴空间分配分三步：
+
+1. **基础宽度**：每个 item 先按 `flex-basis` 给基础尺寸（`auto` = 自身 width/height）；
+2. **grow（空间充足）**：剩余空间按 `flex-grow` 比例分配；
+3. **shrink（空间不足）**：deficit 按 **`flex-shrink × flex-basis`** 的加权比例分摊——basis 大的权重高，缩得多。
+
+`justify-content` 统一用 `(start, step)` 模型：六种模式只是 `start` 偏移和 `step` 间隔的不同取值。
+
+**三个最坑**：
+- `flex: 1`（`1 1 0%`）vs `flex: auto`（`1 1 auto`）：前者 basis=0 从头等分，后者 basis=自身宽只分剩余；
+- `min-width: auto` 是默认值，等于内容最小宽度，会阻止 item shrink 到内容以下——想真的缩到 0 必须显式 `min-width: 0`；
+- `flex-shrink` 只在空间不够时生效，grow 和 shrink 互斥。
+
+### 28.3.2 核心代码摘要
+
+```ts
+// 文件: examples/28-03-flex-layout.ts
+// 主轴空间分配：grow 按比例分剩余，shrink 按 basis×shrink 加权分摊 deficit
+
+function distribute(items: LineEntry[], avail: number): void {
+  const totalBasis = items.reduce((s, e) => s + e.base, 0);
+  const free = avail - totalBasis;
+
+  if (free >= 0) {
+    // grow：按 grow 比例分剩余空间
+    const totalGrow = items.reduce((s, e) => s + e.grow, 0);
+    for (const e of items)
+      e.box.width = e.base + (free * e.grow) / totalGrow;
+  } else {
+    // shrink：按 basis × shrink 加权分摊 deficit
+    const deficit = -free;
+    const weighted = items.reduce((s, e) => s + e.base * e.shrink, 0);
+    for (const e of items) {
+      const share = (deficit * e.base * e.shrink) / weighted;
+      e.box.width = Math.max(0, e.base - share);
+    }
+  }
+}
+
+// justify-content：六种模式统一成 (start, step)
+function position(items, avail, jc) {
+  const free = avail - items.reduce((s, e) => s + e.box.width, 0);
+  let start = 0, step = 0;
+  switch (jc) {
+    case "flex-start":    start = 0; break;
+    case "flex-end":      start = free; break;
+    case "center":        start = free / 2; break;
+    case "space-between": start = 0; step = free / (items.length - 1); break;
+    case "space-around":  start = free / (2 * items.length); step = free / items.length; break;
+    case "space-evenly":  start = free / (items.length + 1); step = free / (items.length + 1); break;
+  }
+}
+```
+
+> 运行方式：`npx tsx examples/28-03-flex-layout.ts`。
+
+**预期输出**：`flex:1` 三等分、`flex:auto` 从基础宽分摊 deficit、shrink 加权（basis 大的多缩）、grow 1:2:1 比例、`space-between` 间隔分配。
+
+### 28.3.3 应用实践
+
+手写 flex 引擎后，"为什么我设了 `flex:1` 还是没等分"这类问题就有了确定答案：检查 `flex-basis` 是不是 `auto`（用了 `flex:auto` 而非 `flex:1`），以及 `min-width: auto` 是不是把 item 卡住了。
+
+---
+
+## 28.4 mini-cascade：specificity 与层叠
+
+### 28.4.1 概念解析
+
+**Specificity 四元组** `[inline, id, class+attr+pseudo, tag+pseudo-element]`：
+
+| Selector | 四元组 |
+| --- | --- |
+| `div` | `[0,0,0,1]` |
+| `.nav` | `[0,0,1,0]` |
+| `#header` | `[0,1,0,0]` |
+| `div.nav` | `[0,0,1,1]` |
+| `#header .title` | `[0,1,1,0]` |
+
+逗号分隔的 selector list 取**最大的**那个 specificity。
+
+**层叠排序**只按一个稳定排序：`!important` 升序（非 important 在前）→ specificity 升序（低在前）→ 源码顺序升序。之后依次 `Map.set(property, declaration)`，后 set 的自然覆盖前 set 的——一条排序同时处理了 specificity 和源码位置两个维度。
+
+### 28.4.2 核心代码摘要
+
+```ts
+// 文件: examples/28-04-cascade.ts
+// 复用 28-01 的 parseStylesheet 与 28-02 的 matches
+
+export function cascade(decls: Cascadable[]): Map<string, Declaration> {
+  const sorted = [...decls].sort((a, b) => {
+    // !important 升序：非 important 在前，important 在后（覆盖前者）
+    if (a.declaration.important !== b.declaration.important)
+      return a.declaration.important ? 1 : -1;
+    // specificity 升序：低在前，高在后
+    const s = cmp(a.specificity, b.specificity);
+    if (s !== 0) return s;
+    // 源码顺序升序：同 specificity 后者覆盖前者
+    return a.order - b.order;
+  });
+  const map = new Map<string, Declaration>();
+  for (const d of sorted) map.set(d.declaration.property, d.declaration);
+  return map; // 后 set 覆盖前 set，一条排序搞定层叠
+}
+```
+
+> 运行方式：`npx tsx examples/28-04-cascade.ts`。
+
+**预期输出**：`div#header.nav` 的 `color` 由 `#header`（`[0,1,0,0]`）胜出为 `red`，`font-size` 由 `div.nav`（`[0,0,1,1]`）胜出为 `16px`；`span.title` 在 `#header` 内时 `color` 由 `#header .title`（`[0,1,1,0]`）胜出为 `purple`。
+
+### 28.4.3 应用实践
+
+理解层叠排序后，"为什么我的样式没生效"就有了排查顺序：先看 `!important`，再看 specificity 四元组，最后看源码顺序（后写的覆盖先写的）。`!important` 不是作弊器——inline `!important` 才是最高优先级，但会破坏整个层叠模型，非必要不用。
+
+---
+
+## 28.5 mini-box-model：盒模型与 block flow
+
+### 28.5.1 概念解析
+
+**content-box vs border-box**：
+- `content-box`（默认）：`width` = 内容宽度，padding/border 额外叠加；
+- `border-box`：`width` = 内容 + padding + border，内容宽度 = `width - padding - border`。
+
+**简写展开**（padding / margin / border-width）：
+
+| 写法 | 展开（上 右 下 左） |
+| --- | --- |
+| `8px` | 8 8 8 8 |
+| `4px 8px` | 4 8 4 8 |
+| `1px 2px 3px` | 1 2 3 2 |
+| `1 2 3 4` | 1 2 3 4 |
+
+**百分比基于父宽**（padding/margin/width 的 `%` 都相对父元素宽度，即使是上下方向也是如此——这是 CSS 的反直觉设计）。
+
+### 28.5.2 核心代码摘要
+
+```ts
+// 文件: examples/28-05-box-model.ts
+// 简写展开 + box-sizing 计算
+
+export function computeBox(style: Map<string, string>, parentWidth = 0): Box {
+  const [pt, pr, pb, pl] = parseShorthand(style.get("padding"));
+  // ... border / margin 同理
+
+  const paddingLeft = resolveLen(pl, parentWidth);
+  // ...
+
+  let width = 0;
+  const wRaw = parseCssValue(style.get("width"));
+  if (wRaw && wRaw.unit !== "auto") {
+    width = wRaw.unit === "%" ? (wRaw.value / 100) * parentWidth : wRaw.value;
+    if (boxSizing === "border-box")
+      width = Math.max(0, width - borderLeft - borderRight - paddingLeft - paddingRight);
+  }
+  // borderWidth = width + padding + border
+  // marginBoxWidth = borderWidth + margin
+}
+```
+
+> 运行方式：`npx tsx examples/28-05-box-model.ts`。
+
+**预期输出**：`content-box` 下 `width:100 padding:10 border:2` 的 border-box 是 124；`border-box` 下同样设置内容宽只有 76；百分比基于父宽 400 时 `width:50%` = 200。
+
+### 28.5.3 应用实践
+
+全局 `* { box-sizing: border-box }` 已经是现代项目标配——它让 `width` 真正等于"你看到的盒子宽度"，避免 padding 撑破布局。但要知道它做了什么：内容宽 = `width - padding - border`，如果 padding/border 加起来超过 width，内容宽会被 clamp 到 0。
+
+---
+
+## 28.6 自测题
+
+**1. 【基础】手写 CSS parser 时，为什么必须是 tokenizer + parser 两层，不能直接用字符串 split 或正则？**
+
+<details>
+<summary>参考答案</summary>
+
+- split/正则无法正确处理嵌套：`@media { .a { color: red; } }` 里有多个 `{` `}`；
+- 字符串内部的标点会被误切：`content: "}"` 里的 `}` 会被当成 rule 边界；
+- comment 跨多行也会干扰 split 结果；
+- tokenizer 先产出**有类型**的 token 数组，parser 才能基于类型做结构化判断。
+</details>
+
+**2. 【进阶】为什么浏览器引擎选择"从右向左"匹配 selector，而不是"从左向右"？**
+
+<details>
+<summary>参考答案</summary>
+
+- DOM size 远大于 selector length：selector 通常几到十几个片段，DOM 节点可能几千几万；
+- BOF 先定位目标元素集合（最右片段），集合大小通常远小于全 DOM；
+- 对目标集合内每个节点向上遍历父链——父链深度是树高，远好于全扫 O(N)；
+- 反过来从 body 向下找 span，要遍历 body 的所有后代再逐个判断，O(N) 且大量无效遍历。
+</details>
+
+**3. 【进阶】容器 300px，三个 item：basis 150/100/80，shrink 各 1。shrink 后各自最终宽度是多少？为什么 basis 大的缩得多？**
+
+<details>
+<summary>参考答案</summary>
+
+```
+总 basis = 150 + 100 + 80 = 330，需缩减 30px
+shrink 权重 = 1×150 : 1×100 : 1×80 = 330
+item1 缩 30 × 150/330 ≈ 13.6 → 136.4px
+item2 缩 30 × 100/330 ≈ 9.1  → 90.9px
+item3 缩 30 ×  80/330 ≈ 7.3  → 72.7px
+```
+
+shrink 权重 = `flexShrink × basis`，不是只用 `flexShrink` 本身。basis 大的 item 权重高，所以分摊的 deficit 多，缩得多。
+</details>
+
+**4. 【基础】`#header .title` 和 `div.nav .title` 哪个 specificity 高？四元组分别是多少？**
+
+<details>
+<summary>参考答案</summary>
+
+- `#header .title` = `[0,1,1,0]`（1 个 id + 1 个 class）
+- `div.nav .title` = `[0,0,2,1]`（2 个 class + 1 个 tag）
+- 比较第二位：1 > 0，所以 `#header .title` 胜出。
+
+id 的权重远高于 class——一个 id 就能压过任意数量的 class。
+</details>
+
+**5. 【挑战】手写一个 BOF 风格的 selector matcher，支持后代选择器和类选择器 `.a .b`。**
+
+<details>
+<summary>参考答案</summary>
+
+```ts
+function parseSelector(sel) {
+  return sel.trim().split(/\s+/); // ['div.container', 'span.icon']
+}
+function matchSimple(el, fragment) {
+  for (const f of fragment.split(".")) {
+    if (!f) continue;
+    if (/^[a-zA-Z]/.test(f)) {
+      if (el.tagName.toLowerCase() !== f) return false;
+    } else {
+      if (!el.classList.contains(f)) return false;
+    }
+  }
+  return true;
+}
+function matches(el, selector) {
+  const parts = parseSelector(selector);
+  let cur = el;
+  for (let i = parts.length - 1; i >= 0; i--) {  // 从右向左
+    if (!matchSimple(cur, parts[i])) return false;
+    if (i > 0) {
+      cur = cur.parentElement;
+      if (!cur) return false;
+    }
+  }
+  return true;
+}
+```
+
+核心：最右片段匹配当前节点，然后向左按 combinator（这里简化为后代=祖先）找候选。
+</details>
+
+---
+
+## 28.7 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| CSS parser | 用 split/正则 parse CSS，字符串里的 `}` 把 rule 提前结束 | tokenizer 优先识别字符串，引号内一切原样保留；嵌套用递归 parser |
+| CSS parser | `@media` 嵌套 rule 被丢掉，AST 只剩顶层 | parser 识别 at-rule 并完整递归 parse 内部 rules，挂到 `children` |
+| Selector 匹配 | 以为 selector 从左向右匹配，写了超长后代链还觉得快 | BOF 从右向左，最右片段决定候选集；嵌套别超 3 层，最右用 class 别用 tag |
+| Selector 匹配 | `*` 通配符放在 selector 右侧 | `*` 让每个 DOM 节点都参与匹配，是性能核弹；最右用具体 class/tag |
+| Flex 等分 | 用了 `flex: auto` 还奇怪为什么没等分 | `flex: auto` = `1 1 auto`（basis=自身宽），要等分用 `flex: 1` = `1 1 0%` |
+| Flex shrink | 设了 `flex-shrink: 1` 但 item 没缩到预期 | `min-width: auto`（默认）= 内容最小宽度，会卡住 shrink；显式 `min-width: 0` |
+| Flex shrink | 以为 shrink 是均等缩减 | shrink 权重 = `flexShrink × basis`，basis 大的缩得多 |
+| Cascade | 同 specificity 时以为先写的生效 | 层叠按源码顺序升序，**后写的覆盖先写的** |
+| Cascade | 用 `!important` 覆盖样式 | `!important` 破坏层叠模型，仅作最后手段；inline `!important` 优先级最高 |
+| Box model | 忘了 `box-sizing`，padding 把盒子撑破 | 全局 `border-box`；内容宽 = `width - padding - border`，注意 clamp 到 0 |

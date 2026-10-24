@@ -1,0 +1,342 @@
+# 第五十部分 · Web 蓝牙与硬件通信——从 GATT 到协议解析（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/50-bluetooth-hardware
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第五十部分 · Web 蓝牙与硬件通信——从 GATT 到协议解析
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第四十九部分 · 组件库工程](./49-component-library.md)｜下一篇：[第五十一部分 · 直播弹幕与实时互动](./51-live-danmaku.md)｜关联章节：[第六部分 · 网络请求优化](./06-network.md) · [第十七部分 · Web 平台新能力](./17-web-platform.md)
+
+> 💡 **本章特色**：硬件对接的难点不在「调一个 API」，而在**连接生命周期、字节流分帧、错误恢复与浏览器边界**。本章从 BLE 协议栈讲到 GATT 读写，再落到帧编解码与重连状态机，两个示例都可以直接运行验证。
+
+## 本部分内容
+
+- [50.1 浏览器能碰到的硬件与协议选型](#_50-1-浏览器能碰到的硬件与协议选型)
+- [50.2 Web Bluetooth：连接与 GATT 读写](#_50-2-web-bluetooth-连接与-gatt-读写)
+- [50.3 设备协议层：分帧、校验与命令队列](#_50-3-设备协议层-分帧、校验与命令队列)
+- [50.4 稳定性、兼容与降级方案](#_50-4-稳定性、兼容与降级方案)
+- [50.5 自测题](#_50-5-自测题)
+- [50.6 本章避坑清单](#_50-6-本章避坑清单)
+
+---
+
+## 50.1 浏览器能碰到的硬件与协议选型
+
+### 概念解析
+
+浏览器不是万能的硬件宿主。先确认「目标设备走哪条通道」，再决定用 Web API 还是原生壳：
+
+| 通道 | Web API | 能力范围 | 浏览器支持 | 典型设备 |
+| --- | --- | --- | --- | --- |
+| BLE（低功耗蓝牙） | Web Bluetooth | GATT 服务/特征读写、通知 | Chromium 系（桌面/Android），Safari/Firefox 不支持 | 手环、体脂秤、传感器、智能锁 |
+| 经典蓝牙 | 无 | SPP/A2DP/HFP 等 | 浏览器无标准 API | 老式打印机、部分扫码枪 |
+| 串口 | Web Serial | 串口读写、流控 | Chromium 系 | 工业设备、电子秤、PLC |
+| HID | WebHID | 报告描述符、输入输出报告 | Chromium 系 | 扫码枪、游戏手柄、专用键盘 |
+| USB | WebUSB | 厂商自定义协议 | Chromium 系 | 烧录器、医疗设备 |
+| NFC | Web NFC | NDEF 读写 | Android Chrome | 门禁卡、标签 |
+
+三条硬约束必须先记住：
+
+1. **安全上下文**：这些 API 只在 HTTPS（或 `http://localhost`）下可用；
+2. **用户手势**：`requestDevice` / `requestPort` 必须由点击等用户操作触发，不能在页面加载时自动弹窗；
+3. **权限模型**：用户选择设备即授权，但页面仍需在 `optionalServices` 里声明要访问的服务，否则拿到设备也读不到特征值。
+
+**选型建议**：BLE 能覆盖大部分低功耗传感器；需要经典蓝牙 SPP 或 iOS 后台能力时，Web 方案基本无解，应走「原生壳 + 桥接」。不要为了「纯 Web」硬扛平台限制。
+
+### 典型应用场景
+
+- 体脂秤/手环：BLE 广播 → 连接 → 订阅体重/心率特征；
+- 电子秤/扫码枪：Web Serial 或 WebHID 读取输入；
+- 智能锁/门禁：BLE 下发开锁命令并等待 ACK；
+- 医疗/工业设备：Web Serial + 自定义帧协议；
+- iOS 专属外设：原生 App + WebView 桥接，或直接用原生页面。
+
+### 可运行代码示例
+
+协议层与浏览器 API 解耦：先把「字节流 → 帧」的逻辑写成纯函数，才能在 Node 里测试、在浏览器里复用。示例 50-01 就是这一层。
+
+```typescript
+// 文件: examples/50-01-ble-frame-codec.ts（核心节选）
+function encodeFrame(cmd: number, payload: number[]): number[] {
+  if (payload.length > MAX_PAYLOAD) throw new Error("payload 超长");
+  const len = 1 + payload.length; // 长度字段覆盖 cmd + payload
+  const body = [len, cmd, ...payload];
+  return [...HEADER, ...body, crc8(body)];
+}
+```
+
+> 运行方式：`npx tsx examples/50-01-ble-frame-codec.ts`（分包重组、半帧缓冲、CRC 校验、噪声跳过）。
+
+### 最佳实践
+
+- ✅ 先画一张「设备能力表」：服务 UUID、特征 UUID、读写/通知属性、数据格式；
+- ✅ 把「浏览器 API 层」与「协议层」分成两个模块，协议层不依赖 `navigator`；
+- ⚠️ Web Bluetooth 只覆盖 BLE GATT，不要把它当「蓝牙全家桶」；
+- ❌ 不要在页面加载时自动请求设备——既违反用户手势要求，也会被浏览器拦截。
+
+---
+
+## 50.2 Web Bluetooth：连接与 GATT 读写
+
+### 概念解析
+
+一次完整的 BLE 交互分五步，每一步都可能失败：
+
+| 步骤 | API | 失败原因 | 处理 |
+| --- | --- | --- | --- |
+| 选择设备 | `navigator.bluetooth.requestDevice(options)` | 用户取消、无匹配设备 | 捕获 `NotFoundError`，提示重试 |
+| 连接 GATT | `device.gatt.connect()` | 设备离线、超出范围 | 超时 + 重连 |
+| 拿服务 | `getPrimaryService(uuid)` | 服务未声明/不存在 | 检查 `optionalServices` 与设备固件 |
+| 拿特征 | `getCharacteristic(uuid)` | UUID 写错、权限不符 | 对照设备协议文档 |
+| 读写/订阅 | `readValue` / `writeValueWithResponse` / `startNotifications` | 未配对、特征不支持 | 区分「不支持」与「暂时失败」 |
+
+**关键细节**：
+
+- `writeValue` 默认「无响应写」，快但不可靠；需要确认写入成功时用 `writeValueWithResponse`；
+- `startNotifications()` 返回特征对象，监听 `characteristicvaluechanged` 事件读取 `event.target.value`（`DataView`）；
+- 浏览器会自动协商 MTU，但**不要假设 20 字节**：默认 MTU 23 时有效载荷 20 字节，实际值以设备协商结果为准，分片逻辑必须按配置而非硬编码；
+- 页面切后台、系统休眠、设备走远都会断连，`gattserverdisconnected` 事件是重连的入口。
+
+### 典型应用场景
+
+- 订阅式传感器：`startNotifications` 持续接收心率/温度；
+- 命令式设备：写特征下发命令，读特征或等通知拿 ACK；
+- 配网/绑定：先读设备信息特征，再写 WiFi 凭据（分片）；
+- 固件升级：BLE 分片传输 + 校验（通常还要 DFU 协议）。
+
+### 可运行代码示例
+
+下面是与 GATT 特征对应的读写封装，重点在**错误归一化**与**断连事件**。浏览器 API 不支持 `timeout` 参数，超时要自己包一层。
+
+```typescript
+// 文件: src/ble/gatt-client.ts —— 虚拟工程文件
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("GATT_TIMEOUT")), ms),
+    ),
+  ]);
+}
+
+export async function connect(device: BluetoothDevice) {
+  device.addEventListener("gattserverdisconnected", () => {
+    // 断连是常态:交给重连状态机,不要在事件里直接重连
+    bus.emit("ble:disconnected", device.id);
+  });
+  const server = await withTimeout(device.gatt!.connect(), 10_000);
+  const service = await server.getPrimaryService(SERVICE_UUID);
+  const rx = await service.getCharacteristic(RX_UUID);
+  const tx = await service.getCharacteristic(TX_UUID);
+  await tx.startNotifications();
+  tx.addEventListener("characteristicvaluechanged", (e) => {
+    const view = (e.target as BluetoothRemoteGATTCharacteristic).value!;
+    parser.feed([...new Uint8Array(view.buffer)]);
+  });
+  return { server, rx, tx };
+}
+```
+
+> 运行方式：BLE API 依赖浏览器环境，需在 HTTPS 页面中运行；协议解析可先用 `npx tsx examples/50-01-ble-frame-codec.ts` 验证。
+
+### 最佳实践
+
+- ✅ 所有 GATT 操作都包超时，避免「永久 pending」卡死页面；
+- ✅ 按 UUID 建一张常量表，Dart/TS/固件文档共用同一份；
+- ⚠️ `characteristicvaluechanged` 里只做「收字节 + 喂解析器」，不要做重计算，否则会丢通知；
+- ❌ 不要在 `gattserverdisconnected` 回调里立刻 `connect()`——设备可能还没准备好，应交给退避状态机。
+
+---
+
+## 50.3 设备协议层：分帧、校验与命令队列
+
+### 概念解析
+
+BLE/串口给到前端的都是**字节流**，不是「一条条消息」。协议层要解决四个问题：
+
+1. **分帧**：如何从连续字节里切出完整帧？常见做法是「帧头 + 长度 + 载荷 + 校验」；
+2. **粘包/半包**：一次回调可能是半帧，也可能是两帧，必须有缓冲区循环解析；
+3. **校验**：CRC/校验和/序列号，用来丢弃误码帧；
+4. **命令队列**：同一特征上的写操作要串行化，避免并发写导致设备状态错乱。
+
+一个可用的帧格式示例：
+
+```text
+| 0xAA 0x55 | len(1B) | cmd(1B) | payload(0~N) | crc8(1B) |
+```
+
+`len` 覆盖 `cmd + payload`，接收端先找帧头，再读长度，再判断缓冲区是否够一帧；CRC 不通过只跳过帧头继续找，不能整段丢弃（否则会连带丢掉后面的好帧）。
+
+**命令队列**的语义要明确：超时怎么算、失败重试几次、是否允许插队（如「急停」）、响应与命令如何配对（序列号）。
+
+### 典型应用场景
+
+- 体脂秤：一帧包含多个测量值，需要按字段解析；
+- 智能锁：开锁命令需要 ACK，超时视为失败并提示；
+- 工业传感器：高频上报，必须做背压与丢弃策略；
+- 固件升级：分片写入 + 每片校验 + 断点续传。
+
+### 可运行代码示例
+
+示例 50-01 实现了完整的分帧器：支持粘包、半帧、CRC 错误、帧头噪声四种情况，并用断言锁住行为。
+
+```typescript
+// 文件: examples/50-01-ble-frame-codec.ts（核心节选）
+feed(chunk: number[]): ParserStats {
+  this.buffer.push(...chunk);
+  for (;;) {
+    const start = this.findHeader();
+    if (start === -1) break;
+    if (start > 0) this.buffer.splice(0, start);
+    if (this.buffer.length < 4) break;
+    const len = this.buffer[2];
+    const total = 2 + 1 + len + 1;
+    if (this.buffer.length < total) break;
+    // ...CRC 校验与出帧
+  }
+  return this.stats;
+}
+```
+
+> 运行方式：`npx tsx examples/50-01-ble-frame-codec.ts`（两帧切片喂入、半帧补齐、CRC 损坏、噪声跳过）。
+
+### 最佳实践
+
+- ✅ 协议层写成纯函数/纯类，输入字节、输出帧，不碰 DOM 与 `navigator`；
+- ✅ CRC 失败只丢当前帧头，保留后续字节重新同步；
+- ✅ 命令队列给每条命令分配序列号，响应按序列号配对，避免「收到 ACK 但不知道是谁的」；
+- ⚠️ 高频通知要做背压：处理不过来时合并/丢弃旧数据，而不是无限堆积；
+- ❌ 不要把「一次 write 成功」当成「设备已执行」——写入成功只代表字节到了特征，业务确认要靠 ACK。
+
+---
+
+## 50.4 稳定性、兼容与降级方案
+
+### 概念解析
+
+硬件通信的稳定性由四层共同决定：
+
+| 层 | 风险 | 手段 |
+| --- | --- | --- |
+| 物理层 | 距离、干扰、遮挡 | 提示用户靠近、降低上报频率 |
+| 连接层 | 断连、配对丢失 | 退避重连 + 手动重试入口 |
+| 协议层 | 丢包、粘包、误码 | 分帧 + CRC + 序列号 + 超时重发 |
+| 应用层 | 重复命令、状态不一致 | 幂等命令、状态机、乐观 UI 回滚 |
+
+**浏览器兼容矩阵**要提前写进产品需求：Web Bluetooth 在 iOS Safari 不可用；Web Serial/WebHID 仅 Chromium 系。面向 C 端用户的产品，通常需要「原生壳 + WebView 桥接」作为兜底，或者直接做原生页面。
+
+**降级策略**：
+
+1. 能力检测：`'bluetooth' in navigator`，不支持时展示「请使用 App / Chrome」；
+2. 权限拒绝：给出系统设置指引，而不是反复弹窗；
+3. 连接失败：区分「设备未开启」「超出范围」「已被其他设备占用」；
+4. 协议异常：保留最近 N 帧日志，支持导出给固件同事排查。
+
+### 典型应用场景
+
+- 门店设备：Android 平板 Chrome + BLE 秤，断线自动重连；
+- 工业现场：Chromium kiosk + Web Serial，命令队列 + 超时告警；
+- 消费级 App：原生壳负责连接，WebView 只做 UI 与业务；
+- 售后排障：前端内置「设备日志」页，导出原始字节与解析结果。
+
+### 可运行代码示例
+
+重连不是「失败就再试」，而是带状态的退避过程。示例 50-02 把「连接中 / 等待 / 已连接 / 失败」写成状态机，并加入抖动避免同频风暴。
+
+```typescript
+// 文件: examples/50-02-device-reconnect.ts（核心节选）
+delayFor(attempt: number): number {
+  const raw = Math.min(
+    this.config.cap,
+    this.config.baseDelay * Math.pow(this.config.factor, attempt),
+  );
+  const jitter = raw * this.config.jitterRatio * (this.rand() * 2 - 1);
+  return Math.round(raw + jitter);
+}
+```
+
+> 运行方式：`npx tsx examples/50-02-device-reconnect.ts`（退避序列、失败上限、成功后清零、抖动打散）。
+
+### 最佳实践
+
+- ✅ 重连上限后进入 `failed` 终态，把「再试一次」交给用户，而不是无限循环耗电；
+- ✅ 手动重试要重置计数，并清理旧定时器；
+- ⚠️ 页面隐藏时暂停重连（`visibilitychange`），回到前台再恢复；
+- ❌ 不要在多个页面同时持有同一设备的连接——连接是全局资源，应由单例管理。
+
+---
+
+## 50.5 自测题
+
+<details>
+<summary><b>1. 【基础】Web Bluetooth 能连接经典蓝牙（SPP）设备吗？为什么？</b></summary>
+
+不能。Web Bluetooth 只提供 BLE GATT 能力，经典蓝牙的 SPP/A2DP/HFP 等协议没有对应的 Web 标准 API。需要经典蓝牙时，只能走原生 App 或原生壳桥接。
+</details>
+
+<details>
+<summary><b>2. 【基础】为什么 `requestDevice` 必须由用户手势触发？</b></summary>
+
+浏览器把「选择设备」视为敏感权限，要求由用户主动操作（点击）发起，防止页面加载时静默扫描/连接周边设备。自动调用会被拒绝并抛出安全错误。
+</details>
+
+<details>
+<summary><b>3. 【进阶】BLE 接收端为什么必须有缓冲区？只处理「一次回调一帧」会怎样？</b></summary>
+
+BLE 通知按 MTU 分片到达，一次回调可能只有半帧，也可能粘了多帧。没有缓冲区就无法重组完整帧：半帧会被误判为坏数据丢弃，粘包会导致只解析第一帧、后续帧被当成噪声。示例 50-01 用循环解析 + 长度判断解决。
+</details>
+
+<details>
+<summary><b>4. 【进阶】CRC 校验失败时，为什么只跳过帧头而不是清空整个缓冲区？</b></summary>
+
+坏帧后面可能紧跟好帧。如果清空整个缓冲区，会把后面的好帧一起丢掉，导致持续丢包。正确做法是只跳过当前帧头（2 字节），继续向后搜索下一个 `0xAA 0x55`，重新同步。
+</details>
+
+<details>
+<summary><b>5. 【进阶】`writeValue` 与 `writeValueWithResponse` 有什么区别？什么时候必须用后者？</b></summary>
+
+`writeValue` 是无响应写，浏览器发出即返回，快但无法确认设备是否收到；`writeValueWithResponse` 会等待设备回 ATT 响应，能确认写入到达。开锁、支付、固件升级等「必须确认」的命令应使用带响应写，并配合业务 ACK。
+</details>
+
+<details>
+<summary><b>6. 【挑战】一个 BLE 设备在 Android Chrome 正常、iOS Safari 完全不可用，产品要求双端可用，你怎么设计？</b></summary>
+
+先确认 iOS Safari 不支持 Web Bluetooth，纯 Web 方案无解。可选路径：① 原生壳（iOS 原生 BLE + WebView 桥接），Web 只做业务 UI；② 直接开发 iOS 原生页面；③ 改用云端网关（设备连 WiFi/网关，前端走 HTTP/WebSocket）。选型看设备形态与成本：需要后台连接/经典蓝牙时只能原生；设备能联网时网关方案可保持纯 Web。
+</details>
+
+<details>
+<summary><b>7. 【挑战】如何设计一个「命令队列」，保证开锁命令不因并发写入而错乱？</b></summary>
+
+队列串行化同一特征的写操作；每条命令带自增序列号，帧内携带，响应按序列号配对；设置超时与最大重试次数；区分优先级（急停/开锁可插队）；失败时回滚乐观 UI；队列与连接生命周期绑定，断连时清空待发命令并标记失败，避免重连后补发过期命令。
+</details>
+
+<details>
+<summary><b>8. 【挑战】设备偶发「命令发出但状态没变」，你会按什么顺序排查？</b></summary>
+
+先看协议层日志：帧是否完整、CRC 是否通过、序列号是否配对；再看写入方式：是否用了无响应写导致丢包；再看设备侧：是否处于忙状态、是否要求先订阅通知；最后看连接质量：RSSI、断连记录、MTU 协商。排查顺序从「前端可观测」到「设备固件」，每层都留可导出的原始日志。
+</details>
+
+---
+
+## 50.6 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 页面加载即调用 `requestDevice` | 被浏览器拦截，功能不可用 | 绑定用户点击手势 |
+| 未声明 `optionalServices` | 拿到设备却读不到服务 | 按协议声明全部可选服务 |
+| 假设 MTU 固定 20 字节 | 换设备/系统后分片错乱 | 读取协商 MTU，按配置分片 |
+| 一次回调只解析一帧 | 粘包丢帧、半帧误判 | 缓冲区 + 循环解析 |
+| CRC 失败清空缓冲 | 连带丢掉后续好帧 | 只跳过帧头重新同步 |
+| 用 `writeValue` 发关键命令 | 丢包无感知，设备未执行 | 关键命令用带响应写 + ACK |
+| 断连事件里立即重连 | 设备未就绪，反复失败耗电 | 交给退避状态机 |
+| 重连无上限 | 无限循环，耗电且刷日志 | 上限后进入 failed，交用户重试 |
+| 多页面同时连同一设备 | 连接互相抢占 | 连接单例 + 全局状态管理 |
+| 通知回调里做重计算 | 处理慢导致丢通知 | 只入队，异步处理 |
+| 把写入成功当执行成功 | UI 显示成功但设备没动 | 业务 ACK + 状态机确认 |
+| 忽略 iOS Safari 不支持 | 上线后 iOS 用户完全不可用 | 能力检测 + 原生壳/网关兜底 |
+| 不处理权限拒绝 | 反复弹窗，用户困惑 | 展示设置指引，提供降级路径 |
+| 无原始日志 | 固件问题无法定位 | 保留最近 N 帧字节与解析结果 |
+| 设备 UUID 写死在多处 | 换型号全量改代码 | UUID 常量表 + 配置化 |
+
+---
+
+> **下一篇**：[第五十一部分 · 直播弹幕与实时互动](./51-live-danmaku.md) 会把 WebSocket 消息流、弹幕调度与高并发渲染治理接起来。

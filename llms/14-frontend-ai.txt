@@ -1,0 +1,434 @@
+# 第十四部分：前端 AI 工程（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/14-frontend-ai
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第十四部分：前端 AI 工程
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[SSR 与元框架](./13-ssr-meta-frameworks.md)｜下一篇：[可访问性与国际化](./15-accessibility-i18n.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-14" target="_blank" rel="noopener">EP.14《AI 流式 UI》</a>
+
+## 本部分内容
+
+- [14.1 LLM 应用的前端架构总览](#_14-1-llm-应用的前端架构总览)
+- [14.2 流式输出与打字机 UI 实战](#_14-2-流式输出与打字机-ui-实战)
+- [14.3 Tool Calling 的前端呈现](#_14-3-tool-calling-的前端呈现)
+- [14.4 AI SDK 的 useChat 抽象模式](#_14-4-ai-sdk-的-usechat-抽象模式)
+- [14.5 成本、稳定性与安全](#_14-5-成本、稳定性与安全)
+- [14.6 自测题](#_14-6-自测题)
+- [14.7 本章避坑清单](#_14-7-本章避坑清单)
+
+---
+
+> AI 功能正在成为业务前端的标配：对话流、智能表单、内容生成。前端工程师在 AI 应用中的核心职责是：**流式渲染、交互编排、成本与体验的平衡**——模型能力是服务端的事，把"生成过程"优雅地呈现出来是我们的主场。
+
+## 14.1 LLM 应用的前端架构总览
+
+#### 概念解析
+
+前端在 AI 应用中的三种拓扑：
+
+| 拓扑 | 数据流 | 适用 | 关键风险 |
+| ---- | ------ | ---- | -------- |
+| 浏览器直连模型 API | 浏览器 → api.anthropic.com 等 | 仅原型/Demo | **API Key 暴露在前端,绝对不能上生产** |
+| **BFF 代理(推荐)** | 浏览器 → 自己的服务端 → 模型 API | 绝大多数生产场景 | 服务端需做好限流/计费/审计 |
+| 边缘代理 | 浏览器 → Edge Function → 模型 | 全球分发、低延迟场景 | 冷启动与执行时长限制 |
+
+所有主流模型 API 的流式响应都是 **SSE 格式**（与 [6.6](./06-network.md#_6-6-实时通信技术) 呼应）：响应体是一行行的 `data: {...}` 事件。前端的本质工作是：**解析增量事件 → 拼接文本 → 流畅渲染**。
+
+## 14.2 流式输出与打字机 UI 实战
+
+#### 概念解析
+
+三个工程要点：**增量解析**（chunk 可能切断一行 JSON，必须缓冲）、**渲染节流**（每个 token 都 setState 会造成大量重渲染）、**可中断**（用户随时停止生成）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/14-01-sse-parser.ts —— SSE 流解析器(纯函数,Node 可直接运行验证)
+// ============ 处理"chunk 切断数据行"的经典难题 ============
+
+export interface StreamEvent { event: string; data: string }
+
+/**
+ * 创建一个 SSE 解析器:喂给它任意切割的文本 chunk,吐出完整的事件
+ * 关键:内部维护缓冲区,只有遇到空行(事件结束符)才产出
+ */
+export function createSseParser(onEvent: (e: StreamEvent) => void) {
+    let buffer = '';
+
+    return {
+        push(chunk: string) {
+            buffer += chunk; // 一次 chunk 可能是半行、三行半……先攒着
+            let idx: number;
+            // 循环取出完整的"事件块"(以 \n\n 分隔)
+            while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                const block = buffer.slice(0, idx);
+                buffer = buffer.slice(idx + 2);
+                const event = { event: 'message', data: '' };
+                for (const line of block.split('\n')) {
+                    if (line.startsWith('data:')) event.data += line.slice(5).trim();
+                    if (line.startsWith('event:')) event.event = line.slice(6).trim();
+                }
+                if (event.data) onEvent(event);
+            }
+        },
+    };
+}
+
+// ---- Node 端验证:模拟被切成碎块的流 ----
+const received: string[] = [];
+const parser = createSseParser((e) => {
+    if (e.data === '[DONE]') return;
+    received.push(JSON.parse(e.data).text);
+});
+
+parser.push('data: {"text":"你"}\n\nda');       // 注意:下一个事件被拦腰切断
+parser.push('ta: {"text":"好"}\n\ndata: {"text":"，世"}\n\n');
+parser.push('data: {"text":"界"}\n\ndata: [DONE]\n\n');
+
+console.log('流式解析结果:', received.join('')); // 你好，世界 —— 碎块拼接无损
+```
+
+```tsx
+// 文件: examples/14-02-stream-chat.tsx —— [浏览器] 完整的流式对话组件
+import { useCallback, useRef, useState } from 'react';
+import { createSseParser } from './14-01-sse-parser';
+
+export function StreamChat() {
+    const [answer, setAnswer] = useState('');
+    const [generating, setGenerating] = useState(false);
+    const controllerRef = useRef<AbortController | null>(null);
+    const pendingRef = useRef('');             // 待渲染缓冲区
+    const frameRef = useRef(0);
+    const flushScheduledRef = useRef(false);   // 本帧是否已安排刷新
+
+    const stop = useCallback(() => controllerRef.current?.abort(), []);
+
+    const send = useCallback(async (prompt: string) => {
+        const controller = new AbortController();
+        controllerRef.current = controller;
+        setGenerating(true);
+        setAnswer('');
+        pendingRef.current = '';
+        flushScheduledRef.current = false;
+
+        // 核心:rAF 批量刷新 —— 同一帧内到达的多个 token 合并成一次 setState
+        // 对比:每个 token 一次 setState → 高频重渲染 + Markdown 反复解析
+        const scheduleFlush = () => {
+            if (flushScheduledRef.current) return; // 本帧已有刷新排队,合并进去
+            flushScheduledRef.current = true;
+            frameRef.current = requestAnimationFrame(() => {
+                flushScheduledRef.current = false;
+                setAnswer((prev) => prev + pendingRef.current); // 累加消费缓冲区
+                pendingRef.current = '';
+            });
+        };
+
+        try {
+            const res = await fetch('/api/chat', {   // BFF 代理,Key 不出服务端
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt }),
+                signal: controller.signal,           // 用户点"停止"立即断流
+            });
+
+            const reader = res.body!.getReader();
+            const decoder = new TextDecoder();
+            // BFF 把各家模型流统一转发为 {text} 简化事件(生产按实际协议调整)
+            const parser = createSseParser((e) => {
+                if (e.data === '[DONE]') return;
+                pendingRef.current += JSON.parse(e.data).text;
+                scheduleFlush();
+            });
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                parser(decoder.decode(value, { stream: true }));
+            }
+            setAnswer((prev) => prev + pendingRef.current); // 兜底:刷出缓冲剩余
+            pendingRef.current = '';
+        } catch (e) {
+            if ((e as Error).name !== 'AbortError') console.error(e); // 主动停止不算错误
+        } finally {
+            cancelAnimationFrame(frameRef.current);
+            setGenerating(false);
+        }
+    }, []);
+
+    return (
+        <div>
+            <button onClick={() => send('用一句话介绍事件循环')}>提问</button>
+            {generating && <button onClick={stop}>■ 停止生成</button>}
+            {/* 生产中用增量安全的 Markdown 渲染器,并做 XSS 消毒(见 7.1) */}
+            <div className="answer">{answer}</div>
+        </div>
+    );
+}
+```
+
+> 运行方式：`npx tsx examples/14-01-sse-parser.ts` 直接验证碎块解析的无损性；流式组件放入 Next.js 项目（配一个转发模型 API 的 `/api/chat` 路由）体验。
+
+#### 最佳实践
+
+- ✅ 渲染节流是流式 UI 的第一性能要务：**rAF 批量刷新**或至少 50ms 节流，不要每个 token 一次 setState；
+- ✅ 长回答用**增量 Markdown 渲染器**（如 `streamdown` 类方案）或"未闭合语法缓冲"策略，避免半截代码块反复闪烁；
+- ✅ "停止生成"必须真正断流（AbortController），而不只是前端不再显示；
+- ⚠️ 解析 SSE 时务必处理 chunk 切断行的情况——本地测试正常、线上随机丢字的元凶基本是它。
+
+## 14.3 Tool Calling 的前端呈现
+
+#### 概念解析
+
+Tool Calling（Function Calling）让模型在回答中"调用"你定义的函数。前端的角色是把这条异步链路**可视化**：
+
+```
+模型输出 tool_call(查天气, {city:'北京'})
+    → 前端/服务端执行真实函数
+    → 结果回传模型继续生成
+    → 前端依次呈现:💭 思考中 → 🛠️ 正在查询北京天气... → ✅ 28℃ 多云 → 📝 最终回答
+```
+
+#### 完整代码示例
+
+```tsx
+// 文件: examples/14-03-tool-ui.tsx —— 工具调用的 UI 映射:注册表模式
+import { useState } from 'react';
+
+// ① 工具注册表:每个工具声明"呈现组件 + 是否需要用户确认"
+interface ToolDef {
+    label: string;
+    confirm?: boolean;                    // 敏感操作(发邮件/下单)先弹确认
+    render: (args: Record<string, unknown>, result?: unknown) => React.ReactNode;
+}
+
+const toolRegistry: Record<string, ToolDef> = {
+    queryWeather: {
+        label: '查询天气',
+        render: (args, result) => (
+            <span>🌤️ {String(args.city)}:{result ? ` ${JSON.stringify(result)}` : ' 查询中...'}</span>
+        ),
+    },
+    sendEmail: {
+        label: '发送邮件',
+        confirm: true,                    // 有副作用的操作必须人工确认
+        render: (args, result) => (
+            <span>📧 给 {String(args.to)} 发邮件 {result ? '✅ 已发送' : '(等待确认)'}</span>
+        ),
+    },
+};
+
+// ② 会话渲染:按事件顺序呈现思考/工具/文本三种片段
+interface Segment { type: 'text' | 'tool'; name?: string; args?: Record<string, unknown>; result?: unknown; text?: string }
+
+export function ChatMessage({ segments }: { segments: Segment[] }) {
+    const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
+    return (
+        <div>
+            {segments.map((seg, i) => {
+                if (seg.type === 'text') return <p key={i}>{seg.text}</p>;
+                const def = toolRegistry[seg.name!];
+                const isWaitingConfirm = def.confirm && !confirmed[`${i}`];
+                return (
+                    <div key={i} className="tool-chip">
+                        {def.render(seg.args!, isWaitingConfirm ? undefined : seg.result)}
+                        {isWaitingConfirm && (
+                            <button onClick={() => setConfirmed((c) => ({ ...c, [`${i}`]: true }))}>
+                                允许执行
+                            </button>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+```
+
+> 运行方式：放入 React 项目，用 mock 的 segments 数组渲染，体验"工具卡片 + 确认按钮"的交互形态。真实链路中 segments 由 14.2 的流解析器产出。
+
+#### 最佳实践
+
+- ✅ 有副作用的工具（发消息、支付、删数据）**必须人工确认**，这是产品层面的安全底线；
+- ✅ 工具执行过程显式呈现（状态徽标/骨架屏），用户能看到"AI 在干什么"会显著提升信任感；
+- ⚠️ 工具结果回传模型前做长度与脱敏控制——把整个数据库结果塞进上下文会瞬间烧掉 token（见 [14.5](./14-frontend-ai.md#_14-5-成本、稳定性与安全)）。
+
+## 14.4 AI SDK 的 useChat 抽象模式
+
+#### 概念解析
+
+Vercel AI SDK 等库把 14.2/14.3 的样板代码封装成状态 Hook，理解它的抽象有助于自研或选型：
+
+```
+useChat 的核心状态机:
+messages[]        ← 完整会话(含 role: user/assistant/tool)
+sendMessage()     ← 追加 user 消息,自动发起流式请求
+status            ← 'ready' | 'submitted' | 'streaming' | 'error'
+stop()            ← 中断
+data / parts      ← 结构化分段(文本段/工具调用段),供 UI 分类渲染
+```
+
+#### 完整代码示例
+
+```tsx
+// 文件: examples/14-04-use-chat.tsx —— useChat 形态示意(以 Vercel AI SDK 为原型)
+import { useChat } from '@ai-sdk/react';
+
+export function AssistantPanel() {
+    const { messages, sendMessage, status, stop, error } = useChat({
+        // transport 指向自己的 BFF(服务端持有 Key 并做限流)
+        transport: { api: '/api/chat' },
+        onError: (e) => console.error('对话失败:', e),
+    });
+
+    return (
+        <div>
+            {messages.map((m) => (
+                <div key={m.id}>
+                    <b>{m.role === 'user' ? '我' : 'AI'}</b>
+                    {/* parts 区分文本段与工具调用段,分别渲染(呼应 14.3) */}
+                    {m.parts.map((part, i) =>
+                        part.type === 'text' ? <p key={i}>{part.text}</p> : <ToolChip key={i} part={part} />,
+                    )}
+                </div>
+            ))}
+
+            {status === 'streaming'
+                ? <button onClick={stop}>■ 停止</button>
+                : <button disabled={status !== 'ready'} onClick={() => sendMessage({ text: '总结一下上面的内容' })}>
+                    继续追问
+                  </button>}
+            {error && <p className="error">出错了,已自动保留上下文,可重试</p>}
+        </div>
+    );
+}
+
+function ToolChip({ part }: { part: { type: string } }) {
+    return <code className="chip">🛠️ 工具调用片段</code>;
+}
+```
+
+> 运行方式：`npm i ai @ai-sdk/react` 后放入 Next.js 项目；服务端路由用 `streamText()` 把模型流透传给前端。
+
+#### 最佳实践
+
+- ✅ 简单对话直接用成熟 SDK；有强定制需求（私有协议、特殊审批流）时，14.2 的手写方案反而是更可控的选择；
+- ✅ 错误恢复要保留上下文：失败后允许"重试最后一条"，而不是清空会话；
+- ⚠️ 会话历史持久化放服务端（数据库），前端只持有当前窗口——多端同步与审计都需要它。
+
+## 14.5 成本、稳定性与安全
+
+#### 概念解析
+
+| 维度 | 要点 | 前端能做的 |
+| ---- | ---- | ---------- |
+| Token 成本 | 输入+输出都计费;历史越长越贵 | 会话窗口裁剪、历史摘要压缩、流式输出上限 |
+| 稳定性 | 模型超时/限流/内容审查失败常见 | 超时 + 指数退避重试(呼应 [1.8](./01-javascript-advanced.md#_1-8-手写高频工具函数)、降级文案、排队提示 |
+| 安全 | Prompt 注入、敏感数据外泄 | 用户输入与网页内容分离标记;上传内容前脱敏;工具白名单 |
+| 合规 | 生成内容需标识与审核 | AI 内容标注、举报入口、日志留存 |
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/14-05-context-budget.ts —— 上下文预算管理:对话历史裁剪
+interface ChatMsg { role: 'user' | 'assistant'; content: string }
+
+/** 粗略估算 token 数(中文 ≈ 1 字/token,英文 ≈ 4 字符/token,生产用官方 tokenizer) */
+function estimateTokens(text: string): number {
+    const cjk = (text.match(/[一-鿿]/g) ?? []).length;
+    return cjk + Math.ceil((text.length - cjk) / 4);
+}
+
+/**
+ * 裁剪策略:始终保留 system 与最近 N 条,超预算时把更早的历史折叠成一条摘要
+ * —— 完整历史仍在数据库里,只是不再随每次请求发送
+ */
+export function buildContext(history: ChatMsg[], budget = 3000): ChatMsg[] {
+    const kept: ChatMsg[] = [];
+    let used = 0;
+    // 从最新往回保留
+    for (let i = history.length - 1; i >= 0; i--) {
+        const cost = estimateTokens(history[i].content);
+        if (used + cost > budget * 0.8 && kept.length >= 2) break; // 至少保留 2 条近期对话
+        kept.unshift(history[i]);
+        used += cost;
+    }
+    const dropped = history.length - kept.length;
+    if (dropped > 0) {
+        kept.unshift({
+            role: 'user',
+            content: `[系统提示:更早的 ${dropped} 条对话已省略,涉及主题:项目讨论与部署方案]`, // 摘要占位
+        });
+    }
+    console.log(`保留 ${kept.length} 条,约 ${used} tokens,预算 ${budget}`);
+    return kept;
+}
+
+// ---- 验证 ----
+const history: ChatMsg[] = Array.from({ length: 50 }, (_, i) => ({
+    role: i % 2 ? 'assistant' : 'user',
+    content: `第 ${i} 条消息,包含一些中文内容与 english words mixed in`,
+}));
+buildContext(history, 3000);
+```
+
+> 运行方式：`npx tsx examples/14-05-context-budget.ts` 观察裁剪日志；生产环境请换用模型官方 tokenizer 精确计数。
+
+#### 最佳实践
+
+- ✅ Key 永远不出前端；BFF 层做**按用户限流与配额**，防止一个用户刷爆账单；
+- ✅ 所有模型输入经过统一的清洗管道：脱敏（手机号/身份证）→ 长度截断 → 注入标记包裹；
+- ⚠️ Prompt 注入的现实威胁：用户让"总结这个网页"时，网页内容可能包含恶意指令——用明确的分隔标记并遵循服务端指令优先原则；
+- 📖 面试加分项：能画出完整链路（前端流式渲染 → BFF 代理/限流 → 模型 API → 工具执行 → 结果回传）并说清每层的职责边界。
+
+## 14.6 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【进阶】为什么生产环境不能让浏览器直连模型 API？正确拓扑是什么？</b></summary>
+
+API Key 必须打包或暴露在前端，任何人都可提取盗刷。正确拓扑是 BFF 代理：浏览器 → 自己的服务端/Edge → 模型 API，服务端持有 Key 并实现按用户限流、配额、审计。
+</details>
+
+<details>
+<summary><b>2. 【进阶】流式解析 SSE 时最经典的 bug 是什么？如何解决？</b></summary>
+
+网络 chunk 会把一行 <code>data: {...}</code> 从中间切断，直接按行 split 会解析出残缺 JSON 导致随机丢字。解决：解析器内部维护缓冲区，只有遇到事件结束符（空行 <code>\n\n</code>）才取出完整事件块解析。
+</details>
+
+<details>
+<summary><b>3. 【进阶】为什么流式输出要用 rAF 批量刷新而不是每个 token 都 setState？</b></summary>
+
+模型每秒可输出几十个 token，逐 token setState 会造成高频重渲染，长回答时 Markdown 反复全量解析还会掉帧。rAF 把同一帧内的增量合并为一次渲染（约 16ms 一批），重渲染次数从"每 token 一次"降到"每帧一次"。
+</details>
+
+<details>
+<summary><b>4. 【基础】哪类工具调用必须加人工确认？为什么？</b></summary>
+
+有真实世界副作用的操作：发消息、支付、删除、外呼等。模型可能误解意图或被 Prompt 注入诱导，一旦执行不可逆操作损失真实发生。只读类工具（查询、检索）可以直接自动执行。
+</details>
+
+<details>
+<summary><b>5. 【挑战】对话历史越来越长，如何控制成本？</b></summary>
+
+三层手段：① 窗口裁剪——只携带最近 N 条；② 历史摘要——把更早的对话折叠成一条摘要占位（完整历史仍在数据库）；③ 精确计量——用官方 tokenizer 而不是字符数估算，并在服务端做单会话 token 预算上限。
+</details>
+
+---
+
+## 14.7 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 流式渲染 | 每个网络 chunk（甚至每个 token）都 `setState`，长回答时高频重渲染掉帧 | 用 `requestAnimationFrame` 把同一帧内的增量合并为一次渲染，重渲染从「每 token 一次」降到「每帧一次」（呼应 14.2） |
+| SSE 解析 | 按网络 chunk 直接 `split` 行，一行被从中间切断导致随机丢字或 JSON 解析失败 | 解析器内部维护缓冲区，只有读到空行（`\n\n`）事件结束符才取出完整事件块解析 |
+| 上下文膨胀 | 多轮 tool call 把完整工具结果与历史全塞进上下文，token 迅速膨胀、成本失控 | 窗口裁剪只带最近 N 条、更早对话折叠成摘要占位，并用官方 tokenizer 计量、在服务端设单会话预算上限 |
+| 取消与竞态 | `AbortController` 取消后回调仍写状态，出现「幽灵消息」或旧流覆盖新流 | 写状态前先判 `signal.aborted`，发起新请求时中止上一个，或用请求序号丢弃过期响应 |
+| 重试 | 断流后无条件整包重试，产生重复消息或重复副作用 | 重试必须幂等：请求带幂等键由服务端去重，只对网络、5xx、限流等可重试错误做退避重试 |
+| Token 计量 | 用字符数估算 token，中英文混排偏差大导致预算超支 | 用模型官方 tokenizer 计数，或按 CJK 与 ASCII 分档估算，并把权威计量放在服务端 |
+| 工具确认 | 有真实副作用的工具（支付、删除、外呼）自动执行，模型误解或被注入后不可逆 | 只读工具（查询、检索）直接执行，有副作用的工具一律加人工确认与可回滚设计 |
+| 密钥与拓扑 | 浏览器直连模型 API、把 Key 写进前端代码，任人提取盗刷 | 走 BFF 代理：浏览器 → 自有服务端 → 模型 API，Key 只存服务端并按用户限流、配额、审计（呼应 14.5） |

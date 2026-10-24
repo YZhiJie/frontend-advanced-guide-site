@@ -1,0 +1,795 @@
+# 第六部分：网络请求优化（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/06-network
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第六部分：网络请求优化
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[状态管理方案](./05-state-management.md)｜下一篇：[前端安全](./07-security.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-6" target="_blank" rel="noopener">EP.06《HTTP 缓存与竞态》</a>
+
+## 本部分内容
+
+- [6.1 HTTP 协议演进与优化要点](#_6-1-http-协议演进与优化要点)
+- [6.2 缓存策略详解](#_6-2-缓存策略详解)
+- [6.3 跨域与 CORS](#_6-3-跨域与-cors)
+- [6.4 请求层封装实战](#_6-4-请求层封装实战)
+- [6.5 竞态处理与请求取消](#_6-5-竞态处理与请求取消)
+- [6.6 实时通信技术](#_6-6-实时通信技术)
+- [6.7 大文件上传方案](#_6-7-大文件上传方案)
+- [6.8 自测题](#_6-8-自测题)
+- [6.9 本章避坑清单](#_6-9-本章避坑清单)
+
+---
+
+## 6.1 HTTP 协议演进与优化要点
+
+#### 概念解析
+
+| 版本 | 关键特性 | 解决的问题 | 遗留问题 |
+| ---- | -------- | ---------- | -------- |
+| HTTP/1.1 | 长连接(keep-alive)、管线化(实际不可用) | 减少握手 | **队头阻塞**：同一连接同时只能处理一个请求；6~8 并发连接限制 |
+| HTTP/2 | 二进制分帧、**多路复用**、头部压缩(HPACK)、服务器推送 | 同一连接并发多请求,消除应用层队头阻塞 | TCP 层队头阻塞(丢包阻塞整条连接) |
+| HTTP/3 | **QUIC(基于 UDP)**、0-RTT 握手、连接迁移 | 彻底消除传输层队头阻塞;弱网/切换网络更快 | 部署门槛(需要 UDP 支持) |
+
+前端要点的启示：**HTTP/2 下"合并文件、雪碧图、域名分片"已成反模式**；优化重心转向"减少请求数"（缓存、按需加载）与"减小传输量"（压缩、现代格式）。
+
+#### 最佳实践
+
+- ✅ 全站 HTTPS（HTTP/2/3 的前置条件），CDN 边缘节点终结 TLS；
+- ✅ 静态资源开 Brotli 压缩（比 gzip 再小 15~20%），构建产物同时输出 `.br`/`.gz`；
+- ✅ 关键接口提前发：`preconnect` + 首屏数据在 HTML 流中内联（或 SSR）；
+- ⚠️ API 响应体大时检查：是否过度取数（over-fetching）、是否需要分页/字段裁剪（GraphQL 的动机所在）。
+
+## 6.2 缓存策略详解
+
+#### 概念解析
+
+```mermaid
+flowchart TD
+    A["浏览器请求资源"] --> B{"本地有缓存?"}
+    B -- "无" --> C["请求服务器: 200 + 内容<br/>记录 ETag 与 max-age"]
+    B -- "有" --> D{"max-age 未过期?"}
+    D -- "未过期(强缓存)" --> E["直接读本地缓存<br/>不发任何网络请求"]
+    D -- "已过期" --> F["协商缓存: 携带 If-None-Match(ETag)"]
+    F --> G{"资源是否变化?"}
+    G -- "未变" --> H["服务器 304<br/>继续用本地缓存"]
+    G -- "已变" --> I["服务器 200<br/>新内容 + 新 ETag"]
+```
+
+| 头部 | 类别 | 常用值 | 说明 |
+| ---- | ---- | ------ | ---- |
+| `Cache-Control` | 强缓存 | `max-age=31536000, immutable` | 一年 + 永不重新验证(带指纹的静态资源) |
+| | | `no-cache` | 可以缓存，但每次用前必须协商验证 |
+| | | `no-store` | 彻底不缓存(敏感数据) |
+| | | `s-maxage` + `stale-while-revalidate` | CDN 层缓存 + 后台异步刷新 |
+| `ETag` / `If-None-Match` | 协商缓存 | 内容指纹 | 精确，但需要服务器计算 |
+| `Last-Modified` / `If-Modified-Since` | 协商缓存 | 秒级时间戳 | 粗粒度，两者都有时 ETag 优先 |
+
+#### 完整代码示例
+
+```javascript
+// 文件: server/cache-demo.js —— Node 原生实现缓存协商(理解原理用)
+const http = require('node:http');
+const crypto = require('node:crypto');
+const content = 'console.log("app bundle v1")';
+const etag = `"${crypto.createHash('md5').update(content).digest('hex')}"`;
+
+http.createServer((req, res) => {
+    res.setHeader('Cache-Control', 'public, max-age=10'); // 演示用 10 秒,方便观察协商
+    if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304);
+        res.end();
+        return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/javascript', ETag: etag });
+    res.end(content);
+}).listen(3000, () => console.log('缓存演示: http://localhost:3000'));
+```
+
+```typescript
+// 文件: examples/06-01-cache-strategy.ts —— 前端侧缓存策略速查
+// ============ "HTML 不缓存,带指纹资源强缓存"黄金法则 ============
+
+// 1. index.html:Cache-Control: no-cache(每次协商,保证拿到最新引用)
+//    → 但协商也有 RTT,追求极致可用 CDN 短缓存(s-maxage=60)
+
+// 2. /assets/app.8f3d2c.js:Cache-Control: max-age=31536000, immutable
+//    → 文件名带内容哈希,内容变 = 文件名变,强缓存一年绝对安全
+
+// 3. API 接口分类型:
+//    - 实时数据(余额、库存):no-store
+//    - 低频变化(城市列表):no-cache 或短 max-age + SWR
+
+// 4. 前端内存缓存:同一份数据多个组件共用时,在请求层做 Map 缓存 + 去重
+const inflight = new Map<string, Promise<unknown>>();
+
+function dedupeFetch<T>(url: string): Promise<T> {
+    if (!inflight.has(url)) {
+        inflight.set(
+            url,
+            fetch(url).then((r) => r.json()).finally(() => inflight.delete(url)), // 完成后删除
+        );
+    }
+    return inflight.get(url) as Promise<T>; // 并发请求自动合并为一次
+}
+
+void (async () => {
+    try {
+        // 同时发起 3 次,实际只发 1 个网络请求(需浏览器或配置了 baseURL 的环境)
+        const [a, b, c] = await Promise.all([dedupeFetch('/api/config'), dedupeFetch('/api/config'), dedupeFetch('/api/config')]);
+        console.log(a, b, c);
+    } catch {
+        console.log('(需在浏览器或配置了 baseURL 的环境中运行;Node 直跑会因相对路径无法解析而失败)');
+    }
+})();
+```
+
+> 运行方式：TS 示例用 `npx tsx examples/06-01-cache-strategy.ts`（需本地 mock `/api/config`，或直接阅读理解）；上方 `server/cache-demo.js` 为内联示意代码（Node 原生缓存协商），未落盘，原理对照阅读即可。
+
+#### 最佳实践
+
+- ✅ 记住黄金法则：**HTML 用 `no-cache`，带指纹静态资源用 `max-age=31536000, immutable`**；
+- ✅ 版本升级后偶发"白屏/新接口旧页面"，先查 HTML 是否被强缓存；
+- ⚠️ `ETag` 在多机部署时注意一致性（默认基于 inode 会不一致，需配置为基于内容）；
+- 📖 面试高频：强缓存 vs 协商缓存流程图、`no-cache` 与 `no-store` 区别、刷新（协商）/ 强制刷新（no-cache 请求）/ 地址栏回车（强缓存）的差异。
+
+## 6.3 跨域与 CORS
+
+#### 概念解析
+
+跨域是**浏览器同源策略**的行为，不是服务器的问题。同源 = 协议 + 域名 + 端口三者全部相同。
+
+**CORS 完整流程**：
+
+```mermaid
+flowchart TD
+    A["浏览器发起跨域请求"] --> B{"是否简单请求?<br/>GET/POST/HEAD + 安全头部<br/>+ 简单 Content-Type"}
+    B -- "是" --> C["直接发送真实请求(带 Origin 头)"]
+    B -- "否(自定义头 / JSON)" --> D["先发 OPTIONS 预检<br/>询问方法与头部"]
+    D --> E{"服务器允许?<br/>Allow-Origin / Methods / Headers"}
+    E -- "不允许" --> G["浏览器拦截<br/>控制台报 CORS 错误"]
+    E -- "允许" --> C
+    C --> H{"响应 Allow-Origin<br/>与当前来源匹配?"}
+    H -- "匹配" --> I["JS 可以读取响应"]
+    H -- "不匹配" --> G
+```
+
+> 所以本地调试看到"一个请求变两个"，第二个就是 OPTIONS 预检。
+
+#### 完整代码示例
+
+```typescript
+// 文件: server/cors-demo.ts —— Express 实现 CORS(生产建议用 cors 中间件,这里展示原理)
+import express from 'express';
+
+const app = express();
+const ALLOWED_ORIGIN = 'https://app.example.com'; // 生产环境不要写 *,配合凭证时也*会失效
+
+app.use((req, res, next) => {
+    res.set('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+    res.set('Access-Control-Allow-Credentials', 'true');                  // 允许携带 Cookie
+    res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); // 放行自定义头
+    res.set('Access-Control-Max-Age', '86400');                            // 预检结果缓存 1 天,减少 OPTIONS
+
+    if (req.method === 'OPTIONS') {
+        res.sendStatus(204); // 预检请求直接短路返回
+        return;
+    }
+    next();
+});
+
+app.get('/api/data', (_req, res) => res.json({ code: 0, data: 'ok' }));
+app.listen(3000);
+```
+
+```typescript
+// 文件: examples/06-02-cors-front.ts —— 前端侧:withCredentials 与替代方案
+// ============ 跨域的三种工程解法 ============
+
+// 1. 服务端 CORS(生产标准方案,见上)
+async function demoFetch() {
+    return fetch('https://api.example.com/api/data', {
+        credentials: 'include', // 跨域携带 Cookie(服务端必须配合 Allow-Credentials + 精确 Origin)
+    });
+}
+void demoFetch; // 仅作示意,避免示例被直接运行时发起真实请求
+
+// 2. 开发环境代理(Vite):浏览器以为同源,服务器之间没有同源策略
+// vite.config.ts → server.proxy → '/api': { target: 'http://localhost:3000', changeOrigin: true }
+
+// 3. Nginx 反向代理(生产):前后端同域部署,跨域问题根本不会出现
+// location /api/ { proxy_pass http://backend:3000/; }
+
+// 附:JSONP / postMessage 等老方案仅存于遗留系统,新项目不要使用
+export {};
+```
+
+> 运行方式：服务端 `server/cors-demo.ts` 为内联示意（Express 原理展示，未落盘）；前端侧配合 `npx tsx examples/06-02-cors-front.ts` 阅读理解，预检行为可在 DevTools Network 中观察 OPTIONS 请求。
+
+#### 最佳实践
+
+- ✅ 生产用 Nginx 同域反代，开发用 Vite proxy——让 CORS 问题在架构层面消失；
+- ⚠️ `Allow-Origin: *` 与 `credentials: 'include'` 互斥；带凭证必须回显具体 Origin；
+- ⚠️ `Allow-Origin` 动态回显请求方 Origin 时要白名单校验，否则等于开放全站（反射型 CORS 漏洞）；
+- 📖 面试高频：什么请求会触发预检、OPTIONS 是谁发的、JSONP 为什么被淘汰、Cookie 的 SameSite 与 CORS 的关系。
+
+## 6.4 请求层封装实战
+
+#### 概念解析
+
+企业级请求层的四个标配能力：**统一注入凭证、响应剥壳、401 静默续期、错误归一化**。下面是一个生产级 Axios 封装（含并发 401 只刷新一次、幂等请求自动重试）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: src/api/http.ts —— 生产级 Axios 封装
+import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+
+/** 业务错误:服务端返回了,但 code != 0 */
+class BusinessError extends Error {
+    constructor(message: string, public code: number | string) {
+        super(message);
+        this.name = 'BusinessError';
+    }
+}
+
+interface HttpOptions {
+    baseURL: string;
+    getToken: () => string | null;
+    onUnauthorized: () => void; // 刷新失败后的兜底(跳转登录)
+}
+
+function createHttp(options: HttpOptions): AxiosInstance {
+    const http = axios.create({ baseURL: options.baseURL, timeout: 10_000 });
+
+    // ---------- 请求拦截器:注入 token ----------
+    http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+        const token = options.getToken();
+        if (token) config.headers.set('Authorization', `Bearer ${token}`);
+        return config;
+    });
+
+    // ---------- 并发的 401 只触发一次刷新(其余请求等它完成后重试) ----------
+    let refreshing: Promise<string> | null = null;
+    const refreshToken = (): Promise<string> =>
+        http.post<{ token: string }>('/auth/refresh').then((r) => r.data.token);
+
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    // ---------- 响应拦截器:剥壳 + 续期 + 重试 + 错误归一化 ----------
+    http.interceptors.response.use(
+        (res) => {
+            // 约定响应结构 { code, data, message }:code === 0 才是业务成功
+            const { code, data, message } = res.data ?? {};
+            if (code === 0) return data; // 调用方直接拿到 data,不用每次 .data.data
+            return Promise.reject(new BusinessError(message ?? '业务错误', code));
+        },
+        async (error: AxiosError) => {
+            const original = error.config as (AxiosRequestConfig & { _retry?: boolean; _retryCount?: number }) | undefined;
+            if (!original) return Promise.reject(error);
+
+            // ---- 401:静默续期后重试一次 ----
+            if (error.response?.status === 401 && !original._retry) {
+                original._retry = true;
+                try {
+                    refreshing = refreshing ?? refreshToken(); // 并发 401 → 复用同一个刷新 Promise
+                    const newToken = await refreshing;
+                    original.headers = { ...original.headers, Authorization: `Bearer ${newToken}` } as any;
+                    return http(original); // 用新 token 重放原请求
+                } catch (e) {
+                    options.onUnauthorized(); // 刷新也失败 → 登出
+                    return Promise.reject(e);
+                } finally {
+                    refreshing = null;
+                }
+            }
+
+            // ---- 网络错误/5xx:幂等请求自动重试 2 次,指数退避 ----
+            const isIdempotent = ['get', 'head', 'options'].includes(original.method ?? '');
+            const isRetryable = ['ECONNABORTED', 'ERR_NETWORK'].includes(error.code ?? '') ||
+                (error.response?.status ?? 0) >= 500;
+
+            if (isIdempotent && isRetryable && (original._retryCount ?? 0) < 2) {
+                original._retryCount = (original._retryCount ?? 0) + 1;
+                await sleep(2 ** original._retryCount * 500); // 1s → 2s
+                return http(original);
+            }
+
+            // ---- 错误归一化:上层只需要处理 BusinessError / 通用 Error ----
+            const message =
+                (error.response?.data as { message?: string } | undefined)?.message ??
+                (error.code === 'ECONNABORTED' ? '请求超时,请稍后重试' : '网络异常,请检查网络');
+            return Promise.reject(new Error(message));
+        },
+    );
+
+    return http;
+}
+
+export const http = createHttp({
+    baseURL: '/api',
+    getToken: () => localStorage.getItem('token'),
+    onUnauthorized: () => {
+        localStorage.removeItem('token');
+        location.href = '/login';
+    },
+});
+
+// ---- 类型安全的调用封装:业务代码只写这一行 ----
+export function apiGet<T>(url: string, params?: Record<string, unknown>) {
+    return http.get<never, T>(url, { params }); // 响应拦截器已剥壳,第二个泛型直接是 data 类型
+}
+export function apiPost<T>(url: string, body?: unknown) {
+    return http.post<never, T>(url, body);
+}
+
+// 使用:const user = await apiGet<User>('/user/1')  ← user 已是 User 类型,无需 .data
+```
+
+> 运行方式：`npm i axios` 后放入项目；` refreshToken` 的具体地址按后端实际接口调整。核心思想与 fetch 封装同理，fetch 版本可自行对照实现。
+
+#### 最佳实践
+
+- ✅ **401 并发刷新**（`refreshing` 单例 Promise）是最高频的考点/坑点：不加它，并发 10 个 401 会触发 10 次刷新；
+- ✅ 重试只给幂等方法 + 网络级错误；业务错误（4xx）不重试；
+- ✅ 所有错误最终归一为两种：`BusinessError`（业务可感知）与通用 Error（网络层），上层 UI 统一 toast；
+- ⚠️ token 不要放 localStorage（XSS 可读，见 [7.1](./07-security.md#_7-1-xss-跨站脚本攻击)）——示例为简化演示，生产建议 HttpOnly Cookie + CSRF Token 方案。
+
+## 6.5 竞态处理与请求取消
+
+#### 概念解析
+
+**竞态（Race Condition）**：快速输入时，先发出的请求后返回，旧数据覆盖新数据。三种解法按优先级：**取消旧请求（AbortController）> 忽略过期结果（版本号/标志位）> 防抖减少触发**。
+
+#### 完整代码示例
+
+```tsx
+// 文件: src/demo/AbortDemo.tsx —— 搜索场景的完整竞态防护
+import { useEffect, useRef, useState } from 'react';
+
+interface SearchResult { id: number; title: string }
+
+export function useSearch(keyword: string) {
+    const [results, setResults] = useState<SearchResult[]>([]);
+    const [loading, setLoading] = useState(false);
+    const controllerRef = useRef<AbortController | null>(null);
+
+    useEffect(() => {
+        if (!keyword.trim()) {
+            setResults([]);
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            // ① 防抖:输入停顿 300ms 才发请求
+            controllerRef.current?.abort();            // ② 取消上一次未完成的请求
+            const controller = new AbortController();
+            controllerRef.current = controller;
+            setLoading(true);
+
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(keyword)}`, {
+                    signal: controller.signal,          // ③ 请求与控制器绑定
+                });
+                setResults((await res.json()) as SearchResult[]);
+            } catch (e) {
+                if ((e as Error).name !== 'AbortError') {
+                    console.error('搜索失败:', e); // ④ 只有真实错误才处理,取消是正常流程
+                }
+            } finally {
+                if (controllerRef.current === controller) setLoading(false); // 防止旧请求误关新 loading
+            }
+        }, 300);
+
+        return () => clearTimeout(timer); // 卸载/keyword 变化时清理防抖定时器
+    }, [keyword]);
+
+    return { results, loading };
+}
+
+// ---- 忽略过期结果的备选方案:版本号(不能取消请求时使用)----
+let requestVersion = 0;
+async function fetchWithStaleGuard(url: string) {
+    const version = ++requestVersion;
+    const data = await fetch(url).then((r) => r.json());
+    if (version !== requestVersion) throw new Error('STALE'); // 已有更新的请求发出 → 本次结果作废
+    return data;
+}
+
+export function SearchPage() {
+    const [keyword, setKeyword] = useState('');
+    const { results, loading } = useSearch(keyword);
+    return (
+        <>
+            <input value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+            {loading && <p>搜索中...</p>}
+            <ul>{results.map((r) => <li key={r.id}>{r.title}</li>)}</ul>
+        </>
+    );
+}
+```
+
+```tsx
+// 文件: src/demo/UploadProgress.tsx —— 上传进度与取消
+import { useRef, useState } from 'react';
+
+export function UploadButton() {
+    const [progress, setProgress] = useState(0);
+    const xhrRef = useRef<XMLHttpRequest | null>(null);
+
+    const handleUpload = (file: File) =>
+        new Promise<void>((resolve, reject) => {
+            // ⚠️ 上传进度目前仍需 XHR(fetch 只原生支持下载进度流)
+            const xhr = new XMLHttpRequest();
+            xhrRef.current = xhr;
+            xhr.open('POST', '/api/upload');
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
+            };
+            xhr.onload = () => resolve();
+            xhr.onerror = () => reject(new Error('上传失败'));
+            xhr.send(file);
+        });
+
+    return (
+        <>
+            <input type="file" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+            <progress value={progress} max={100} />
+            <button onClick={() => xhrRef.current?.abort()}>取消上传</button>
+        </>
+    );
+}
+```
+
+> 运行方式：放入 React 项目运行；在 DevTools Network 面板中可以观察到被取消的请求显示为 `(canceled)`。生产中的搜索场景建议直接用 TanStack Query（内置竞态防护）。
+
+#### 最佳实践
+
+- ✅ 一切"输入驱动的请求"（搜索、筛选、联动下拉）都必须处理竞态，没有例外；
+- ✅ `AbortError` 是**正常业务流程**，捕获后静默处理，不要当错误弹 toast；
+- ⚠️ `Promise.race` 实现的"超时"不会真正取消底层请求，需要取消时必须用 AbortController；
+- 📖 AbortController 组合技：`AbortSignal.timeout(5000)`（自动超时）、`AbortSignal.any([a, b])`（多个信号任一触发）。
+
+## 6.6 实时通信技术
+
+#### 概念解析
+
+| 方案 | 方向 | 协议 | 适用场景 |
+| ---- | ---- | ---- | -------- |
+| 短轮询 | 双向 | HTTP | 实时性要求低、实现最简单 |
+| 长轮询 | 双向 | HTTP(挂起) | 兼容性兜底 |
+| SSE | 服务器 → 客户端 | HTTP 流 | 消息推送、AI 流式输出（天然自动重连） |
+| **WebSocket** | 全双工 | ws:// | 聊天、协同编辑、行情、游戏 |
+
+选型原则：**只需要服务器推送就用 SSE**（更简单、走标准 HTTP、自带重连）；需要客户端高频上行才用 WebSocket。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/06-03-sse.ts —— SSE:AI 流式输出的标配方案
+// ============ 客户端:三行核心代码 ============
+
+function listenNotifications(onMessage: (data: unknown) => void) {
+    // EventSource 自带:断线自动重连、last-event-id 续传
+    const source = new EventSource('/api/notifications');
+
+    source.onmessage = (event) => onMessage(JSON.parse(event.data));
+    source.addEventListener('order-paid', (event) => onMessage(JSON.parse((event as MessageEvent).data))); // 自定义事件
+
+    source.onerror = () => console.warn('连接中断,浏览器将自动重连');
+    return () => source.close(); // 返回关闭函数,组件卸载时调用
+}
+
+// ---- 流式请求(POST 场景用 fetch 读流,SSE 不支持 POST)----
+async function streamCompletion(prompt: string, onChunk: (text: string) => void) {
+    const res = await fetch('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ prompt }),
+        headers: { 'Content-Type': 'application/json' },
+    });
+    const reader = res.body!.getReader();       // ReadableStream 读取器
+    const decoder = new TextDecoder();
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        onChunk(decoder.decode(value, { stream: true })); // stream:true 处理跨 chunk 的多字节字符
+    }
+}
+
+// 演示(Node 端没有 EventSource/流,以下调用需浏览器环境):
+// listenNotifications((data) => console.log('收到推送:', data));
+// await streamCompletion('写一首诗', (chunk) => process.stdout.write(chunk));
+export {};
+```
+
+```typescript
+// 文件: examples/06-04-websocket-manager.ts
+// ============ 生产级 WebSocket 管理:心跳 + 指数退避重连 ============
+
+interface WsOptions {
+    heartbeatInterval?: number;
+    maxRetries?: number;
+    onMessage?: (data: unknown) => void;
+}
+
+class ReconnectingWebSocket {
+    private ws: WebSocket | null = null;
+    private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    private reconnectDelay = 1000;
+    private closedByUser = false;
+
+    constructor(private url: string, private options: WsOptions = {}) {
+        this.connect();
+    }
+
+    private connect() {
+        this.ws = new WebSocket(this.url);
+
+        this.ws.onopen = () => {
+            this.reconnectDelay = 1000;      // 连上后重置退避
+            this.startHeartbeat();
+        };
+
+        this.ws.onmessage = (event) => {
+            if (event.data === 'pong') return; // 心跳响应,交给定时器判断即可
+            this.options.onMessage?.(JSON.parse(event.data as string));
+        };
+
+        this.ws.onclose = () => {
+            this.stopHeartbeat();
+            if (!this.closedByUser) this.reconnect();
+        };
+
+        this.ws.onerror = () => this.ws?.close(); // 统一走 onclose 重连逻辑
+    }
+
+    /** 心跳:探测假死连接(代理/防火墙会静默断开空闲连接) */
+    private startHeartbeat() {
+        this.heartbeatTimer = setInterval(() => {
+            if (this.ws?.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, this.options.heartbeatInterval ?? 30_000);
+    }
+
+    private stopHeartbeat() {
+        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = null;
+    }
+
+    /** 指数退避重连:1s → 2s → 4s → ... 封顶 30s,避免服务恢复瞬间被重连风暴打垮 */
+    private reconnect() {
+        const retries = this.options.maxRetries ?? 8;
+        if (this.reconnectDelay > 2 ** retries * 1000) {
+            console.error('重连次数超限,放弃(请检查网络或提示用户刷新)');
+            return;
+        }
+        console.warn(`${this.reconnectDelay}ms 后重连...`);
+        setTimeout(() => {
+            this.reconnectDelay *= 2;
+            this.connect();
+        }, this.reconnectDelay);
+    }
+
+    send(data: unknown) {
+        if (this.ws?.readyState !== WebSocket.OPEN) {
+            throw new Error('连接未就绪(生产中应做发送队列,见最佳实践)');
+        }
+        this.ws.send(JSON.stringify(data));
+    }
+
+    close() {
+        this.closedByUser = true; // 主动关闭不再重连
+        this.stopHeartbeat();
+        this.ws?.close();
+    }
+}
+
+// ---- 使用(需真实 WS 服务;直接运行会因连不上而进入重连循环,故注释保留供阅读)----
+// const ws = new ReconnectingWebSocket('wss://example.com/ws', {
+//     onMessage: (data) => console.log('收到:', data),
+// });
+// ws.send({ type: 'chat', content: 'hello' });
+```
+
+> 运行方式：SSE 示例放入浏览器项目运行（服务端返回 `Content-Type: text/event-stream`）；WebSocket 示例配合任意 WS 服务端（如 `ws` 库）运行，观察断网后的自动重连日志。
+
+#### 最佳实践
+
+- ✅ 心跳 + 指数退避是 WebSocket 生产环境的**最低标配**，缺一不可；
+- ✅ 连接断开期间的 `send` 应进入**离线队列**，重连成功后按序补发；
+- ✅ 页面 `visibilitychange` 隐藏时降频/暂停订阅，回到前台立即刷新——省流量也省服务端资源；
+- ⚠️ SSE 不支持 POST 与自定义请求头（鉴权需用 Cookie 或查询参数 token）；跨域 SSE 同样遵循 CORS。
+
+## 6.7 大文件上传方案
+
+#### 概念解析
+
+大文件上传三板斧：**分片（绕过单请求体积/超时限制）→ 并发控制（提速且不占满带宽）→ 断点续传/秒传（哈希标识 + 已传分片记录）**。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/06-05-chunk-upload.ts
+// ============ 大文件分片上传:秒传 + 断点续传 + 并发控制 ============
+
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB 一片
+
+/** 计算文件哈希作为唯一标识(大文件建议放 Web Worker + 增量抽样计算,避免卡 UI) */
+async function hashFile(file: File): Promise<string> {
+    const buffer = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...init });
+    return res.json() as Promise<T>;
+}
+
+/** 并发池(同 1.8 的 asyncPool) */
+async function asyncPool<T>(limit: number, items: readonly T[], task: (item: T) => Promise<void>) {
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (cursor < items.length) await task(items[cursor++]);
+    });
+    await Promise.all(workers);
+}
+
+export async function uploadLargeFile(file: File, onProgress?: (percent: number) => void) {
+    // ① 计算唯一标识
+    const hash = await hashFile(file);
+
+    // ② 问服务器:这文件传过吗?(秒传)传过哪些片?(断点续传)
+    const { uploaded, exists } = await fetchJSON<{ uploaded: number[]; exists: boolean }>('/api/upload/status', {
+        method: 'POST',
+        body: JSON.stringify({ hash, name: file.name, size: file.size }),
+    });
+    if (exists) return console.log('⚡ 秒传:服务器已有相同文件');
+
+    const total = Math.ceil(file.size / CHUNK_SIZE);
+    const pending = Array.from({ length: total }, (_, i) => i).filter((i) => !uploaded.includes(i));
+    let doneCount = uploaded.length;
+
+    // ③ 并发上传缺失分片(并发 3,失败单片自动重试)
+    await asyncPool(3, pending, async (index) => {
+        const blob = file.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE); // File.slice:零拷贝切片
+        const form = new FormData();
+        form.append('chunk', blob);
+        form.append('hash', hash);
+        form.append('index', String(index));
+
+        // 单片重试 3 次
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                await fetch('/api/upload/chunk', { method: 'POST', body: form });
+                doneCount++;
+                onProgress?.(Math.round((doneCount / total) * 100));
+                return;
+            } catch (e) {
+                if (attempt === 2) throw e;
+                await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+            }
+        }
+    });
+
+    // ④ 通知服务端合并分片
+    await fetchJSON('/api/upload/merge', { method: 'POST', body: JSON.stringify({ hash, total, name: file.name }) });
+    console.log('✅ 上传完成');
+}
+
+// 触发:<input type="file" onChange={(e) => uploadLargeFile(e.target.files![0], console.log)} />
+```
+
+```typescript
+// 文件: server/chunk-merge.ts —— 服务端合并逻辑示意(Node.js)
+import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const app = express();
+app.use(express.json());
+const UPLOAD_DIR = path.resolve('chunks');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// 分片落盘:chunks/<hash>/<index>
+app.post('/api/upload/chunk', (req, res) => {
+    const { hash, index } = req.query as { hash: string; index: string };
+    const chunkDir = path.join(UPLOAD_DIR, hash);
+    fs.mkdirSync(chunkDir, { recursive: true });
+    // 生产中建议用流式写入(pipostream),此处示意
+    req.pipe(fs.createWriteStream(path.join(chunkDir, index)));
+    req.on('end', () => res.json({ ok: true }));
+});
+
+// 状态查询:支持秒传(exists)与断点续传(uploaded)
+app.post('/api/upload/status', (req, res) => {
+    const { hash, size } = req.body as { hash: string; size: number };
+    const chunkDir = path.join(UPLOAD_DIR, hash);
+    const uploaded = fs.existsSync(chunkDir) ? fs.readdirSync(chunkDir).map(Number) : [];
+    const exists = fs.existsSync(path.join(UPLOAD_DIR, `${hash}.done`)) || (uploaded.length > 0 && uploaded.length * 5 * 1024 * 1024 >= size);
+    res.json({ uploaded, exists });
+});
+
+// 合并:按序拼接所有分片
+app.post('/api/upload/merge', (req, res) => {
+    const { hash, total, name } = req.body as { hash: string; total: number; name: string };
+    const chunkDir = path.join(UPLOAD_DIR, hash);
+    const writeStream = fs.createWriteStream(path.join(UPLOAD_DIR, name));
+
+    let i = 0;
+    const appendNext = () => {
+        if (i >= total) {
+            writeStream.end();
+            fs.rmSync(chunkDir, { recursive: true }); // 清理分片
+            return res.json({ ok: true });
+        }
+        fs.createReadStream(path.join(chunkDir, String(i++)))
+            .on('end', appendNext)
+            .pipe(writeStream, { end: false });
+    };
+    appendNext();
+});
+
+app.listen(3001, () => console.log('分片上传服务: http://localhost:3001'));
+```
+
+> 运行方式：服务端 `server/chunk-merge.ts` 为内联示意（未落盘），把上传函数接到 `<input type="file">` 上测试即可；哈希计算在真实项目建议用 `spark-md5` 在 Web Worker 中**抽样计算**（首尾 + 中间采样），GB 级文件也能秒级出哈希。
+
+#### 最佳实践
+
+- ✅ 分片大小权衡：太小 → 请求数爆炸；太大 → 失败重传成本高；一般 2~10MB；
+- ✅ 哈希必须异步/抽样计算，否则大文件 `arrayBuffer()` 会直接卡死主线程；
+- ✅ 断点续传的"已传分片列表"由服务端下发（客户端本地记录不可信）；
+- ⚠️ 合并接口要做**完整性校验**（分片数 + 总大小 + 可选整体哈希），防止缺片静默成功。
+
+---
+
+## 6.8 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】哪些请求会触发 CORS 预检(OPTIONS)?</b></summary>
+
+非简单请求:① 方法不是 GET/POST/HEAD;② 携带自定义头部(如 Authorization);③ Content-Type 不是三种简单值(如 application/json)。命中任意一条,浏览器先发 OPTIONS 询问服务器是否允许。
+</details>
+
+<details>
+<summary><b>2. 【进阶】并发多个请求同时 401 时,如何避免触发多次 token 刷新?</b></summary>
+
+共享同一个刷新 Promise:第一个 401 发起 refreshToken() 并存入变量,后续 401 直接 await 同一个 Promise,刷新完成后各自携带新 token 重放原请求。
+</details>
+
+<details>
+<summary><b>3. 【进阶】竞态问题的三种解法与优先级?</b></summary>
+
+① 取消旧请求(AbortController) —— 最彻底,推荐;② 忽略过期结果(版本号/标志位,请求无法取消时用);③ 防抖减少触发频率 —— 只是缓解,必须与前两者组合使用。
+</details>
+
+<details>
+<summary><b>4. 【挑战】SSE 和 WebSocket 怎么选?</b></summary>
+
+只需要服务器 → 客户端单向推送选 SSE:走标准 HTTP、浏览器自带断线重连、实现简单(通知、AI 流式输出)。需要客户端高频上行或全双工(聊天、协同编辑)才用 WebSocket,并必须配心跳 + 指数退避重连。
+</details>
+
+---
+
+## 6.9 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| CORS 预检 | 带了自定义头，浏览器先发一个 `OPTIONS` | 命中非简单请求条件（自定义头、非简单 `Content-Type`、非简单方法）就触发预检；服务端要正确应答 `OPTIONS` 并回带 `Access-Control-Allow-Headers`、`Access-Control-Allow-Methods` |
+| 缓存失效 | 改版后用户仍看到旧页面、旧资源 | HTML 用 `no-cache` 每次协商，带哈希的静态资源用 `max-age` 加 `immutable` 强缓存，文件名一变缓存自然失效（见 [3.5](./03-engineering.md#_3-5-性能优化体系)） |
+| 请求竞态 | 快速切换搜索词，旧响应盖掉了新结果 | 后发先至的旧请求会覆盖新结果；用 `AbortController` 取消上一个请求（最彻底），或加版本号忽略过期响应 |
+| HTTP/2 时代的旧招 | 沿用域名分片、雪碧图、文件合并 | HTTP/2 多路复用后这些是反模式，域名分片反而阻碍连接复用；优化重心转为减少请求数与减小传输量 |
+| SSE 分块切行 | 流式输出偶尔丢半个 JSON | SSE 以空行分隔事件，跨网络分块可能把一行劈开；按空行切分事件，并缓存不完整分块待下块拼接 |
+| 断点续传的 `Range` | 续传重试后服务端返回 200，结果少了一段 | `Range` 语义是「续传缺失区间」，服务端应回 `206` 与 `Content-Range`；合并前校验分片数与总大小，别信客户端本地记录 |
+| 并发 401 刷新 | 多个请求同时 401，触发多次 token 刷新 | 共享同一个刷新 Promise，第一个 401 发起刷新、其余 `await` 同一 Promise 后再各自重放原请求 |

@@ -1,0 +1,411 @@
+# 第三十六部分 · 认证体系全景（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/36-auth-system
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第三十六部分 · 认证体系全景
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第三十五部分 · 后台管理系统权限方案](./35-admin-system-auth.md) · [第七部分 · 前端安全](./07-security.md) · [第十六部分 · Node 服务端](./16-node-server.md)
+
+> 💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。第 35 册解决的是「登录之后能干什么」（授权），本册解决「如何证明你是谁」（认证）——从 Session、JWT、Refresh Token 轮换，到 OAuth2 授权码、SSO 与多租户，补全认证体系的完整地图。
+
+## 本部分内容
+
+- [36.1 认证与授权：一体两面](#_36-1-认证与授权-一体两面)
+- [36.2 Session-Cookie：有状态会话](#_36-2-session-cookie-有状态会话)
+- [36.3 JWT：无状态令牌](#_36-3-jwt-无状态令牌)
+- [36.4 Refresh Token 与静默续期](#_36-4-refresh-token-与静默续期)
+- [36.5 OAuth2 授权码流程与第三方登录](#_36-5-oauth2-授权码流程与第三方登录)
+- [36.6 SSO 单点登录](#_36-6-sso-单点登录)
+- [36.7 多租户登录态](#_36-7-多租户登录态)
+- [36.8 Token 存储与前端工程实践](#_36-8-token-存储与前端工程实践)
+- [36.9 自测题](#_36-9-自测题)
+- [36.10 本章避坑清单](#_36-10-本章避坑清单)
+
+```mermaid
+flowchart LR
+    A[用户提交凭证] --> B{认证方式}
+    B --> C[Session-Cookie<br/>服务端会话表]
+    B --> D[JWT<br/>无状态签名令牌]
+    B --> E[OAuth2 授权码<br/>第三方登录]
+    C --> F[踢人下线 / 会话可控]
+    D --> G[Refresh Token 轮换<br/>静默续期 + 复用检测]
+    E --> H[SSO 统一认证中心]
+    G --> I[多系统共享登录态]
+    F --> J[授权层：permissionCodes<br/>第 35 册 RBAC 模型]
+    I --> J
+```
+
+---
+
+> 认证（Authentication）回答「你是谁」，授权（Authorization）回答「你能干什么」。很多团队把两者搅在一起，直到出现「未登录和没权限返回同一个错误码，前端不知道该跳登录页还是弹提示」才意识到分层的重要性。本册的策略轴心是：**认证方案决定「凭证长什么样、存在哪、怎么失效」**，它是所有权限体系的地基。
+
+---
+
+## 36.1 认证与授权：一体两面
+
+### 36.1.1 概念解析
+
+认证在授权之前发生，产出一份**身份**（identity），授权消费这份身份做权限判断。两层分离带来三个工程收益：
+
+1. **错误码语义分明**：401（未认证）→ 前端跳登录页；403（未授权）→ 前端弹提示。混用后前端只能瞎猜。
+2. **可独立替换**：从 Session 切到 JWT、接入第三方登录，认证层整个换掉，授权层（第 35 册的 `matchRule/hasPermission`）一行不改。
+3. **可独立测试**：授权是纯函数（权限码进、布尔出），不需要 mock 登录流程。
+
+### 36.1.2 核心代码
+
+```ts
+// 文件: examples/36-01-authn-authz.ts
+export interface Identity {
+    userId: string;
+    name: string;
+    /** 认证成功后由服务端下发的权限码列表（第 35 册的 RBAC 模型产出） */
+    permissionCodes: string[];
+}
+
+/** 认证：校验凭证，产出身份。失败返回 null */
+export function authenticate(username: string, password: string): Identity | null;
+
+/** 授权：基于身份做权限码匹配（与认证解耦，可独立单测） */
+export function authorize(identity: Identity, requiredCode: string): boolean;
+
+/** 请求处理管线：先认证后授权，错误码语义分明 */
+export function handleRequest(
+    credentials: { username: string; password: string } | null,
+    requiredCode: string,
+): { status: 200 | 401 | 403; body: string };
+```
+
+> 运行方式：`npx tsx examples/36-01-authn-authz.ts`。
+
+### 36.1.3 应用实践
+
+- **401/403 全链路对齐**：网关、服务、前端拦截器三处统一口径——401 必然触发「清理凭证 + 跳登录」，403 走「无权限提示页」。
+- **匿名可访问的资源不走认证管线**：公开页面（落地页、文档）不产生 401，避免 Sentry 里堆满噪音。
+- **凭证校验永远在服务端**：前端的登录表单校验只是体验优化，`authenticate` 的真相必须来自服务端。
+
+---
+
+## 36.2 Session-Cookie：有状态会话
+
+### 36.2.1 概念解析
+
+Session 方案里，服务端维护一张会话表（内存 / Redis），客户端只持有不透明的 `sessionId`（放 Cookie）。它是「服务端说了算」的方案——**能主动踢人**，这是 JWT 做不到的。
+
+Cookie 必须配齐三件套：
+
+| 属性 | 作用 |
+| --- | --- |
+| `HttpOnly` | JS 读不到，XSS 偷不走凭证 |
+| `Secure` | 仅 HTTPS 传输 |
+| `SameSite=Lax` | 跨站请求不带 Cookie，缓解 CSRF |
+
+过期策略用「双保险」：**滑动过期**（每次访问续命，空闲 30 分钟失效）+ **绝对过期硬顶**（无论多活跃，24 小时必须重登录）。
+
+### 36.2.2 核心代码
+
+```ts
+// 文件: examples/36-02-session-auth.ts
+export class SessionStore {
+    constructor(private config: SessionConfig) {}
+
+    create(userId: string, now: number): Session;
+    /** 校验 + 滑动续期；空闲超时或超过绝对硬顶都返回 null */
+    validate(sessionId: string, now: number): Session | null;
+    /** 登出 / 踢下线：服务端单方面销毁 */
+    destroy(sessionId: string): boolean;
+    /** 按用户踢全部会话（改密码后强制全端重登录） */
+    destroyAllByUser(userId: string): number;
+}
+
+/** 序列化 Set-Cookie：HttpOnly/Secure/SameSite 三件套 + maxAge */
+export function serializeSessionCookie(sessionId: string, maxAgeSeconds: number): string;
+```
+
+> 运行方式：`npx tsx examples/36-02-session-auth.ts`。
+
+### 36.2.3 应用实践
+
+- **水平扩展用集中存储**：多实例部署时会话表放 Redis（共享），否则请求落到另一台机器就「莫名掉登录」。
+- **sessionId 不可预测**：必须用 `crypto.randomBytes(32)` 级别的熵，禁止时间戳 + 用户 ID 拼接（可枚举遍历）。
+- **前后端分离的 Cookie 域**：API 与站点不同域时，要么网关同域反代，要么 `SameSite=None; Secure` + CORS `credentials: "include"`（后者限制更严，优先前者）。
+
+---
+
+## 36.3 JWT：无状态令牌
+
+### 36.3.1 概念解析
+
+JWT 三段式 `header.payload.signature`：前两段 base64url 编码（**只是编码不是加密，任何拿到 token 的人都能读**），第三段 HMAC-SHA256 签名保证不可篡改。
+
+| 维度 | Session | JWT |
+| --- | --- | --- |
+| 状态 | 服务端存表 | 无状态，签名即凭证 |
+| 主动失效 | 一删即生效 | 难（要黑名单/短有效期） |
+| 扩展性 | 需共享存储 | 任意节点可验签 |
+| 泄露后果 | 可踢下线 | 过期前一直有效 |
+
+校验顺序是硬规矩：**结构 → 签名 → 过期**。先看 exp 再验签等于先信任了不可信内容。另外 `alg` 字段由校验方锁定（本例 HS256），**绝不读 token 里的 alg**——历史上有过 `alg: none` 漏洞：伪造一个空签名 token，服务端信了 header 里的 alg 直接放行。
+
+### 36.3.2 核心代码
+
+```ts
+// 文件: examples/36-03-jwt-sign-verify.ts
+export function signJwt(payload: Omit<JwtPayload, "iat" | "exp">, expiresInSeconds: number, now?: number): string;
+
+export type VerifyResult =
+    | { ok: true; payload: JwtPayload }
+    | { ok: false; reason: "malformed" | "bad_signature" | "expired" };
+
+/** 校验顺序：结构 → 签名（timingSafeEqual 防时序攻击）→ 过期 */
+export function verifyJwt(token: string, now?: number): VerifyResult;
+```
+
+> 运行方式：`npx tsx examples/36-03-jwt-sign-verify.ts`（依赖 `node:crypto`，属 Node 示例）。
+
+### 36.3.3 应用实践
+
+- **payload 只放声明**：`sub/role/permissionCodes/exp`，绝不放密码、手机号——payload 是明文可读的。
+- **密钥管理**：签名密钥放服务端环境变量，轮换时用 `kid`（key id）头部区分新旧密钥，双密钥过渡期并存验签。
+- **别自造 JWT 库**：示例是教学手写，生产用 `jose`/`jsonwebtoken`，它们处理了 padding、多算法、aud/iss 校验等坑。
+
+---
+
+## 36.4 Refresh Token 与静默续期
+
+### 36.4.1 概念解析
+
+JWT 的「难注销」用双令牌化解：
+
+- **access token**：15 分钟，随请求携带，泄露窗口小；
+- **refresh token**：7 天，只在续期接口出现，服务端存表（回到了有状态——这是刻意的，为了可控）。
+
+核心安全机制是**轮换（rotate）**：每次续期发新 refresh、旧的立即作废；一旦发现**已作废的 refresh 被再次使用**（reuse），说明 token 可能被窃取——立即撤销整个 token 家族（family），攻击者和你自己全部下线重新登录。
+
+### 36.4.2 核心代码
+
+```ts
+// 文件: examples/36-04-refresh-token.ts
+export class AuthService {
+    login(userId: string, now: number): TokenPair;
+    verifyAccess(token: string, now: number): boolean;
+    /**
+     * 续期：refresh 轮换 + 复用检测。
+     * - 合法 refresh → 发新对，旧 refresh 标记 revoked；
+     * - 已 revoked 的 refresh 再次出现 → 泄露信号 → 整族撤销。
+     */
+    rotate(refreshToken: string, now: number):
+        | { ok: true; pair: TokenPair }
+        | { ok: false; reason: "invalid" | "expired" | "reused" };
+}
+```
+
+> 运行方式：`npx tsx examples/36-04-refresh-token.ts`（依赖 `node:crypto`）。
+
+前端侧的静默续期伪代码（真实实现要点）：
+
+```ts
+// 响应拦截器：401 → 排队刷新 → 重放原请求
+let refreshing: Promise<string> | null = null;
+if (status === 401) {
+    refreshing ??= fetch('/api/refresh', { method: 'POST' }).then(getAccessToken);
+    await refreshing; refreshing = null; // 成功后重放；失败跳登录
+}
+```
+
+关键在 `??=`：并发多个 401 时只发一次刷新请求，其余排队等同一个 Promise。
+
+### 36.4.3 应用实践
+
+- **刷新接口判客户端指纹**：refresh token 绑定 UA/IP 段指纹，跨环境使用即拒绝，进一步压缩被盗 token 的可用面。
+- **重放队列有上限**：刷新失败（refresh 也过期）必须停止重试跳登录页，避免死循环刷接口。
+- **登出双清**：清前端存储 + 调服务端登出接口作废 refresh。只做前者，token 还能用到自然过期。
+
+---
+
+## 36.5 OAuth2 授权码流程与第三方登录
+
+### 36.5.1 概念解析
+
+「用微信/GitHub 登录」背后是 OAuth2 授权码流程。四个角色：
+
+```mermaid
+sequenceDiagram
+    participant U as 用户代理(浏览器)
+    participant C as 客户端(你的前端)
+    participant A as 授权服务器
+    U->>C: 点击"用 GitHub 登录"
+    C->>U: 302 跳转 /authorize（带 state + code_challenge）
+    U->>A: 登录并同意授权
+    A->>U: 重定向回调 ?code=xxx&state=yyy
+    U->>C: 打开回调页
+    C->>C: 校验 state === 发起时保存的值
+    C->>A: code + code_verifier 换 access_token
+    A->>C: access_token（+ id_token）
+```
+
+前端职责边界：**发起跳转、接收回调、校验 state**。code 换 token 一步，有后端时放后端做（client_secret 不能暴露在前端；纯 SPA 用 PKCE 代替 secret）。
+
+两个必做防御：
+
+1. **state**：发起时生成随机串存 sessionStorage，回调必须原样带回——否则攻击者可以伪造回调把你登录到他的账号（CSRF 登录攻击）。
+2. **PKCE**：`code_verifier`（随机串）→ `code_challenge`（其哈希）随跳转发出，换 token 时出示原 verifier。授权码即使被截获，没有 verifier 也换不出 token。
+
+### 36.5.2 核心代码
+
+```ts
+// 文件: examples/36-05-oauth-code-flow.ts
+/** ① 前端生成 state + verifier，带 challenge 跳转授权页 */
+export function buildAuthorizeUrl(): { url: string; state: string; verifier: string };
+
+/** ② 授权服务器：用户同意后发放一次性授权码（10 分钟过期） */
+function issueCode(challenge: string, now: number): { code: string; state: string };
+
+/** ③ 用 code + verifier 换 token：一次性 / 过期 / PKCE 校验三道关 */
+function exchangeCode(code: string, verifier: string, now: number):
+    | { ok: true; accessToken: string }
+    | { ok: false; error: string };
+```
+
+> 运行方式：`npx tsx examples/36-05-oauth-code-flow.ts`。
+
+### 36.5.3 应用实践
+
+- **回调页只做三件事**：校验 state → 提取 code → 交给换 token 逻辑，然后立刻清 URL 参数（code 留在地址栏会被历史记录/分享链接泄露）。
+- **redirect_uri 精确匹配**：授权服务器必须做全等校验（含路径、协议、尾斜杠），宽松匹配会让授权码被重定向到攻击者站点。
+- **OIDC 拿身份**：OAuth2 只管授权不管「我是谁」，需要用户信息走 OIDC（多一个 `id_token`），别自己拿 access_token 去猜用户接口。
+
+---
+
+## 36.6 SSO 单点登录
+
+### 36.6.1 概念解析
+
+SSO 解决「一家人（sso.example.com）登录，全家（oa.crm.blog）通行」。核心思路：**登录态收敛到统一认证中心，业务系统只持有由中心签发的会话**。
+
+CAS 风格流程：
+
+1. 访问业务系统 A，无本地会话 → 302 到认证中心 `sso?service=A的回调地址`；
+2. 认证中心有全局会话（Cookie 在 sso 域下）→ 直接签发一次性 ticket 重定向回 A；
+3. A 拿 ticket 到认证中心后端换取会话（校验 ticket 一次性）→ 建立本地会话；
+4. 访问系统 B → 跳认证中心时**全局会话还在** → 免密签发新 ticket → B 免登录通行。
+
+登出是反向的：在中心登出 → 中心通知各业务系统销毁本地会话（单点登出 SLO），否则出现「中心登出了，OA 还能点」的诡异状态。
+
+### 36.6.2 与 OAuth2 的关系
+
+| | CAS/自建 SSO | OAuth2/OIDC |
+| --- | --- | --- |
+| 目标 | 自家多系统共享登录态 | 授权第三方应用访问资源 |
+| 凭证 | ticket（换会话） | code（换 token） |
+| 适用 | 企业内部系统群 | 对外开放平台 / 第三方登录 |
+
+企业内部优先 CAS/OIDC 单点；对外生态用 OAuth2。两者可以共用同一个认证中心。
+
+### 36.6.3 应用实践
+
+- **ticket 必须一次性 + 短时效**（类似 36.5 的 code），换票动作放后端。
+- **全局会话的 Cookie 域是整个方案的心脏**：必须落在认证中心的顶级域（`example.com`），业务系统才能共享「已登录」状态。
+- **本地会话与全局会话解耦**：业务系统本地会话独立过期（短），过期后重走 SSO 免密换票即可，不必每次都带着全局 Cookie 转发全部请求。
+
+---
+
+## 36.7 多租户登录态
+
+### 36.7.1 概念解析
+
+SaaS 场景：一套系统服务多家公司（租户），认证必须回答「你是哪个租户的谁」。三件事要定：
+
+1. **租户识别**：进入登录页前就确定租户——子域名（`acme.app.com`）、路径（`/acme/login`）或登录页输入组织码；
+2. **token 携带租户声明**：JWT payload 加 `tenantId`，或 Session 记录租户字段；所有权限数据（第 35 册的角色表）按租户隔离查询；
+3. **租户切换 = 重新认证**：一个用户可以属于多个租户，切换租户时重新签发 token（或走一次免密换票），**绝不在同一 token 里塞多个租户的权限**——判定逻辑会复杂到失控。
+
+### 36.7.2 工程要点
+
+- **缓存 key 全部带租户前缀**：`tenant:{tid}:user:{uid}:perms`，漏一个前缀就是跨租户数据泄露事故。
+- **前端租户上下文只读不改**：`tenantId` 来自 token 解析，界面展示用，接口层不传 `tenantId` 参数（后端从 token 取），防篡改。
+- **登录页先解析租户再渲染品牌**：白标（每个租户看到自己的 Logo/主题）依赖租户识别前置。
+
+### 36.7.3 与第 35 册的衔接
+
+第 35 册的 RBAC 模型扩展一个维度即成多租户版：`Role` 表加 `tenantId` 列，`collectPermissions(user, roles)` 查询时按 `user.tenantId` 过滤角色。权限码本身不用改。
+
+---
+
+## 36.8 Token 存储与前端工程实践
+
+### 36.8.1 存储位置权衡
+
+| 存储位置 | XSS 可读 | CSRF 暴露 | 适用 |
+| --- | --- | --- | --- |
+| `localStorage` | ✅ 可读 | ❌ 不参与 CSRF | XSS 防控到位时的 access token |
+| Cookie（HttpOnly） | ❌ 不可读 | ✅ 需 SameSite | Session id / refresh token |
+| 内存（JS 变量） | 刷新即丢 | ❌ | access token（配合 refresh 静默续期） |
+
+**推荐组合**：access token 放内存 + refresh token 放 HttpOnly Cookie。页面刷新后 access 丢了没关系，静默续期立刻拿回来；refresh 不暴露给 JS，XSS 偷不走。
+
+### 36.8.2 请求层接线清单
+
+1. **请求拦截器**：给 API 域名自动附加 `Authorization: Bearer <token>`；
+2. **响应拦截器**：401 → 并发收敛的静默刷新（`??=` 单飞）→ 重放原请求；刷新失败 → 清凭证 → 跳登录（带 `?redirect=` 回跳）；
+3. **登出清理清单**：localStorage / sessionStorage / 内存变量 / Cookie / 请求队列中的重试标记，一处不落；
+4. **多标签页同步**：`storage` 事件或 BroadcastChannel 广播「已登出/已切换租户」，其他标签页立即收敛会话，避免「关了一个标签还在发请求」。
+
+### 36.8.3 自测前的一句话总结
+
+> Session 换可控性，JWT 换扩展性，Refresh 轮换补 JWT 的注销短板，OAuth2 解决「让别人替你认证」，SSO 把认证收敛到一个中心，多租户把认证染上隔离色。没有万能方案，只有匹配规模与威胁模型的组合。
+
+---
+
+## 36.9 自测题
+
+1. 为什么「未登录返回 403」是错误设计？前端如何据此分流？
+
+<details><summary>查看答案</summary>
+
+401（未认证）应触发「清理凭证 + 跳登录页」，403（未授权）应展示无权限提示。未登录返回 403 会让用户看到「无权限」却不知道要先登录，前端也无法区分两种失败路径。认证与授权分层后，两层各自独立演化和测试。
+</details>
+
+2. JWT 校验时为什么不能信任 token 内的 `alg` 字段？
+
+<details><summary>查看答案</summary>
+
+header 是攻击者可完全控制的明文。若服务端按其中的 `alg` 选择算法，攻击者可伪造 `alg: none`（空签名）或 RS→HS 混淆（用公钥当 HMAC 密钥）绕过验签。正确做法：校验方在代码里锁定算法，只按锁定算法验签。
+</details>
+
+3. Refresh token 轮换后，检测到旧 refresh 被再次使用，为什么撤销整个家族而不是只拒绝这一次？
+
+<details><summary>查看答案</summary>
+
+正常流程中旧 refresh 只会在两种情况再次出现：网络重试（罕见且无害）或 token 被窃取（攻击者与你各自使用）。检测到 reuse 时无法区分，而家族中后续续期大概率会落到攻击者手里，宁可整族作废强迫重新登录，把损失压缩到一次登录成本。
+</details>
+
+4. OAuth2 回调页为什么必须校验 `state`？不校验会发生什么？
+
+<details><summary>查看答案</summary>
+
+攻击者可构造带自己的 code 的回调链接诱导受害者点击（登录 CSRF），受害者在不知情下登录了攻击者的账号，后续敏感操作数据流向攻击者可读取的账号。校验「回调 state === 发起时 sessionStorage 中保存的随机值」可确认回调与本会话发起的请求同源。
+</details>
+
+5. 「access token 放内存 + refresh token 放 HttpOnly Cookie」比「全部放 localStorage」好在哪？
+
+<details><summary>查看答案</summary>
+
+XSS 脚本能读 localStorage，两个 token 一起偷走即长期接管会话。内存方案的 access 刷新即丢、泄露窗口仅 15 分钟；refresh 在 HttpOnly Cookie 中 JS 不可读，XSS 拿不到长期凭证。代价是需要静默续期逻辑与 CSRF 防护（SameSite + 接口幂等）。
+</details>
+
+---
+
+## 36.10 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 401/403 混用 | 前端无法区分「去登录」和「提示无权限」 | 认证失败 401、授权失败 403，全链路统一 |
+| JWT payload 放敏感数据 | payload 只是编码，任何人可解出明文 | 只放 sub/权限码/时间声明，敏感数据不进 token |
+| 校验 JWT 先看 exp 再验签 | 先信任了未验证的内容，伪造 token 借 exp 逻辑绕过 | 固定顺序：结构 → 签名 → 过期 |
+| 读 token 内的 `alg` 决定验签算法 | `alg:none`/RS-HS 混淆攻击直接绕过签名 | 校验方锁定算法，无视 token 声明 |
+| access token 有效期太长（如 7 天） | 泄露后攻击窗口等于整个有效期 | 15min access + 轮换 refresh |
+| refresh token 不轮换 | 被盗后攻击者可无限续期 | 每次续期作废旧 refresh + 复用检测整族撤销 |
+| 并发 401 各自触发刷新 | 刷新接口被并发调爆，refresh 未轮换完就全部作废 | 刷新 Promise 单飞（`??=`），其余请求等待同一 Promise |
+| OAuth2 回调不校验 state | 登录 CSRF，受害者登录进攻击者账号 | 发起存 sessionStorage、回调全等比对 |
+| code 换 token 放在前端 | client_secret 暴露；code 暴露在 URL 历史 | 有后端放后端；纯 SPA 用 PKCE + 立即清 URL |
+| 多租户缓存 key 漏租户前缀 | 跨租户数据泄露，SaaS 最严重事故级别 | 所有缓存/查询 key 强制 `tenant:` 前缀，代码评审专项检查 |

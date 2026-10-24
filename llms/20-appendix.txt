@@ -1,0 +1,56 @@
+# 附录（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/20-appendix
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 附录
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[常用业务功能代码片段](./19-business-snippets.md)
+
+---
+
+## 附录 A：学习路线与自查清单
+
+### 建议节奏（约 12 周）
+
+| 阶段 | 内容 | 自查标准 |
+| ---- | ---- | -------- |
+| 第 1~2 周 | 第一部分 JS 高级特性 | 能手写防抖/深拷贝/并发池；能讲清事件循环输出题 |
+| 第 3~4 周 | 第二部分 TypeScript | 能手写 Partial/Pick/ReturnType；会用 infer 做路径类型 |
+| 第 5 周 | 第三部分 工程化 | 独立配置 Vite 项目；能分析并优化首包体积 |
+| 第 6~7 周 | 第四部分 框架深入 | 能讲清 Fiber/响应式原理；能定位一次卡顿的渲染原因 |
+| 第 8 周 | 第五、六部分 状态与网络 | 独立封装请求层（401 续期 + 竞态防护） |
+| 第 9 周 | 第七部分 安全 + 第九部分 测试 | 通过 XSS/CSRF 清单自查；核心模块有单测 |
+| 第 10 周 | 第十部分 浏览器原理 | 能用 Performance 面板定位并修复一个真实卡顿 |
+| 第 11~12 周 | 第八、十一部分 + 实战 | 完成一次小型全链路实践（如带监控的组件库/工具站） |
+
+### 面试高频自查清单
+
+- [ ] 事件循环：宏/微任务、`await` 的本质、Node 与浏览器差异
+- [ ] 闭包与内存：循环陷阱、四种内存泄漏、WeakMap 的适用场景
+- [ ] 原型与继承：手写 instanceof、寄生组合继承、`new` 的过程
+- [ ] Promise：手写 then 链、all/race/any 区别、并发池
+- [ ] TypeScript：泛型约束、条件类型、infer、手写工具类型、`satisfies`
+- [ ] React：Fiber 与两阶段渲染、Hooks 顺序机制、memo 组合拳、并发特性、React 19 变化
+- [ ] Vue：Proxy 响应式、依赖收集/派发、computed vs watch、shallowRef 场景
+- [ ] 工程化：Vite 快的原因、Tree Shaking 前提、缓存黄金法则、monorepo 工作流
+- [ ] 网络：HTTP/2 vs 1.1、强/协商缓存流程、CORS 预检、竞态处理、断点续传
+- [ ] 安全：XSS 三类与防御、CSRF 三层防御、CSP、原型污染
+- [ ] 浏览器：重排重绘合成、Layout Thrashing、虚拟列表、Web Worker
+- [ ] 软素质：一次性能优化经历（指标基线 → 定位 → 手段 → 结果）
+
+## 附录 B：推荐学习资源
+
+| 类型 | 资源 |
+| ---- | ---- |
+| 语言基础 | MDN Web Docs、JavaScript.info（现代 JavaScript 教程） |
+| 类型系统 | TypeScript 官方 Handbook、type-challenges 仓库 |
+| 浏览器/性能 | web.dev（Core Web Vitals）、Chrome DevTools 官方文档 |
+| 框架 | React 官方文档（react.dev）、Vue3 官方文档、Angular 官方文档 |
+| 工程 | Vite/Rollup/Webpack 官方文档、pnpm 与 Turborepo 官方文档 |
+| 安全 | OWASP Cheat Sheet Series、MDN Security |
+| 测试 | Vitest、Testing Library、Playwright 官方文档 |
+| 手写题 | JavaScript 算法与手写题仓库（搜索 frontend-interview 类开源项目） |
+
+---
+
+> **结语**：进阶的本质是"把模糊的感觉变成确定的机制"。本指南的每个示例都值得亲手跑一遍、改一遍、坏一遍——调试的过程才是真正的学习。祝进阶顺利！

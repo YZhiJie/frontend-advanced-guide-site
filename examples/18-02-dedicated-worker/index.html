@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>18-02 DedicatedWorker 计算卸载 + Transferable</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 680px; margin: 40px auto; padding: 0 16px; }
+        button { padding: 8px 16px; margin: 4px 8px 4px 0; cursor: pointer; }
+        #bar { width: 100%; height: 14px; background: #e2e8f0; border-radius: 7px; overflow: hidden; margin: 12px 0; }
+        #fill { height: 100%; width: 0; background: linear-gradient(90deg, #3b82f6, #22d3ee); transition: width .1s; }
+        pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; min-height: 80px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h2>DedicatedWorker 演示</h2>
+    <p>
+        <button id="sum">后台累加 1~10 亿（带进度）</button>
+        <button id="buffer">Transferable 零拷贝回传 64MB</button>
+        <button id="kill">terminate() 销毁 Worker</button>
+    </p>
+    <div id="bar"><div id="fill"></div></div>
+    <pre id="out">就绪。计算期间主线程按钮仍可点击，说明界面未被阻塞。</pre>
+
+    <script src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,460 @@
+# 第四十四部分 · 多系统统一账号中心（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/44-account-center
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第四十四部分 · 多系统统一账号中心
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第三十六部分 · 认证体系全景](./36-auth-system.md) · [第三十七部分 · ABAC 与策略引擎](./37-abac-policy-engine.md) · [第四十二部分 · 工作流与审批引擎](./42-workflow-approval.md)
+
+> 💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。一个公司有 OA、CRM、工单、数据平台四套系统，如果每套都自建注册/登录/改密页，就会出现四份密码策略、四种错误文案、四个被撞库的入口。本章给出一套可落地的**统一账号中心**详细设计：一套注册页、一套登录页、一套改密页，业务系统只负责「换票 + 建本地会话」。包含数据模型、接口契约、页面状态机、回跳白名单、单点登出兜底、密码哈希升级与迁移路径。
+
+## 本部分内容
+
+- [44.1 总体架构与统一账号模型](#_44-1-总体架构与统一账号模型)
+- [44.2 注册页设计与实现](#_44-2-注册页设计与实现)
+- [44.3 登录页设计与回跳安全](#_44-3-登录页设计与回跳安全)
+- [44.4 会话体系与单点登出](#_44-4-会话体系与单点登出)
+- [44.5 修改密码与找回密码](#_44-5-修改密码与找回密码)
+- [44.6 多系统接入与工程实践](#_44-6-多系统接入与工程实践)
+- [44.7 自测题](#_44-7-自测题)
+- [44.8 本章避坑清单](#_44-8-本章避坑清单)
+
+```mermaid
+sequenceDiagram
+    participant U as 用户浏览器
+    participant A as 业务系统 oa.example.com
+    participant C as 账号中心 account.example.com
+    participant S as 业务后端
+    U->>A: 访问受保护页面（无本地会话）
+    A-->>U: 302 到中心，带 app_id/redirect/state
+    U->>C: 打开统一登录页
+    C-->>U: 登录成功，Set-Cookie 全局会话
+    C-->>U: 302 回 oa，带一次性 ticket
+    U->>S: 回调请求带 ticket
+    S->>C: 服务端换票（ticket + app_secret）
+    C-->>S: uid + 签名断言
+    S-->>U: Set-Cookie 本地会话，进入页面
+```
+
+---
+
+> 设计目标只有一句：**身份只在一处产生，会话在各处短暂存在**。账号中心负责「你是谁」，业务系统负责「你能做什么」。下面每个小节都围绕这条边界展开。
+
+---
+
+## 44.1 总体架构与统一账号模型
+
+### 44.1.1 概念解析
+
+统一账号中心是**一个独立部署的 Web 应用**（通常 `account.example.com`），承载全部身份页面：注册、登录、找回密码、修改密码、安全设置、已授权应用列表。业务系统不再实现这些页面，只保留「跳转 → 换票 → 建本地会话」三件事。
+
+**三种接入形态**，按隔离性与体验取舍：
+
+| 形态 | 交互 | Cookie 可用性 | 适用 |
+| --- | --- | --- | --- |
+| 整页跳转 | 业务系统 302 到中心，登录后 302 回来 | 最稳（顶层导航，SameSite=Lax 可用） | 默认方案，全部系统 |
+| 弹窗 iframe | 业务系统内弹 iframe，postMessage 回传 ticket | 依赖第三方 Cookie，Safari/隐私模式常被拦 | 同主域、体验要求高的后台 |
+| 内嵌组件 SDK | 中心提供组件包，直接渲染在业务系统 | 与业务同域，共享本地会话 | 强品牌定制、移动端 WebView |
+
+**域名与 Cookie 拓扑**（最容易设计错的地方）：
+
+- 全局会话 Cookie 只设在 `account.example.com`，**不设到父域** `.example.com`——父域 Cookie 会被所有子系统页面携带，任何一处 XSS 都能读到（即使 HttpOnly 也会被同域子站的服务端拿到）；
+- 中心 Cookie 固定属性：`HttpOnly; Secure; SameSite=Lax; Path=/`；纯跨站接入才用 `SameSite=None; Secure`，并接受 Safari ITP 的第三方 Cookie 限制；
+- 业务系统本地会话 Cookie 设在各自域（`oa.example.com`），与中心互不读取；
+- 全部入口强制 HTTPS，HSTS 预加载；`Referrer-Policy: strict-origin-when-cross-origin` 防止 ticket 随 Referer 外泄。
+
+**统一账号模型**：身份与业务授权分离。
+
+```mermaid
+erDiagram
+    account_user ||--o{ account_identity : "手机号/邮箱/第三方"
+    account_user ||--o{ account_session : "全局会话"
+    account_user ||--o{ account_user_app : "开通关系"
+    account_app ||--o{ account_user_app : ""
+    account_user ||--o{ account_ticket : "一次性票据"
+    account_user ||--o{ account_audit_log : ""
+```
+
+核心表（省略索引与审计字段）：
+
+```sql
+-- 全局账号：一个自然人一条记录
+account_user(id PK, phone UNIQUE, email UNIQUE NULL, password_hash,
+             status ENUM(active, locked, disabled), cred_version INT,
+             created_at, updated_at)
+
+-- 登录标识：手机号/邮箱/微信可并存，未来加登录方式不动主表
+account_identity(id PK, user_id FK, provider, identifier, verified_at,
+                 UNIQUE(provider, identifier))
+
+-- 接入系统登记：回跳白名单的唯一来源
+account_app(app_id PK, name, origin, callback_path, secret_hash,
+            status, created_at)
+
+-- 用户与系统的开通关系：账号中心只管「有没有开」，不管「是什么角色」
+account_user_app(user_id FK, app_id FK, status ENUM(pending, active, disabled),
+                 provisioned_at, PRIMARY KEY(user_id, app_id))
+
+-- 全局会话：可多端并存，支持单端踢下线
+account_session(sid PK, user_id FK, ip, user_agent, created_at,
+                last_active_at, absolute_expires_at, revoked_at, cred_version)
+
+-- 一次性票据：只存哈希，换票即作废
+account_ticket(ticket_hash PK, user_id FK, app_id FK, session_id FK,
+               expires_at, used_at)
+
+-- 重置令牌：只存哈希，单次有效
+account_reset_token(token_hash PK, user_id FK, expires_at, used_at, request_ip)
+
+-- 审计：登录/改密/重置/登出/开通全留痕
+account_audit_log(id PK, user_id, action, ip, user_agent, detail, created_at)
+```
+
+三条建模纪律：
+
+1. **密码只存哈希**，`password_hash` 里带算法与参数（见 44.5 的透明升级）；
+2. **不存业务角色**：`account_user_app` 只记开通状态，角色归各业务系统——否则一个系统的「财务主管」会污染另一个系统；
+3. **票据/令牌只存哈希**：数据库泄露时，攻击者拿不到可用的 ticket 或 reset token。
+
+### 44.1.2 核心代码
+
+本章示例聚焦前端与服务端编排的最小可运行模型：
+
+| 示例 | 覆盖的设计点 |
+| --- | --- |
+| `44-01-register-pipeline.ts` | 注册管道：校验 → 一次性验证码 → 唯一索引兜底 → 自动登录 |
+| `44-02-login-ticket.ts` | 登录管道：锁定 → scrypt 验密 → 全局会话 → 一次性 ticket |
+| `44-03-redirect-whitelist.ts` | 回跳白名单：八种开放重定向攻击的拦截 + state |
+| `44-04-sso-slo.ts` | 三层会话：静默换票、单点登出、广播失败兜底 |
+| `44-05-password-change-reset.ts` | 改密撤会话、重置令牌、防枚举、哈希透明升级 |
+
+> 运行方式：`npx tsx examples/44-01-register-pipeline.ts`（其余同理；44-02/44-05 依赖 `node:crypto`，属 Node 示例）。
+
+### 44.1.3 应用实践
+
+- **先定边界再写页面**：账号中心绝不接收业务系统的角色数据；业务系统绝不接收明文密码。接口契约里只有 `uid`、`phone`（脱敏）、`ticket`、`app_id`；
+- **中心是唯一收密码的地方**：任何业务系统出现 `<input type="password">` 都是设计事故——密码表单每多一份，撞库与泄露面就多一份；
+- **一条审计链路贯穿**：注册、登录、改密、重置、登出、开通全部写 `account_audit_log`，排查「谁在什么时候改了什么」不靠翻应用日志。
+
+---
+
+## 44.2 注册页设计与实现
+
+### 44.2.1 概念解析
+
+注册页的固定管道：**字段校验 → 验证码消费 → 建号 → 自动登录**。顺序不是随意的：
+
+- **验证码先消费再建号**：建号失败（手机号已注册）也不退还验证码。否则攻击者能用一个验证码反复试探「这个手机号注册过没有」；退码等于把验证码变成账号枚举工具；
+- **唯一索引是并发注册的最终防线**：两个请求同时通过「该手机号未注册」预检查时，靠数据库 `UNIQUE(phone)` 冲突兜底，冲突后按「已注册」返回，引导去登录或找回；
+- **前端校验只是体验**：前端做的密码强度、手机号格式全部要在服务端复验，直接调接口绕过前端是攻击者的常规操作；
+- **自动登录**：注册成功直接建全局会话，不要让用户再登一次——多一次输入就多一次流失。
+
+字段与校验规则（示例 44-01 完整实现）：
+
+| 字段 | 规则 | 错误文案原则 |
+| --- | --- | --- |
+| phone | 中国大陆 11 位，`1[3-9]` 开头 | 「手机号格式不正确」，不提示「未注册」 |
+| password | ≥10 位，至少 3 类字符，非单字符重复 | 逐条列出未满足项，不做红黄绿三档模糊评价 |
+| code | 6 位数字，5 分钟 TTL，一次性 | 「验证码已失效，请重新获取」 |
+| agreed | 必须勾选 | 明确指出服务条款与隐私政策 |
+
+### 44.2.2 核心代码
+
+```ts
+// 文件: examples/44-01-register-pipeline.ts
+export function passwordIssues(pwd: string): string[];
+export function validateRegister(input: RegisterInput): Record<string, string[]>;
+export class CodeStore {
+  issue(phone, purpose, now, ttlMs?): string;
+  consume(phone, purpose, code, now): "ok" | "expired" | "mismatch" | "used";
+}
+export class AccountStore { create(phone, password, now): Account } // UNIQUE_PHONE
+export function register(input, deps): RegisterResult;
+// 返回联合类型：validate | code | conflict | 成功（userId + sessionId）
+```
+
+> 运行方式：`npx tsx examples/44-01-register-pipeline.ts`（验证了错误码、过期、重放、并发冲突四类分支）。
+
+### 44.2.3 应用实践
+
+- **验证码发送要限流**：同一手机号 60s 一次、每天 10 条、同 IP 每小时 20 条；否则短信通道会被刷成账单；
+- **注册与登录共用一套页面骨架**：同一 `AuthLayout`（Logo、品牌色、页脚协议链接），路由级切换表单，减少两套 UI 的维护分裂；
+- **多品牌**：`brand` 参数只接受登记表里的枚举值，从配置中心取 Logo 与文案；绝不把参数拼进 `innerHTML` 或重定向 URL（否则就是 XSS/开放重定向）；
+- **注册后引导**：若用户来自某个业务系统（带 `app_id`），注册成功后直接建该系统的开通关系，避免「注册完还要找管理员开权限」的断点。
+
+---
+
+## 44.3 登录页设计与回跳安全
+
+### 44.3.1 概念解析
+
+登录是全站唯一接收密码的页面，编排顺序有严格依赖：
+
+1. **锁定检查先于验密**：连续失败 5 次锁 15 分钟，锁定期间连正确密码也拒绝——先验密再判断会让攻击者用响应差异探测密码正确性；
+2. **验密用常量时间比较**：`timingSafeEqual`，避免逐字节比较的时间差泄露前缀；
+3. **账号不存在也跑一次假哈希**：让「用户不存在」与「密码错误」的响应时间接近，且返回**同一个错误码** `INVALID_CREDENTIALS`——区分二者等于免费提供账号枚举接口；
+4. **建全局会话**：中心域 HttpOnly Cookie，记录 ip/ua、滑动过期 + 绝对过期；
+5. **签发一次性 ticket**：60 秒 TTL、绑定 `app_id`、换票即作废；
+6. **302 回业务系统**：回跳地址必须过白名单（44.3.2），不能在登录成功后才「信任请求参数」。
+
+失败次数要落**账号维度 + IP 维度**双计数：只按账号锁，攻击者可以撞库大量账号各试 4 次；只按 IP 锁，NAT 出口会误伤整栋办公楼。
+
+### 44.3.2 核心代码：回跳白名单
+
+`redirect` 参数是开放重定向的经典入口。防御必须**解析 URL 后逐项校验**，不能做字符串包含：
+
+```ts
+// 文件: examples/44-03-redirect-whitelist.ts
+export function resolveRedirect(raw, app: AllowedApp): RedirectCheck;
+// 四道关：https 协议 → 无 userinfo → origin 完全相等 → path 命中登记路径
+export function buildAuthRequest(app, rawRedirect, center?): AuthRequest;
+export function verifyCallback(callbackUrl, expectedState, app);
+```
+
+示例拦截的八种形态（真实攻击载荷）：
+
+| 攻击 | 载荷 | 拦在哪一关 |
+| --- | --- | --- |
+| 外域直跳 | `https://evil.com/sso/callback` | origin |
+| 后缀障眼 | `https://oa.example.com.evil.com/...` | origin |
+| userinfo 障眼 | `https://oa.example.com@evil.com/...` | userinfo |
+| 协议降级 | `http://oa.example.com/...` | protocol |
+| 协议相对 | `//evil.com/...` | unparsable |
+| 反斜杠绕过 | `https:\\evil.com\...` | origin（URL 解析归一化） |
+| 路径穿越 | `https://oa.example.com/sso/callback/../../evil` | path（解析后已归一化） |
+| 伪协议 | `javascript:alert(...)` | protocol |
+
+**state 是另一半**：发起时生成 32 字节随机串存服务端（或签名 Cookie），回调必须原样带回。没有 state，攻击者可以构造回调链接把受害者账号绑到自己的身份上（登录 CSRF）。回调里如果又出现 `redirect` 参数，**必须再过一次白名单**——不能在回调阶段信任任何请求参数。
+
+### 44.3.3 应用实践
+
+- **登录方式矩阵**：账密 + 图形验证码（失败 3 次后强制）→ 短信验证码登录 → 扫码登录（可选）。验证码不要默认就要求，正常用户被无谓打扰会显著降低转化；
+- **错误码映射表**：服务端只返回机器码，前端统一翻译——`INVALID_CREDENTIALS` →「手机号或密码不正确」，`ACCOUNT_LOCKED` →「尝试次数过多，请 15 分钟后再试」，`CAPTCHA_REQUIRED` → 展示验证码；
+- **ticket 不进前端存储**：ticket 通过 302 URL 传给业务系统，业务后端立即换票并 302 到干净地址；严禁把 ticket 写进 localStorage 或日志；
+- **自动填充**：`autocomplete="username"` / `"current-password"`，密码管理器才能正确工作；不要禁止粘贴——禁止粘贴只会逼用户用弱密码。
+
+---
+
+## 44.4 会话体系与单点登出
+
+### 44.4.1 概念解析
+
+统一登录不是「登录一次」，而是**三层会话各司其职**：
+
+| 层 | 位置 | TTL | 作用 |
+| --- | --- | --- | --- |
+| 全局会话 | 中心域 HttpOnly Cookie | 滑动 2h + 绝对 7d | 真正的「已登录」，只中心可见 |
+| 一次性 ticket | 302 URL → 业务后端 | 60s，单次 | 跨系统传递身份的载体 |
+| 本地会话 | 各业务域 Cookie | 30min 滑动 | 业务请求鉴权，避免每请求回中心 |
+
+**静默换票**是免密体验的全部秘密：本地会话过期后，业务系统 302 到中心，中心发现全局 Cookie 还在，直接签发新 ticket 再 302 回来——用户只看到一次极快的跳转，不需要输密码。示例 44-04 的 `ensureSession` 就是这个判断：
+
+- 本地有效 → `ok`；
+- 本地过期 + 全局有效 → `silent`（新本地会话）；
+- 全局也没了 → `login-required`。
+
+**单点登出（SLO）**是反向广播：中心删除全局会话后，通知所有已登记系统销毁对应本地会话。三个工程现实：
+
+1. **广播会失败**：系统下线、网络抖动、后端超时，示例中 `crm` 不可达就出现在 `failed` 清单里；
+2. **失败必须有兜底**：未收到 SLO 的系统，本地会话仍在（最长 30 分钟），但它的续期请求会因全局会话不存在而失败，到期后必然回登录页。**不要为了「立刻全网退出」把本地 TTL 设成几秒**——那是拿性能换一个本来就有兜底的窗口；
+3. **广播要精确到会话**：SLO 消息必须带全局 `sid`，业务系统按 `globalSid` 清理对应本地会话。只按 `uid` 清理会把同一用户在另一台设备的会话一起误杀。
+
+### 44.4.2 核心代码
+
+```ts
+// 文件: examples/44-04-sso-slo.ts
+export class Center {
+  login(uid, now): string;                        // 全局会话 sid
+  redeem(ticket, appId, now): { ok, uid?, sid?, reason? };
+  silentTicket(sid, appId, now): string | null;   // 本地过期后的免密换票
+  logout(sid): { notified: string[]; failed: string[] };
+}
+export class BusinessApp {
+  ssoLogin(ticket, now): { ok, sessionId?, reason? };
+  ensureSession(sessionId, globalSid, now): { status: "ok" | "silent" | "login-required" };
+}
+```
+
+> 运行方式：`npx tsx examples/44-04-sso-slo.ts`（验证：一次性票据、静默换票、SLO 部分失败、兜底回登录页）。
+
+### 44.4.3 应用实践
+
+- **本地会话用 JWT 还是服务端 session**：无状态 JWT 省一次查询，但**无法即时撤销**（改密/踢人后旧 JWT 仍有效到过期）。统一账号中心建议本地会话短 TTL（15~30 分钟）+ 关键操作回中心校验，或维护一个轻量 revocation 列表；
+- **会话列表与踢下线**：`account_session` 支持「查看登录设备 + 单端下线」，这是账号安全页的标配，也是用户被盗号后的第一自救入口；
+- **绝对过期不可滑动**：滑动过期可以无限续，但必须同时有绝对上限（如 7 天），否则「一次登录永久有效」；
+- **多标签页一致**：登出后其它标签页通过 `storage` 事件或 BroadcastChannel 同步跳登录页，避免「一个页面已退出、另一个还能点」。
+
+---
+
+## 44.5 修改密码与找回密码
+
+### 44.5.1 概念解析
+
+两个入口的安全语义完全不同，不能复用同一段逻辑：
+
+**修改密码（已登录）**：
+
+1. 校验旧密码（防会话被劫持后直接改密锁号）；
+2. 强密码策略 + 新密码不能与旧密码相同；
+3. 更新哈希；
+4. **撤销除当前会话外的全部会话**——密码泄露的第一时间止损；
+5. 写审计 + 可选通知（邮件/短信「你的密码已修改」）。
+
+**找回密码（未登录）**：
+
+1. 手机/邮箱验证码；
+2. 签发 **reset token**：32 字节随机、只存哈希、15 分钟 TTL、单次使用；
+3. 用令牌设新密码；
+4. **撤销全部会话**（包括当前设备）；
+5. 通知用户 + 审计。
+
+**防用户枚举**：找回密码入口对未注册手机号也返回「已发送」。如果返回「该手机号未注册」，攻击者就得到了一个批量探测接口。假成功意味着：不建 token、不发短信，但响应体与耗时与真实路径一致。
+
+**哈希透明升级**：老系统迁移过来的记录参数落后（如 scrypt `N=8192`），用户登录成功的一瞬间用新参数重算并覆盖，用户无感。示例 44-05 的 `verifyAndUpgrade` 返回 `needsUpgrade`，登录层负责写回。
+
+### 44.5.2 核心代码
+
+```ts
+// 文件: examples/44-05-password-change-reset.ts
+export function hashPassword(pwd: string): string;              // scrypt$N$salt$hash
+export function verifyAndUpgrade(pwd, stored): { ok, needsUpgrade };
+export function passwordIssues(pwd: string): string[];
+export class CredentialService {
+  changePassword(uid, oldPwd, newPwd, currentSessionId, now):
+    | { ok: true; revoked: number }
+    | { ok: false; code: "INVALID_OLD" | "WEAK" | "SAME_AS_OLD" };
+  requestReset(phone, now): { ok: true };                       // 永远假成功
+  resetPassword(token, newPwd, now):
+    | { ok: true; revoked: number }
+    | { ok: false; code: "INVALID_TOKEN" | "EXPIRED" | "USED" | "WEAK" };
+}
+```
+
+> 运行方式：`npx tsx examples/44-05-password-change-reset.ts`。
+
+### 44.5.3 应用实践
+
+- **哈希选型**：生产用 argon2id（内存硬）或 scrypt（`N≥2^15, r=8, p=1`），参数写进哈希串便于升级；绝不用 MD5/SHA1/裸 SHA256；
+- **改密页放在中心**：业务系统只放「去修改密码」的链接。改密页一旦下沉到各系统，就会出现四套校验、四套审计、四个 CSRF 面；
+- **重置令牌只走一次**：点击链接 → 打开设置新密码页 → 提交成功即作废；链接被邮件网关预取（安全扫描器会先访问链接）时不能消耗令牌——把「校验令牌」和「消费令牌」分开，只在最终提交时消费；
+- **通知不可省**：改密/重置成功后发一条「如非本人操作请立即联系管理员」，这是账号被盗后的最后一道人工兜底。
+
+---
+
+## 44.6 多系统接入与工程实践
+
+### 44.6.1 多系统开通与首次建户
+
+用户与系统的关系分三种模式，按组织规模选择：
+
+| 模式 | 行为 | 适用 |
+| --- | --- | --- |
+| 默认全开通 | 注册即对所有系统 active | 内部小团队，系统间无敏感边界 |
+| 申请开通 | 用户在中心点「申请」，管理员审批后 active | 中大型组织，有数据隔离要求（可接第 42 册审批流） |
+| 管理员分配 | 由 HR/IT 按组织架构批量导入 | 有 HR 系统的企业，入职离职自动同步 |
+
+**首次登录建户（JIT Provisioning）**：业务系统换票拿到 `uid` 后，若本地用户表没有该 `uid`，自动创建影子用户（只存 uid、昵称、头像，不存密码）。要点：
+
+- **幂等**：并发首次登录可能同时建户，靠 `UNIQUE(uid)` 兜底；
+- **离职同步**：账号中心 disabled 后，业务系统在下一次换票/续期时收到 `ACCOUNT_DISABLED`，本地会话立即失效；
+- **账号合并**：历史遗留的多个账号（手机号/邮箱各一个）通过「绑定登录方式」合并到同一 `user_id`，冲突时要求人工确认，合并动作写审计。
+
+### 44.6.2 前端页面实现细节
+
+**路由与页面骨架**（中心应用）：
+
+```
+/login              统一登录（账密 / 短信 / 扫码）
+/register           统一注册
+/reset              找回密码（输入手机号 + 验证码）
+/reset/confirm      设置新密码（带 token）
+/account/security   修改密码、登录设备、已授权应用
+```
+
+一个 `AuthLayout` 承载品牌区 + 表单区；表单组件统一封装 `Field`（label、错误、帮助文案）、`SubmitButton`（提交锁）、`CountdownButton`（验证码 60s 倒计时，基于服务端时间校准）。**不要为三个页面写三套表单状态机**。
+
+**表单状态机**：`idle → validating → submitting → success | error`。`submitting` 期间禁用按钮并忽略重复提交；同时带 `Idempotency-Key`，防止用户刷新/重试造成重复注册或重复发短信。
+
+**关键实现清单**：
+
+| 项 | 做法 |
+| --- | --- |
+| 密码可见切换 | 切换 `type=password/text`，不改变光标位置 |
+| 大写锁定提示 | `keyup` 检测 `getModifierState("CapsLock")` |
+| 验证码倒计时 | 以服务端 `next_send_at` 为准，不用本地 `setInterval` 累加 |
+| 自动填充 | `autocomplete="username" / "current-password" / "new-password"` |
+| 错误聚焦 | 提交失败聚焦第一个错误字段，并 `aria-invalid` |
+| 弱网 | 请求超时 10s，超时文案明确「请检查网络后重试」，不自动重发注册请求 |
+
+**安全响应头**：中心页面 `Content-Security-Policy: default-src 'self'; frame-ancestors 'self' https://oa.example.com https://crm.example.com`——`frame-ancestors` 必须精确列出允许嵌入的系统域，不能用 `*`（点击劫持）。
+
+### 44.6.3 可观测与迁移
+
+- **核心指标**：注册成功率、登录成功率、验证码到达率、锁定率、ticket 换票失败率（按 app 维度）、静默续期占比、SLO 广播失败率；
+- **告警**：换票失败率突增（通常是 app_secret 轮换或时钟漂移）、锁定率突增（撞库）、验证码到达率下降（短信通道）；
+- **迁移路径**：新中心并行运行 → 业务系统逐个切换登录入口（灰度）→ 旧账号首次登录时透明升级哈希并绑定手机号 → 观察一个完整周期后下线旧登录页。**不要一次性强切**：老用户登录不了是最贵的故障；
+- **时钟**：ticket TTL 只有 60 秒，中心与业务服务器必须 NTP 同步；本地开发环境时钟漂移会造成「刚登录就过期」的假故障。
+
+---
+
+## 44.7 自测题
+
+1. 为什么全局会话 Cookie 不设在父域 `.example.com`，而是只设在 `account.example.com`？
+
+<details><summary>查看答案</summary>
+
+父域 Cookie 会被所有子域请求携带：任一业务系统（哪怕是一个静态营销页）出现 XSS 或被攻陷，都能读到/带走它，全局会话等于全站通行证。只设在账号中心域，业务系统只能通过「跳转中心 + 一次性 ticket」拿身份，攻击面收敛到中心一个应用。代价是静默续期需要一次顶层跳转，可接受。
+</details>
+
+2. 登录页为什么「用户不存在」和「密码错误」返回同一个错误码，还要跑一次假哈希？
+
+<details><summary>查看答案</summary>
+
+同码防的是**内容枚举**：区分二者等于告诉攻击者哪些手机号已注册，可直接用于撞库和短信轰炸。假哈希防的是**时间侧信道**：用户不存在时若直接返回，响应会明显快于真正验密，攻击者靠耗时也能枚举。两者必须同时做。
+</details>
+
+3. 单点登出广播失败了，未收到通知的系统为什么还能继续用一会儿？这是漏洞吗？
+
+<details><summary>查看答案</summary>
+
+不是漏洞，是设计内的兜底窗口。该系统本地会话仍在（TTL 30 分钟），但全局会话已删除，它的下一次续期/换票会失败，到期后必然回登录页。真正的漏洞是把本地 TTL 设得极长或允许无限滑动续期。正确做法是短本地 TTL + 全局会话为唯一续期依据，并接受「最长一个本地 TTL」的残留窗口。
+</details>
+
+4. 找回密码为什么对未注册手机号也要返回「已发送」？
+
+<details><summary>查看答案</summary>
+
+否则接口变成账号枚举器：输入任意手机号，看返回「已发送」还是「未注册」，就能批量探测用户库。假成功要求：不建 token、不发短信，但响应体、状态码、耗时与真实路径一致；同时用 IP/设备维度限流，防止被当作短信轰炸入口（真实号码仍会收短信，假号码不会）。
+</details>
+
+5. 改密后为什么要撤销「除当前会话外」的所有会话，而重置密码要撤销「全部」？
+
+<details><summary>查看答案</summary>
+
+改密时用户正持有当前会话，撤销它会让用户在改完密码的瞬间被踢出，体验断裂且可能引发重复改密；其它会话（可能是攻击者的）必须清除。重置密码发生在「忘记密码/疑似泄露」场景，用户当前并未通过正常身份验证，无法区分哪个会话可信，因此全部撤销，强制用新密码重新登录。
+</details>
+
+---
+
+## 44.8 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 每个业务系统自建登录/改密页 | 多套密码策略、多个撞库入口、审计分裂 | 页面只在账号中心，业务系统只换票 |
+| 全局会话 Cookie 设在父域 | 任一子站 XSS 即可窃取全站通行证 | 只设 `account.example.com`，HttpOnly + Secure |
+| 注册验证码建号失败后退还 | 验证码变成账号枚举工具 | 先消费后建号，失败不退码 |
+| 前端校验后服务端不复验 | 绕过前端直接调接口即可注册弱密码 | 服务端按同一规则复验 |
+| 无唯一索引只靠预检查 | 并发注册产生重复账号 | `UNIQUE(phone)` 兜底 + 冲突后引导登录 |
+| 登录区分「用户不存在/密码错误」 | 提供账号枚举接口 | 同一错误码 + 假哈希抹平耗时 |
+| 先验密再判锁定 | 锁定期间仍能通过响应差异探测 | 锁定检查先于验密 |
+| 明文/可逆方式存密码 | 库泄露即全量密码泄露 | argon2id/scrypt + 每用户盐 |
+| 回跳只做字符串包含判断 | `oa.example.com.evil.com` 直接绕过 | 解析 URL，origin 完全相等 + path 命中 |
+| 回调阶段再次信任 redirect | 登录后被送去钓鱼站 | 每次使用 redirect 都过白名单 |
+| 不校验 state | 登录 CSRF，受害者账号被绑定攻击者身份 | 随机 state + 服务端/签名 Cookie 校验 |
+| ticket 写进 localStorage 或日志 | 60 秒内可被重放/窃取 | 只在 302 URL 与后端换票中使用 |
+| ticket 不绑定 appId | 可跨系统重放 | 绑定 appId + 单次 + TTL |
+| SLO 只按 uid 清理会话 | 误杀同用户其它设备的会话 | 按全局 sid 精确清理 |
+| 改密不撤销其它会话 | 攻击者会话继续有效 | 保留当前，撤销其余 |
+| 重置令牌明文入库 | 库泄露即可改任意账号密码 | 只存哈希，单次 + 15 分钟 TTL |
+| 找回密码提示「未注册」 | 账号枚举 + 短信轰炸定位 | 假成功 + 双维度限流 |
+| 哈希参数永不升级 | 老记录长期停留在弱参数 | 登录成功时透明 rehash |

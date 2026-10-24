@@ -1,0 +1,1283 @@
+# 第十七部分：Web 新能力与可视化（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/17-web-platform
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第十七部分：Web 新能力与可视化
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[Node.js 与服务端基础](./16-node-server.md)｜下一篇：[Worker 家族与跨标签页通信](./18-worker-messaging.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-17" target="_blank" rel="noopener">EP.17《Web 新能力》</a>
+
+## 本部分内容
+
+- [第十七部分：Web 新能力与可视化](#第十七部分-web-新能力与可视化)
+  - [本部分内容](#本部分内容)
+  - [17.1 浏览器新能力速查](#_17-1-浏览器新能力速查)
+      - [概念解析](#概念解析)
+      - [Popover vs Dialog：什么时候用哪个](#popover-vs-dialog-什么时候用哪个)
+      - [完整代码示例](#完整代码示例)
+      - [更多新能力代码速查](#更多新能力代码速查)
+      - [最佳实践](#最佳实践)
+  - [17.2 可视化技术选型](#_17-2-可视化技术选型)
+      - [概念解析](#概念解析-1)
+      - [SVG vs Canvas：保留模式 vs 立即模式](#svg-vs-canvas-保留模式-vs-立即模式)
+      - [完整代码示例](#完整代码示例-1)
+      - [OffscreenCanvas：把渲染搬进 Worker](#offscreencanvas-把渲染搬进-worker)
+      - [ECharts 深度优化：从万级到百万级数据](#echarts-深度优化-从万级到百万级数据)
+      - [Three.js 集成模式：React/Vue 中的正确接入](#three-js-集成模式-react-vue-中的正确接入)
+      - [最佳实践](#最佳实践-1)
+  - [17.3 Web Components](#_17-3-web-components)
+      - [概念解析](#概念解析-2)
+      - [完整生命周期](#完整生命周期)
+      - [完整代码示例](#完整代码示例-2)
+      - [Slot 组合：声明式内容投射](#slot-组合-声明式内容投射)
+      - [事件与响应式：CustomEvent + 属性变化](#事件与响应式-customevent-属性变化)
+      - [声明式 Shadow DOM：SSR 友好的 Web Components](#声明式-shadow-dom-ssr-友好的-web-components)
+      - [Lit：让 Web Components 写法回到声明式](#lit-让-web-components-写法回到声明式)
+      - [最佳实践](#最佳实践-2)
+  - [17.4 WebAssembly 适用边界](#_17-4-webassembly-适用边界)
+      - [概念解析](#概念解析-3)
+      - [完整加载与实例化管线](#完整加载与实例化管线)
+      - [WASM + Web Workers：计算与 UI 并行](#wasm-web-workers-计算与-ui-并行)
+      - [AssemblyScript：用 TypeScript 写 WASM](#assemblyscript-用-typescript-写-wasm)
+      - [最佳实践](#最佳实践-3)
+  - [17.5 自测题](#_17-5-自测题)
+  - [17.6 本章避坑清单](#_17-6-本章避坑清单)
+
+---
+
+> 平台能力在快速进化：很多以前要引库、写几十行代码的事，现在一行声明式 API 就够了。这一部分做两件事：**更新你的"浏览器能力地图"**，以及给出可视化的选型决策框架。
+
+## 17.1 浏览器新能力速查
+
+#### 概念解析
+
+| 能力 | 解决什么 | 替代了什么 | 可用性 |
+| ---- | -------- | ---------- | ------ |
+| **Popover API** | 声明式弹层:置顶层级、点击外部关闭、焦点管理 | 手写 z-index 大战 + 全局点击监听 | 基线(2024+) |
+| **`<dialog>` API** | 模态对话框:背景遮罩、焦点陷阱、Esc 关闭 | 手写 modal 遮罩 + focus trap 库 | 基线 |
+| **View Transitions** | 页面/状态切换的过渡动画 | 手写 FLIP / 引动画库 | 同文档基线;MPA 跨文档逐步可用 |
+| **Speculation Rules** | 声明式预取/预渲染下一页 | `<link rel=prefetch>` 的粗粒度 | Chromium |
+| **WebGPU** | 现代 GPU 计算 + 渲染 | WebGL 的下一代 | Chromium/逐步 |
+| **WebCodecs** | 视频帧级编解码 | 只能靠 `<video>` 标签 | 基线 |
+| **OPFS** | 页面私有高性能文件系统 | localStorage/IndexedDB 的某些场景 | 基线 |
+| `navigator.clipboard` | 富文本/异步剪贴板 | `document.execCommand`(已废弃) | 基线 |
+| CSS 原生嵌套 | 样式表内嵌套 | Sass 的嵌套语法 | 基线(呼应 12.2) |
+| **`:has()` 选择器** | 父级选择器/条件状态样式 | JS 判断后加类名 | 基线(2024+) |
+| **Container Queries** | 容器尺寸响应(而非视口) | 只靠 `@media` 视口查询 | 基线 |
+| **Wake Lock API** | 防止屏幕熄灭 | 插件/不可实现 | 基线 |
+| **Screen Capture** | 标签页/窗口录屏 | 仅桌面端 Electron | 基线 |
+| **Badging API** | 桌面/手机图标角标 | 仅移动端 push 通知 | Chromium |
+
+#### Popover vs Dialog：什么时候用哪个
+
+两者常被混用，但语义完全不同——选错会导致无障碍行为错误：
+
+```mermaid
+flowchart TD
+    A[需要弹层] --> B{是否需要<br/>阻断用户操作?}
+    B -- 是,必须先处理完才能继续 --> C[<dialog> showModal<br/>模态:背景遮罩 + 焦点陷阱<br/>Esc 关闭,Tab 不逃出]
+    B -- 否,轻弹层可点击外部关闭 --> D[popover<br/>非模态:top-layer 置顶<br/>点击外部/Esc 自动关闭<br/>light dismiss]
+    C --> E{典型:确认对话框<br/>表单提交、关键操作确认}
+    D --> F{典型:tooltip/dropdown<br/>操作菜单、帮助提示}
+```
+
+#### 完整代码示例
+
+```html
+<!-- 文件: examples/17-01-popover.html —— [浏览器] Popover API:一行声明的合规弹层 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        [popover] {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+            margin: auto;              /* top-layer 中自动居中 */
+        }
+    </style>
+</head>
+<body>
+    <!-- 声明式:popovertarget 自动处理开关、点击外部关闭、Esc 关闭、top-layer 置顶 -->
+    <button popovertarget="help">帮助</button>
+
+    <div id="help" popover>
+        <p>这是弹层内容。Esc 可关闭,点击外部也会关闭 —— 全部浏览器原生行为。</p>
+        <p>不再需要:手写 z-index、全局 click 监听、焦点管理样板代码。</p>
+    </div>
+</body>
+</html>
+```
+
+```html
+<!-- 文件: examples/17-07-dialog.html —— [浏览器] <dialog> 模态对话框:焦点陷阱与遮罩 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        dialog { border-radius: 8px; border: none; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,.2); }
+        /* ::backdrop 是 showModal() 自带的背景遮罩 —— 原生提供,不用手写 */
+        dialog::backdrop { background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(2px); }
+    </style>
+</head>
+<body>
+    <button id="open">删除文件</button>
+
+    <dialog id="confirm">
+        <form method="dialog">  <!-- method="dialog":提交即关闭,无需 JS -->
+            <h3>确认删除?</h3>
+            <p>此操作不可撤销。</p>
+            <menu>
+                <button value="cancel">取消</button>
+                <button value="confirm" autofocus>确认删除</button>
+            </menu>
+        </form>
+    </dialog>
+
+    <script>
+        const dlg = document.getElementById('confirm');
+        document.getElementById('open').onclick = () => dlg.showModal(); // showModal = 模态
+
+        dlg.addEventListener('close', () => {
+            // returnValue 来自 form 提交的 button value
+            if (dlg.returnValue === 'confirm') {
+                console.log('执行删除...');
+            }
+        });
+        // ✅ showModal 自动提供:top-layer 置顶、背景遮罩、Esc 关闭、焦点陷阱(Tab 不逃出)
+        // ❌ 反例:用 div + position:fixed 模拟 modal → 缺焦点陷阱,Tab 跑到背后表单
+    </script>
+</body>
+</html>
+```
+
+```typescript
+// 文件: examples/17-02-view-transition.ts —— View Transitions:状态切换的共享元素动画
+// ============ document.startViewTransition:让浏览器自动做 FLIP ============
+
+// 场景:列表 → 详情的共享元素过渡(图片从卡片位置放大到全屏)
+async function openDetail(cardEl: HTMLElement) {
+    if (!document.startViewTransition) {
+        showDetailDirectly(); // 不支持的浏览器:直接切换,优雅降级
+        return;
+    }
+    // 浏览器截取旧状态 → 更新 DOM → 截取新状态 → 自动生成两状态间的过渡
+    const transition = document.startViewTransition(() => showDetailDirectly());
+    await transition.updateCallbackDone;
+
+    // 配合 CSS 命名共享元素,图片平滑放大:
+    // .card img { view-transition-name: hero; }
+    // .detail img { view-transition-name: hero; }   ← 同名元素之间自动补间
+}
+declare function showDetailDirectly(): void;
+
+// ---- React 中使用:在 setState 外包一层 ----
+// import { useTransition } from 'react'; // ← 注意:与 startViewTransition 同名但完全不同
+// const [pending, startTransition] = useTransition();
+// function navigate() {
+//     startTransition(() => {           // React 的并发标记
+//         document.startViewTransition(() => {  // 浏览器的动画标记
+//             setRoute('/detail');       // DOM 变化在这回调里完成
+//         });
+//     });
+// }
+
+// ---- Vue Router 中接入(Vue 3.4+)----
+// router.beforeEach((to, from, next) => {
+//     if (document.startViewTransition) {
+//         document.startViewTransition(() => next());
+//     } else {
+//         next();
+//     }
+// });
+
+// ---- Speculation Rules:声明式预渲染(MPA 秒开) ----
+// <script type="speculationrules">
+// {
+//     "prerender": [{
+//         "where": { "href_matches": "/products/*" },
+//         "eagerness": "moderate"   // 悬停/预连线时预渲染
+//     }]
+// }
+// </script>
+// 效果:用户点击时页面已经渲染完成,≈0ms 导航 —— MPA 也能有 SPA 的体验
+export {};
+```
+
+> 运行方式：`open examples/17-01-popover.html` 和 `open examples/17-07-dialog.html` 直接体验声明式弹层与模态对话框；View Transitions 放入真实页面（Chrome/Edge 111+）配合 `view-transition-name` 观察共享元素补间动画；Speculation Rules 需在 Chromium 浏览器中配置 `<script type="speculationrules">` 后观察 Network 面板的预取请求。
+
+#### 更多新能力代码速查
+
+```typescript
+// 文件: examples/17-08-new-apis.ts —— [浏览器] 新能力快速上手
+// ============ Clipboard:富文本/图片异步剪贴板 ============
+
+// 写入富文本:告别 execCommand('copy')
+async function copyRichText(text: string, html?: string) {
+    if (html) {
+        const blob = new Blob([html], { type: 'text/html' });
+        const textBlob = new Blob([text], { type: 'text/plain' });
+        await navigator.clipboard.write([new ClipboardItem({
+            'text/html': blob,
+            'text/plain': textBlob,
+        })]);
+    } else {
+        await navigator.clipboard.writeText(text);
+    }
+}
+// ⚠️ ClipboardItem 的值必须是 Blob,不能直接写字符串(Chrome 限制)
+// ⚠️ write 在非用户手势触发的回调中会失败(SecurityError) —— 必须在 click 事件链中调用
+
+// ---- OPFS:页面私有高性能文件系统(比 IDB 快,同步访问在 Worker 中)----
+async function opfsDemo() {
+    const root = await navigator.storage.getDirectory(); // OPFS 根目录
+    const file = await root.getFileHandle('cache.bin', { create: true });
+    const w = await file.createWritable();
+    await w.write(new Uint8Array([1, 2, 3])); // 写入二进制
+    await w.close();
+
+    const r = await file.getFile();
+    const buf = await r.arrayBuffer();
+    console.log(new Uint8Array(buf)); // [1, 2, 3]
+
+    // ⚠️ 主线程的 OPFS 读写是异步的;Worker 中可用 createSyncAccessHandle 获得同步 IO
+    // 同步 IO 消除了 Promise 开销 —— 音频/视频帧级处理的理想存储
+}
+
+// ---- Wake Lock:防止屏幕熄灭(全屏播放器/导航/烹饪)----
+let wakeLock: WakeLockSentinel | null = null;
+async function requestWakeLock() {
+    if (!navigator.wakeLock) return;
+    wakeLock = await navigator.wakeLock.request('screen');
+    // ⚠️ 页面失焦(切后台/最小化)时 Wake Lock 自动释放,回来后需重新请求
+    document.addEventListener('visibilitychange', async () => {
+        if (wakeLock !== null && document.visibilityState === 'visible') {
+            wakeLock = await navigator.wakeLock.request('screen');
+        }
+    });
+}
+
+// ---- Screen Capture:标签页/窗口录屏(远程协作/截图分享)----
+async function shareScreen() {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: false, // true 可捕获标签页音频
+    });
+    // stream 可喂给 <video>、WebRTC、MediaRecorder
+    // ⚠️ 用户每次都需要手动选择共享内容 —— 浏览器不允许静默录屏(安全)
+    // ⚠️ 用户可勾选"共享音频" → audio track 存在,但不是所有标签都支持
+    return stream;
+}
+
+// ---- CSS :has() 选择器:不再需要 JS 判断后加类名 ----
+// CSS:
+//   .card:has(img) { padding: 0; }          /* 有图时去 padding */
+//   form:has(input:invalid) .submit { opacity: .5; pointer-events: none; } /* 表单有错时禁用按钮 */
+//   div:has(> .sticky) { position: relative; } /* 子级有 sticky 时父级设 relative */
+// JS 等价(被替代):if (form.querySelector('input:invalid')) btn.disabled = true;
+
+// ---- Container Queries:容器尺寸响应(而非视口)----
+// CSS:
+//   .sidebar { container-type: inline-size; }  /* 声明容器 */
+//   @container (min-width: 300px) { .card { flex-direction: row; } } /* 容器够宽就横排 */
+// 解决:侧栏宽度取决于父布局,不只跟视口走 —— @media 永远不知道组件容器多大
+
+export {};
+```
+
+> 运行方式：`npx tsx examples/17-08-new-apis.ts`（OPFS/WakeLock/Screen Capture 需浏览器环境，以阅读理解为主；CSS 特性在 Chrome/Edge 105+ 的 DevTools 中直接验证）。OPFS 的同步 IO 需在 Worker 中用 `createSyncAccessHandle`，详见 [18-worker-messaging 模块二](./18-worker-messaging.md#模块二-dedicatedworker-web-worker-详解)。
+
+#### 最佳实践
+
+- ✅ 弹层三件套的默认答案变为 Popover（非模态）+ `<dialog>` showModal（模态）；`z-index: 9999` 时代结束；
+- ✅ View Transitions 的 DOM 更新回调要同步完成（不要在里面 await 网络请求），否则浏览器会跳过过渡；SPA 路由切换前包裹 `startViewTransition()` 即可，不需要手动截图旧状态；
+- ✅ Speculation Rules 的 `eagerness` 选 `moderate`（悬停触发）比 `eager`（页面加载即预渲染）更省带宽——只在核心入口路径上用 `eager`；
+- ✅ 每季度扫一次 [web.dev](https://web.dev) 的 Baseline 更新——很多"lodash 式工具"已被平台吸收（如 `structuredClone`、`Array.at`、CSS 嵌套、`:has()`）；
+- ⚠️ 新能力上线前查 [caniuse](https://caniuse.com) 与业务浏览器占比，并始终写出降级路径（示例中的 `if (!document.startViewTransition)`）；
+- ⚠️ Clipboard 的 `write` 必须在用户手势触发的调用链中执行（安全限制），`setTimeout` 后再调会 `SecurityError`；
+- ⚠️ OPFS 与 IndexedDB 不冲突——OPFS 适合"文件型"二进制数据（音视频帧、模型权重），IDB 适合"结构化"数据（JSON 记录），两者按数据形态选用；
+- 📖 面试加分项：能说出至少三个"以前引库、现在原生"的案例（Popover 替代 z-index 管理、`:has()` 替代 JS 判断加类名、Container Queries 替代 JS 窗口监听），体现对平台的持续关注。
+
+## 17.2 可视化技术选型
+
+#### 概念解析
+
+```mermaid
+flowchart TD
+    A[可视化需求] --> B{什么形态?}
+    B -- 业务图表<br/>折线/柱状/饼图/地图 --> C[ECharts / AntV<br/>开箱即用,别自绘]
+    B -- 自定义图形<br/>高度定制/探索性 --> D{图元数量?}
+    B -- 3D 场景 --> E[Three.js / 原生 WebGPU]
+    D -- 少于 1k,交互多 --> F[SVG / DOM+CSS<br/>保留模式,支持事件]
+    D -- 大量 2D / 粒子 / 像素 --> G[Canvas 2D<br/>立即模式,分层+离屏缓存]
+    D -- 万级以上 / GPU 计算 --> H[WebGL / WebGPU<br/>GPU 并行]
+    C --> I[详见 17.2 ECharts 实践]
+    F --> J[详见 17.2 SVG vs Canvas]
+    G --> K[详见 17.2 Canvas 分层三板斧]
+    H --> L[详见 17.2 WebGPU 基础]
+```
+
+```
+决策树(文字版):
+  交互多、元素少(<1k)、需要无障碍/SEO  →  SVG(或 DOM+CSS)
+  大量 2D 图元、粒子、游戏、像素操作    →  Canvas 2D
+  3D 场景 / 万级以上图元 / GPU 计算     →  WebGL / WebGPU(Three.js / 原生)
+  业务图表(报表/大屏)                  →  ECharts / AntV(G2) 直接用,不要自绘
+  高度定制、数据驱动、复杂布局          →  D3(学习曲线陡,按需引入模块)
+```
+
+| 库 | 定位 | 什么时候选 |
+| -- | ---- | ---------- |
+| ECharts | 开箱即用的图表全家桶 | 90% 的业务图表场景 |
+| AntV 系列(G2/L7/X6) | 阿里系,关系图/地理/流程图 | 特定图类型的专业需求 |
+| D3 | 底层可视化原语 | 图表形态完全自定义、探索性可视化 |
+| Three.js | 3D 场景封装 | 3D 展示、数字孪生 |
+
+#### SVG vs Canvas：保留模式 vs 立即模式
+
+这是面试高频，理解这个区别就理解了可视化技术选型的核心：
+
+```mermaid
+graph LR
+    subgraph SVG - 保留模式
+        S1[DOM 节点持久存在] --> S2[浏览器管理重绘] --> S3[天然支持事件<br/>无障碍/SEO]
+    end
+    subgraph Canvas - 立即模式
+        C1[每帧整画面重绘] --> C2[无对象模型] --> C3[需自己命中检测<br/>但万级图元不卡]
+    end
+```
+
+| 维度 | SVG | Canvas |
+| ---- | --- | ------ |
+| 渲染模式 | 保留模式（DOM 树持久化） | 立即模式（每帧画完即丢） |
+| 事件绑定 | 原生 DOM 事件，每个元素可监听 | 需自己做命中检测（坐标→图元） |
+| 无障碍 | ✅ 屏幕阅读器可读 | ❌ 画布无语义，需 `aria-label` 兜底 |
+| 数据量边界 | ~1k 节点开始卡 | 数万图元流畅 |
+| 编辑能力 | ✅ 可直接操作单个 DOM 节点 | ❌ 需重绘整帧 |
+| 打印/导出 | 矢量，无损放大 | 位图，放大模糊 |
+
+#### 完整代码示例
+
+```html
+<!-- 文件: examples/17-03-canvas-layers.html —— [浏览器] Canvas 分层:性能优化的经典手法 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        /* 三层画布叠放:静态背景层(不重绘) + 数据层(低频) + 交互层(高频) */
+        .stage { position: relative; width: 600px; height: 300px; }
+        .stage canvas { position: absolute; inset: 0; }
+    </style>
+</head>
+<body>
+    <div class="stage">
+        <canvas id="bg" width="600" height="300"></canvas>    <!-- 网格背景:只画一次 -->
+        <canvas id="data" width="600" height="300"></canvas>  <!-- 折线:数据变化才重绘 -->
+        <canvas id="ui" width="600" height="300"></canvas>    <!-- 十字准星:鼠标移动高频重绘 -->
+    </div>
+    <script>
+        const bg = document.getElementById('bg').getContext('2d');
+        const ui = document.getElementById('ui').getContext('2d');
+
+        // 背景层:只画一次 —— 高频重绘的代价永远不要花在不变的内容上
+        for (let x = 0; x < 600; x += 30) { bg.fillRect(x, 0, 1, 300); }
+
+        // 交互层:鼠标移动只清除/重绘最上层的小画布,下层零开销
+        document.getElementById('ui').addEventListener('mousemove', (e) => {
+            ui.clearRect(0, 0, 600, 300);          // 只清交互层
+            ui.fillRect(e.offsetX - 1, 0, 2, 300);
+        });
+    </script>
+</body>
+</html>
+```
+
+```typescript
+// 文件: examples/17-04-echarts-best-practice.ts —— ECharts 业务实践要点(配置骨架)
+// npm i echarts —— 90% 的业务图表注意事项集中在以下几点
+// import * as echarts from 'echarts';
+
+function renderChart(dom: HTMLElement, data: { name: string; value: number }[]) {
+    // ① 按需引入:只打包用到的图表与组件(体积从 1MB+ 降到 300KB 级)
+    // const chart = echarts.init(dom, null, { renderer: 'svg' });
+    //    ↑ 需要无障碍/大量图表实例时选 svg 渲染器;大数据量选 canvas(默认)
+
+    const option = {
+        animationDurationUpdate: 300,
+        // ② 大数据量:开启渐进渲染 + 采样,万级数据不掉帧
+        series: [{
+            type: 'line',
+            large: true,                  // 大数据模式
+            sampling: 'lttb',             // 降采样保留波形
+            progressive: 2000,            // 渐进渲染,避免一次性布局
+            data: data.map((d) => [d.name, d.value]),
+        }],
+        // ③ dataZoom 内置缩放,别自己造
+        // dataZoom: [{ type: 'inside' }],
+    };
+    // chart.setOption(option);
+    // ④ 容器 resize 时必须 chart.resize();组件卸载时 chart.dispose()(防内存泄漏,呼应 1.6)
+}
+export {};
+```
+
+> 运行方式：`open examples/17-03-canvas-layers.html` 后在图上快速移动鼠标，用 Performance 面板对比"单画布全量重绘"与"分层"的帧率差异；ECharts 要点放入项目理解。
+
+#### OffscreenCanvas：把渲染搬进 Worker
+
+Canvas 渲染是主线程任务——万级粒子、复杂滤镜会把主线程打满导致 UI 卡顿。`OffscreenCanvas` + Worker 把渲染管线整体搬到 Worker 线程，主线程只负责接收合成好的帧：
+
+```typescript
+// 文件: examples/17-09-offscreen-canvas.ts —— [浏览器] OffscreenCanvas Worker 渲染
+// ============ 主线程:把 canvas 控制权转交给 Worker ============
+
+// 主线程
+const canvas = document.getElementById('canvas') as HTMLCanvasElement;
+// transferControlToOffscreen 后,主线程不能再获取该 canvas 的 2d 上下文
+const offscreen = canvas.transferControlToOffscreen();
+const worker = new Worker(new URL('./17-09-canvas-worker.ts', import.meta.url), { type: 'module' });
+
+// 把 OffscreenCanvas 转移给 Worker(Transferable,零拷贝)
+worker.postMessage({ type: 'init', canvas: offscreen }, [offscreen]);
+
+// 主线程只发指令,不碰渲染 —— UI 线程彻底解放
+function startAnimation() {
+    worker.postMessage({ type: 'start', particleCount: 5000 });
+}
+function stopAnimation() {
+    worker.postMessage({ type: 'stop' });
+}
+function resize(width: number, height: number) {
+    worker.postMessage({ type: 'resize', width, height });
+}
+
+// ⚠️ transferControlToOffscreen 是单向不可逆的 —— 主线程之后不能再操作该 canvas
+// ⚠️ Worker 中没有 DOM API(没有 document/window),所有输入通过 postMessage 传入
+// ⚠️ requestAnimationFrame 在 Worker 中可用(非 DOM 专属)
+
+export {};
+```
+
+```typescript
+// 文件: examples/17-09-canvas-worker.ts —— [浏览器] Worker 侧的渲染循环
+// ============ Worker 线程:粒子动画的完整渲染循环 ============
+
+let ctx: OffscreenCanvasRenderingContext2D;
+let rafId: number;
+let particles: { x: number; y: number; vx: number; vy: number }[] = [];
+
+self.onmessage = (e: MessageEvent) => {
+    const { type } = e.data;
+    if (type === 'init') {
+        const canvas = e.data.canvas as OffscreenCanvas;
+        ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
+        ctx.canvas.width = 600;
+        ctx.canvas.height = 400;
+    } else if (type === 'start') {
+        // 初始化粒子
+        const count = e.data.particleCount as number;
+        particles = Array.from({ length: count }, () => ({
+            x: Math.random() * 600,
+            y: Math.random() * 400,
+            vx: (Math.random() - 0.5) * 2,
+            vy: (Math.random() - 0.5) * 2,
+        }));
+        loop();
+    } else if (type === 'stop') {
+        if (rafId) cancelAnimationFrame(rafId);
+    } else if (type === 'resize') {
+        if (ctx) {
+            ctx.canvas.width = e.data.width;
+            ctx.canvas.height = e.data.height;
+        }
+    }
+};
+
+function loop() {
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.fillStyle = '#1890ff';
+    for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > ctx.canvas.width) p.vx *= -1;
+        if (p.y < 0 || p.y > ctx.canvas.height) p.vy *= -1;
+        ctx.fillRect(p.x, p.y, 2, 2);
+    }
+    rafId = requestAnimationFrame(loop); // ✅ Worker 中 rAF 可用
+}
+
+export {}; // Worker 模块:导出空确保类型检查
+```
+
+> 运行方式：浏览器环境，需 `npx serve .` 静态服务器（`file://` 下 Worker 源为 opaque 会失败）。对比"主线程渲染 5000 粒子"与"Worker 渲染"的帧率差异——前者滚动卡顿、后者流畅。详见 [2.10 OffscreenCanvas](./18-worker-messaging.md#_2-10-offscreencanvas-把渲染搬进-worker)。
+
+#### ECharts 深度优化：从万级到百万级数据
+
+ECharts 内置了大数据优化手段，关键在于正确配置——漏配任何一个都会在大数据量时掉帧：
+
+```typescript
+// 文件: examples/17-10-echarts-large-data.ts —— [浏览器] ECharts 百万级数据配置
+// npm i echarts
+// import * as echarts from 'echarts';
+// import { LineChart, GridComponent, TooltipComponent, DataZoomComponent } from 'echarts/charts';
+// echarts.use([LineChart, GridComponent, TooltipComponent, DataZoomComponent]); // 按需引入
+
+interface EChartsOption {
+    series: Array<{
+        type: string;
+        large?: boolean;
+        progressive?: number;
+        sampling?: string;
+        data: [string, number][];
+        [key: string]: unknown;
+    }>;
+    animationDurationUpdate?: number;
+    dataZoom?: Array<{ type: string }>;
+    [key: string]: unknown;
+}
+
+function createLargeDataChart(dom: HTMLElement, count: number): EChartsOption {
+    // 生成百万级测试数据
+    const data: [string, number][] = [];
+    let base = 0;
+    const now = Date.now();
+    for (let i = 0; i < count; i++) {
+        base += (Math.random() - 0.45) * 20;
+        data.push([new Date(now - (count - i) * 1000).toISOString(), Math.round(base)]);
+    }
+
+    return {
+        animationDurationUpdate: 0, // 大数据时关闭动画 —— 动画本身就是长任务
+        series: [{
+            type: 'line',
+            large: true,                  // ① 大数据模式:跳过非视觉元素的逐个处理
+            sampling: 'lttb',            // ② LTTB 降采样:保留波形特征,不是简单抽样
+            progressive: 5000,            // ③ 渐进渲染:每帧最多渲染 5000 个点
+            progressiveThreshold: 10000,  // 超过 1 万点才启用渐进,小数据直接渲染更快
+            data,
+            // ④ showSymbol 设为 false:不画每个数据点的标记(万级点标记是性能杀手)
+            showSymbol: false,
+            // ⑤ hover 层级限制:不渲染所有 tooltip,只渲染最近的
+            emphasis: { disabled: true },
+        }],
+        dataZoom: [
+            { type: 'inside', rangeMode: ['value', 'percent'], start: 80, end: 100 }, // 默认只看最后 20%
+        ],
+        // ⑥ tooltip 模式设为 axis(整列高亮)而非 item(逐点高亮)
+        tooltip: { trigger: 'axis' },
+    };
+}
+
+// ---- 生命周期管理(防内存泄漏的头号规则)----
+function setupChart(dom: HTMLElement) {
+    // const chart = echarts.init(dom, null, { renderer: 'canvas' }); // 大数据用 canvas
+    // chart.setOption(createLargeDataChart(dom, 1_000_000));
+
+    let resizeTimer: ReturnType<typeof setTimeout>;
+    const onResize = () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            // chart.resize(); // 防抖 resize:频繁 resize 会闪屏
+        }, 200);
+    };
+    window.addEventListener('resize', onResize);
+
+    // ✅ 清理函数:卸载时必须调
+    return () => {
+        window.removeEventListener('resize', onResize);
+        clearTimeout(resizeTimer);
+        // chart.dispose(); // 释放实例与事件监听 —— 漏了就是内存泄漏(呼应 1.6)
+    };
+}
+
+export {};
+```
+
+> 运行方式：`npm i echarts` 后引入项目；百万级数据配合 LTTB 采样 + 渐进渲染，Chrome DevTools Performance 面板观察帧率是否稳定在 60fps。
+
+#### Three.js 集成模式：React/Vue 中的正确接入
+
+Three.js 是命令式 API，在声明式框架中集成需要注意"谁管 DOM"的边界：
+
+```typescript
+// 文件: examples/17-11-three-react.tsx —— [React 19] Three.js 集成:useRef + useEffect
+// import * as THREE from 'three';
+
+// React 侧:useRef 管 DOM,useEffect 初始化/清理
+// (以下为示意代码,实际需 npm i three)
+declare const THREE: typeof import('three');
+
+function useThreeScene(containerRef: React.RefObject<HTMLElement>) {
+    useEffect(() => {
+        if (!containerRef.current) return;
+
+        // 1. 场景、相机、渲染器(命令式初始化)
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        containerRef.current.appendChild(renderer.domElement);
+        camera.position.z = 5;
+
+        // 2. 几何体
+        const geo = new THREE.BoxGeometry();
+        const mat = new THREE.MeshBasicMaterial({ color: 0x1890ff });
+        const cube = new THREE.Mesh(geo, mat);
+        scene.add(cube);
+
+        // 3. 动画循环
+        let rafId: number;
+        const animate = () => {
+            cube.rotation.x += 0.01;
+            cube.rotation.y += 0.01;
+            renderer.render(scene, camera);
+            rafId = requestAnimationFrame(animate);
+        };
+        animate();
+
+        // 4. resize 监听
+        const onResize = () => {
+            const w = containerRef.current!.clientWidth;
+            const h = containerRef.current!.clientHeight;
+            renderer.setSize(w, h);
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+        };
+        onResize();
+        window.addEventListener('resize', onResize);
+
+        // 5. ✅ 清理(关键!漏了会泄漏 WebGL context,多次切换后 WebGL context 数超上限)
+        return () => {
+            cancelAnimationFrame(rafId);
+            window.removeEventListener('resize', onResize);
+            renderer.dispose();
+            geo.dispose();
+            mat.dispose();
+            containerRef.current?.removeChild(renderer.domElement);
+        };
+    }, []);
+}
+
+export {};
+```
+
+> ⚠️ Three.js 集成三大坑：① WebGL context 数有浏览器上限（~16 个），页面切换不 `dispose()` 会导致 "Too many WebGL contexts" 报错；② React StrictMode 双挂载会创建两次场景——cleanup 必须彻底；③ `renderer.domElement` 是 Three.js 自己创建的 `<canvas>`，不要在 JSX 里再放一个 canvas。
+
+> 💡 生产级 3D 项目推荐 **React Three Fiber**（R3F）——它把 Three.js 声明式化，自动管理生命周期，不需要手写 useRef + dispose 组合拳。Vue 侧有 TresJS 做同类事。
+
+#### 最佳实践
+
+- ✅ 业务图表不要自绘：ECharts/AntV 覆盖 90% 需求，自绘的交互（tooltip/图例/缩放）成本远超预期；
+- ✅ Canvas 性能三板斧：分层、离屏 Canvas 缓存静态内容、`requestAnimationFrame` 合并重绘；
+- ✅ OffscreenCanvas + Worker 是渲染性能的终极手段——主线程做 UI、Worker 做渲染，两者并行；
+- ✅ ECharts 大数据四件套：`large:true` + `sampling:'lttb'` + `progressive` + `showSymbol:false`，配合 `dataZoom` 只渲染可见区域；
+- ⚠️ SVG 的 DOM 节点超过几千个会卡——需要时可降到 Canvas（损失 DOM 事件,需自己命中检测）；
+- ⚠️ Three.js `dispose()` 是防泄漏的关键——WebGL context 数有浏览器上限，不清理会 "Too many contexts"；
+- 📖 面试高频：SVG vs Canvas 本质差异（保留模式 vs 立即模式）、大数据量图表优化手段、ECharts 按需引入与大数据配置、Canvas 分层原理、Three.js 生命周期管理。
+
+## 17.3 Web Components
+
+#### 概念解析
+
+三件套：**Custom Elements**（自定义标签）、**Shadow DOM**（样式与 DOM 隔离）、`<template>`/`<slot>`（模板与插槽）。核心价值是**框架无关**：组件在 React/Vue/纯 HTML 中行为一致——典型场景是跨框架设计系统、微前端共享组件、浏览器扩展与编辑器插件。
+
+#### 完整生命周期
+
+Custom Elements 有四个回调，记住它们的触发时机就够了：
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created: constructor<br/>实例化,不可访问 DOM
+    Created --> Connected: connectedCallback<br/>插入文档,可读 DOM/属性
+    Connected --> Disconnected: disconnectedCallback<br/>移出文档,清理监听/定时器
+    Disconnected --> Connected: 重新插入(缓存后再挂回)
+    Connected --> Adopted: adoptedCallback<br/>被移到新 document(iframe)
+    Adopted --> Connected: 移回原文档
+    Connected --> Connected: attributeChangedCallback<br/>observedAttributes 中的属性变化
+    Disconnected --> [*]: 被回收
+```
+
+| 回调 | 触发时机 | 适合做什么 | ⚠️ 不能做什么 |
+| ---- | -------- | ---------- | --------------- |
+| `constructor` | 元素实例化 | 初始化内部状态、Shadow DOM | 访问属性/子节点（此时还没挂载）、读写 DOM |
+| `connectedCallback` | 插入 DOM | 渲染、读属性、加事件监听 | 假设只执行一次（可能反复挂/卸） |
+| `disconnectedCallback` | 移出 DOM | 清理定时器、事件、WS 连接 | 假设元素会被回收（可能被缓存后重新插入） |
+| `attributeChangedCallback` | `observedAttributes` 中声明的属性变化 | 同步更新内部状态/渲染 | 在 `constructor` 里读属性（此时可能还没设值） |
+| `adoptedCallback` | 移到新 document | 罕见，iframe 场景用 | —— |
+
+#### 完整代码示例
+
+```html
+<!-- 文件: examples/17-05-web-component.html —— [浏览器] 手写一个 <count-up> 自定义元素 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /></head>
+<body>
+    <!-- 使用方式与原生标签无异:属性传参,任意框架可用 -->
+    <count-up to="2026" duration="1500"></count-up>
+
+    <script>
+        class CountUp extends HTMLElement {
+            // observedAttributes:声明需要监听的属性变化
+            static get observedAttributes() { return ['to', 'duration']; }
+
+            connectedCallback() {
+                // Shadow DOM:内部样式与 DOM 完全隔离,不污染页面,不被页面污染
+                const root = this.attachShadow({ mode: 'open' });
+                root.innerHTML = `
+                    <style>
+                        span { font: 700 2em/1 monospace; color: #1890ff; }
+                    </style>
+                    <span>0</span>
+                `;
+                this.display = root.querySelector('span');
+
+                const to = Number(this.getAttribute('to') ?? 0);
+                const duration = Number(this.getAttribute('duration') ?? 1000);
+                const start = performance.now();
+
+                const tick = (now: number) => {
+                    const progress = Math.min((now - start) / duration, 1);
+                    // easeOutCubic 缓动
+                    const eased = 1 - (1 - progress) ** 3;
+                    this.display!.textContent = String(Math.round(to * eased));
+                    if (progress < 1) requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            }
+        }
+        customElements.define('count-up', CountUp);
+    </script>
+</body>
+</html>
+```
+
+> 运行方式：`open examples/17-05-web-component.html`，DevTools 中展开 `<count-up>` 可以看到 `#shadow-root (open)`——内部样式对页面全局样式完全免疫（呼应 12.2 的样式隔离）。
+
+#### Slot 组合：声明式内容投射
+
+Slot 是 Web Components 的"children"——让使用者在自定义元素里塞内容，组件决定内容出现在哪里：
+
+```html
+<!-- 文件: examples/17-12-slots.html —— [浏览器] Slot 组合与 fallback -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /></head>
+<body>
+    <!-- 命名 slot:内容投射到指定位置 -->
+    <my-card>
+        <span slot="title">用户管理</span>
+        <p>这里是默认 slot 的内容,会被投射到未命名的 <slot> 中。</p>
+        <button slot="actions">编辑</button>
+    </my-card>
+
+    <script>
+        class MyCard extends HTMLElement {
+            connectedCallback() {
+                const root = this.attachShadow({ mode: 'open' });
+                root.innerHTML = `
+                    <style>
+                        .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+                        header { font-weight: bold; margin-bottom: 8px; }
+                        footer { margin-top: 12px; text-align: right; }
+                    </style>
+                    <div class="card">
+                        <header><slot name="title">默认标题</slot></header>
+                        <div><slot>默认内容 fallback</slot></div>     <!-- 未命名 slot:接收无 slot 属性的内容 -->
+                        <footer><slot name="actions"></slot></footer>
+                    </div>
+                `;
+            }
+        }
+        customElements.define('my-card', MyCard);
+    </script>
+</body>
+</html>
+```
+
+> 运行方式：`open examples/17-12-slots.html`。DevTools 中可以看到"光 DOM"（使用者写的内容）被投射到 Shadow DOM 的 `<slot>` 位置——内容仍然在光 DOM（可被外部 JS/CSS 选中），只是渲染位置被组件控制。
+
+#### 事件与响应式：CustomEvent + 属性变化
+
+Web Components 向外通信用 `CustomEvent`（组件不感知外部框架），内部响应用 `attributeChangedCallback`：
+
+```typescript
+// 文件: examples/17-13-custom-element-events.ts —— [浏览器] 完整的属性→事件通信
+// ============ 一个 <toggle-switch> 开关组件:属性驱动状态,事件通知外部 ============
+
+class ToggleSwitch extends HTMLElement {
+    static get observedAttributes() {
+        return ['checked', 'disabled']; // 只有这些属性变化才触发 callback
+    }
+
+    private bound = false; // 防止重复绑监听
+
+    constructor() {
+        super();
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+            <style>
+                :host { display: inline-block; cursor: pointer; }
+                :host([disabled]) { opacity: 0.5; cursor: not-allowed; }
+                .track { width: 44px; height: 22px; background: #ccc; border-radius: 11px; position: relative; transition: 0.2s; }
+                .track.on { background: #1890ff; }
+                .thumb { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: 0.2s; }
+                .track.on .thumb { transform: translateX(22px); }
+            </style>
+            <div class="track"><div class="thumb"></div></div>
+        `;
+    }
+
+    connectedCallback() {
+        if (this.bound) return; // 防重复(组件可能反复挂/卸)
+        this.bound = true;
+        this.addEventListener('click', this.onClick);
+        // ⚠️ 焦点与键盘:WCAG 要求开关可用空格/回车切换
+        this.setAttribute('role', 'switch');
+        this.setAttribute('tabindex', '0');
+        this.addEventListener('keydown', (e) => {
+            if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); this.onClick(); }
+        });
+    }
+
+    disconnectedCallback() {
+        // ⚠️ 用命名函数引用才能 removeEventListener —— 匿名函数永远解绑失败
+        this.removeEventListener('click', this.onClick);
+    }
+
+    private onClick = () => {
+        if (this.hasAttribute('disabled')) return;
+        this.checked = !this.checked; // setter 会同步属性 → 触发 attributeChangedCallback
+    };
+
+    // 属性 ↔ 属性 的桥接(setter 写 attribute,callback 读 attribute)
+    get checked() { return this.hasAttribute('checked'); }
+    set checked(val: boolean) {
+        val ? this.setAttribute('checked', '') : this.removeAttribute('checked');
+    }
+
+    attributeChangedCallback(name: string, _old: string, _new: string) {
+        const track = this.shadowRoot!.querySelector('.track');
+        if (name === 'checked') {
+            track?.classList.toggle('on', this.checked);
+            this.setAttribute('aria-checked', String(this.checked));
+            // ✅ 向外发事件:CustomEvent + composed:true(穿透 Shadow DOM 边界)
+            this.dispatchEvent(new CustomEvent('change', {
+                detail: { checked: this.checked },
+                bubbles: true,    // 冒泡到父级
+                composed: true,   // 穿透 Shadow DOM —— 外部监听才能收到
+            }));
+        }
+        if (name === 'disabled') {
+            this.setAttribute('aria-disabled', String(this.hasAttribute('disabled')));
+        }
+    }
+}
+
+customElements.define('toggle-switch', ToggleSwitch);
+export {};
+```
+
+> 运行方式：浏览器环境。关键点：`composed: true` 让事件穿透 Shadow DOM——不加这个属性，外部 `addEventListener('change')` 收不到。`onClick` 用箭头函数存为实例属性，保证 `removeEventListener` 能匹配同一引用。
+
+#### 声明式 Shadow DOM：SSR 友好的 Web Components
+
+传统 `attachShadow()` 需要客户端 JS 执行——SSR/无 JS 环境下组件内容不可见。声明式 Shadow DOM 在 HTML 里直接写 `<template shadowrootmode="open">`，浏览器解析时自动创建 Shadow DOM：
+
+```html
+<!-- 文件: examples/17-14-declarative-shadow-dom.html —— [浏览器] SSR 友好的声明式 Shadow DOM -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /></head>
+<body>
+    <!-- 声明式 Shadow DOM:无需 JS 即可渲染隔离内容(SSR 可直接输出这段 HTML)-->
+    <my-ssr-card>
+        <template shadowrootmode="open">
+            <style>
+                .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+                h3 { color: #1890ff; }
+            </style>
+            <div class="card">
+                <h3><slot name="title">默认标题</slot></h3>
+                <p><slot>默认内容</slot></p>
+            </div>
+        </template>
+        <!-- 以下内容在光 DOM 中,被投射到上面的 slot -->
+        <span slot="title">SSR 标题</span>
+        <p>这段内容由服务端渲染,无需客户端 JS 即可显示。</p>
+    </my-ssr-card>
+
+    <script>
+        // 浏览器解析 <template shadowrootmode="open"> 时自动调用 attachShadow
+        // 如果已有声明式 Shadow DOM,JS 中的 attachShadow 会报"已经挂载" —— 用 getShadowRoot 检测
+        class MySSRCard extends HTMLElement {
+            connectedCallback() {
+                // ✅ 优先使用已存在的声明式 Shadow DOM,不存在才手动 attach
+                const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
+                // 已有内容(来自 <template>),不需要再 innerHTML
+                // 这里只做增强:加事件监听、动态更新等
+            }
+        }
+        customElements.define('my-ssr-card', MySSRCard);
+    </script>
+</body>
+</html>
+```
+
+> 运行方式：`open examples/17-14-declarative-shadow-dom.html`。即使禁用 JS，卡片内容仍可见（Shadow DOM 由 HTML 解析器自动创建）。Chrome 111+ 支持；降级方案：`if (!HTMLTemplateElement.prototype.shadowRoot)` polyfill。
+
+#### Lit：让 Web Components 写法回到声明式
+
+原生 Web Components 写法样板代码多——Lit（Google 出品）用装饰器 + `html` 模板把样板消掉，是生产级 WC 的推荐工具链：
+
+```typescript
+// 文件: examples/17-15-lit-toggle.ts —— [浏览器] Lit 版的 ToggleSwitch
+// npm i lit
+// import { LitElement, html, css } from 'lit';
+// import { customElement, property } from 'lit/decorators.js';
+
+declare const LitElement: typeof import('lit').LitElement;
+declare const html: typeof import('lit').html;
+declare const css: typeof import('lit').css;
+// const { customElement, property } = await import('lit/decorators.js');
+
+// @customElement('lit-toggle')  // 自动注册 <lit-toggle>
+class LitToggle extends LitElement {
+    // @property({ type: Boolean })  // 自动桥接 attribute ↔ property,触发 attributeChanged
+    checked = false;
+
+    // @property({ type: Boolean, reflect: true })  // reflect: 属性变化回写到 HTML attribute
+    disabled = false;
+
+    static styles = css`
+        :host { display: inline-block; cursor: pointer; }
+        .track { width: 44px; height: 22px; background: #ccc; border-radius: 11px; transition: 0.2s; }
+        .track.on { background: #1890ff; }
+        .thumb { width: 18px; height: 18px; background: #fff; border-radius: 50%; margin: 2px; transition: 0.2s; }
+        .track.on .thumb { transform: translateX(22px); }
+    `; // ✅ Lit 自动创建 Shadow DOM + 样式隔离,不需要手动 attachShadow
+
+    render() {
+        // ✅ html 模板自动追踪依赖,只有 checked 变了才更新 DOM(类似 Vue 的细粒度响应式)
+        return html`
+            <div class="track ${this.checked ? 'on' : ''}" @click=${this.toggle}>
+                <div class="thumb"></div>
+            </div>
+        `;
+    }
+
+    private toggle() {
+        if (this.disabled) return;
+        this.checked = !this.checked;
+        this.dispatchEvent(new CustomEvent('change', {
+            detail: { checked: this.checked },
+            bubbles: true,
+            composed: true, // 穿透 Shadow DOM
+        }));
+    }
+}
+
+// 对比:原生版 50+ 行(手动 attachShadow、attributeChangedCallback、observedAttributes),
+// Lit 版 20 行——样板代码由框架处理,开发者只写业务逻辑
+export {};
+```
+
+> 运行方式：`npm i lit` 后引入项目；Lit 的 `html` 模板语法与 React JSX / Vue template 殊途同归——都是"声明式描述 UI + 自动追踪依赖"。生产级设计系统（如 Spectrum、Fluent）大量使用 Lit。
+
+#### 最佳实践
+
+- ✅ 选 Web Components 的信号：组件要**跨框架/跨团队/跨应用**复用（设计系统、微前端），纯 React/Vue 项目内不必用它；
+- ✅ React 19 已原生支持自定义元素（属性/事件映射改善），混用成本大幅下降——`<toggle-switch checked onChange={...}>` 即可；
+- ✅ Vue 3 中 `<toggle-switch :checked="val" @change="...">` 天然可用——Vue 对自定义元素的 `camelCase` 属性会自动转 `kebab-case`；
+- ✅ 生产级 WC 用 Lit 而非裸 API——样板代码消掉 80%，且自动处理响应式、属性反射、Shadow DOM 创建；
+- ⚠️ Shadow DOM 内的全局字体/CSS 变量需要 `::part()` 或继承值穿透——设计令牌（[12.3](./12-css-engineering.md#_12-3-设计令牌与主题系统)）是标准穿透通道；
+- ⚠️ `composed: true` 是 Shadow DOM 内事件外出的关键——不加这个属性，外部框架的 `@change` / `onChange` 永远收不到事件；
+- ⚠️ 声明式 Shadow DOM 的 `<template shadowrootmode="open">` 不能与 JS `attachShadow` 同时调用——用 `this.shadowRoot ??` 检测是否已有声明式 root；
+- 📖 面试高频：三件套各自职责、Shadow DOM 与 CSS Modules 隔离层次的区别（浏览器原生 vs 构建期哈希）、Light DOM 与 Shadow DOM 的样式关系、`composed: true` 的作用、声明式 Shadow DOM 解决了什么 SSR 问题。
+
+## 17.4 WebAssembly 适用边界
+
+#### 概念解析
+
+WASM 是**可移植的二进制指令格式**，让 C/C++/Rust 编译的代码以接近原生的速度运行在浏览器中。判断口诀：**计算密集 + 生态复用 → 上 WASM；操作 DOM/常规业务 → 留在 JS**（WASM 访问 DOM 需要绕道胶水层,来回开销抵消优势）。
+
+```mermaid
+flowchart TD
+    A[性能瓶颈?] --> B{先 Profiler 定位<br/>详见 10.3}
+    B --> C{热点是什么?}
+    C -- DOM/布局/网络 --> D[❌ WASM 不解决问题<br/>优化 DOM/网络/缓存]
+    C -- 纯计算<br/>图像/编解码/加密 --> E{有现成的 C/C++/Rust<br/>实现可复用?}
+    E -- 是 --> F[✅ 编译为 WASM<br/>复用生态,5~20x 提速]
+    E -- 否 --> G{能接受自研成本?<br/>Rust + wasm-pack}
+    G -- 是 --> H[✅ 自研 WASM<br/>但先 benchmark 验证收益]
+    G -- 否 --> I[❌ JS 优化 + Web Worker<br/>可能足够,详见 18-worker-messaging]
+```
+
+| 已验证的场景 | 说明 | 典型库 |
+| ------------ | ---- | ------ |
+| 图像/视频处理 | 像素级卷积运算,单帧内完成 | squoosh、ffmpeg.wasm |
+| 解析器/编译器 | 大文件解析,复用 C 实现 | sql.js(SQLite)、esbuild-wasm |
+| 加密/压缩 | 密码学/压缩算法的 Rust 移植 | wasm-zstd、argon2-browser |
+| 游戏/物理引擎 | 高性能模拟 | Unity/Unreal 导出 |
+
+#### 完整加载与实例化管线
+
+```typescript
+// 文件: examples/17-06-wasm-boundary.ts —— WASM 的取舍判断(概念示意)
+// 场景 A ✅:JS 里做高斯模糊(百万像素 × 卷积核)—— 纯计算,单帧内完成,WASM 快 5~20 倍
+// 场景 B ❌:用 WASM 遍历 DOM 生成列表 —— 每次操作 DOM 都要跨越 JS↔WASM 边界,反而更慢
+
+// 加载与实例化(以导出 blur 函数的 wasm 模块为例):
+// const { instance } = await WebAssembly.instantiateStreaming(
+//     fetch('/blur.wasm'),
+//     { env: { memory: new WebAssembly.Memory({ initial: 256 }) } },
+// );
+// instance.exports.blur(imageDataPtr, width, height, radius);
+// 💡 数据通过线性内存传递:把像素写入 WASM 内存 → 调用 → 读回,边界穿越次数要最小化
+
+// 决策自检三问:
+// 1. 热点真的是计算吗?(先 profiling,呼应 10.3 —— 很多"慢"是 DOM/布局,不是算力)
+// 2. 该算法有现成的 C/C++/Rust 实现吗?(有 → 复用生态;没有 → 手写 Rust 成本可能不值)
+// 3. 能接受 +几百 KB 的 wasm 产物吗?(移动端弱网要权衡)
+export {};
+```
+
+#### WASM + Web Workers：计算与 UI 并行
+
+WASM 本身是同步阻塞的——长时间运行会冻结主线程。生产用法是 **WASM 跑在 Worker 中**，主线程通过 postMessage 发数据、收结果：
+
+```typescript
+// 文件: examples/17-16-wasm-worker.ts —— [浏览器] WASM 在 Worker 中运行
+// ============ 主线程:发送数据给 Worker,接收处理结果 ============
+
+// 主线程
+const worker = new Worker(new URL('./17-16-wasm-worker-side.ts', import.meta.url), { type: 'module' });
+
+interface WasmResult { width: number; height: number; data: Uint8ClampedArray; }
+
+async function blurImage(imageData: ImageData, radius: number): Promise<ImageData> {
+    // 用 Transferable 零拷贝传递 ArrayBuffer(发送方立即失去访问权)
+    const buf = imageData.data.buffer;
+    const promise = new Promise<ImageData>((resolve) => {
+        worker.onmessage = (e: MessageEvent) => {
+            const result = e.data as WasmResult;
+            resolve(new ImageData(result.data, result.width, result.height));
+        };
+    });
+    // ⚠️ Transferable 传递后,原 imageData.data 的 buffer 被 detached,不能再访问
+    worker.postMessage(
+        { type: 'blur', data: buf, width: imageData.width, height: imageData.height, radius },
+        [buf],
+    );
+    return promise;
+}
+
+// ⚠️ Worker + WASM 组合的典型场景:实时视频滤镜(每帧送入 WASM 处理)
+// requestVideoFrameCallback + WASM blur → 实时滤镜不卡 UI
+
+export {};
+```
+
+```typescript
+// 文件: examples/17-16-wasm-worker-side.ts —— [浏览器] Worker 侧:加载 WASM 并处理
+// ============ Worker 线程:加载 WASM,接收数据,返回结果 ============
+
+// import { instantiate } from '@assemblyscript/loader';
+// 或:import init from './pkg/blur.js'; // wasm-bindgen/wasm-pack 生成
+
+let wasmExports: { blur: (ptr: number, width: number, height: number, radius: number) => void; memory: WebAssembly.Memory } | null = null;
+
+async function initWasm() {
+    if (wasmExports) return;
+    // AssemblyScript 产出:.wasm + .js 胶水层
+    // Rust(wasm-pack) 产出:pkg/*.wasm + *.js(含 wasm-bindgen 胶水)
+    // const wasm = await instantiate(fetch('/blur.wasm'), {});
+    // wasmExports = wasm.exports as typeof wasmExports;
+}
+
+self.onmessage = async (e: MessageEvent) => {
+    await initWasm();
+    const { type, data, width, height, radius } = e.data;
+    if (type !== 'blur') return;
+
+    const pixels = new Uint8ClampedArray(data); // 接收主线程传来的 buffer
+
+    // ---- 线性内存交互:把 JS 数据写入 WASM 内存 ----
+    // 1. 分配 WASM 内存空间(大小 = width * height * 4 RGBA)
+    const ptr = 0; // wasmExports!.alloc(pixels.length); // 分配指针
+    // 2. 把像素数据复制到 WASM 线性内存
+    const wasmMem = new Uint8ClampedArray(/* wasmExports!.memory.buffer */ data);
+    wasmMem.set(pixels, ptr);
+    // 3. 调用 WASM 函数(同步,但 Worker 中不阻塞 UI)
+    // wasmExports!.blur(ptr, width, height, radius);
+    // 4. 从 WASM 内存读回结果
+    const result = wasmMem.slice(ptr, ptr + pixels.length);
+    // 5. 释放 WASM 内存
+    // wasmExports!.dealloc(ptr, pixels.length);
+
+    // ⚠️ 第 2 步和第 4 步是"边界穿越" —— 每次拷贝都有开销
+    // ✅ 优化方向:批量传递、减少调用次数(一次处理整帧而非逐像素)
+
+    // Transferable 回传结果(零拷贝)
+    self.postMessage(
+        { type: 'result', data: result.buffer, width, height },
+        [result.buffer],
+    );
+};
+
+export {};
+```
+
+> 运行方式：浏览器环境，需 `npx serve .` 静态服务器。Worker 加载 WASM 是标准做法——WASM 同步执行不阻塞主线程 UI。详见 [18-worker-messaging 模块二](./18-worker-messaging.md#模块二-dedicatedworker-web-worker-详解)。
+
+#### AssemblyScript：用 TypeScript 写 WASM
+
+不想学 Rust？AssemblyScript 让你用 TypeScript 语法写 WASM——学习成本最低的 WASM 入门路径：
+
+```typescript
+// 文件: examples/17-17-assemblyscript.ts —— AssemblyScript 源码(编译为 .wasm)
+// npm i -g assemblyscript
+// asc 17-17-assemblyscript.ts --outFile blur.wasm --exportRuntime
+// ============ 用 TypeScript 语法写,编译为 WASM 二进制 ============
+
+// AssemblyScript 是 TypeScript 的子集(严格类型,无 any/union)
+// 导出的函数可被 JS 调用
+
+// @ts-ignore: AssemblyScript 的整数类型标注
+export function blur(srcPtr: usize, width: i32, height: i32, radius: i32): void {
+    // 直接操作线性内存(指针 = 内存偏移量)
+    // AssemblyScript 提供了 load/store 函数操作内存
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            // 简化:实际高斯模糊需要卷积核邻域采样
+            const offset = (y * width + x) * 4;
+            const r = load<u8>(srcPtr + offset);
+            const g = load<u8>(srcPtr + offset + 1);
+            const b = load<u8>(srcPtr + offset + 2);
+            // 简化处理:实际应对邻域求均值
+            store<u8>(srcPtr + offset, r);
+            store<u8>(srcPtr + offset + 1, g);
+            store<u8>(srcPtr + offset + 2, b);
+        }
+    }
+}
+
+// ---- 与 Rust(wasm-pack)的对比 ----
+// | 维度 | AssemblyScript | Rust + wasm-pack |
+// | ---- | -------------- | ---------------- |
+// | 语言 | TypeScript 子集(上手快) | Rust(学习曲线陡) |
+// | 性能 | 接近原生(略慢于 Rust) | 最优(与 C 持平) |
+// | 生态 | 小(适合简单计算) | 大(可复用 crates.io) |
+// | 胶水 | 自动生成 JS 绑定 | wasm-bindgen 自动生成 |
+// | 适用 | 快速原型/简单算法 | 生产级/复杂算法/复用现有 C/Rust 库 |
+
+export {};
+```
+
+> 运行方式：`npm i -g assemblyscript` 后 `asc 17-17-assemblyscript.ts --outFile blur.wasm --exportRuntime` 编译，再在 JS 中通过 `instantiateStreaming` 加载。AssemblyScript 适合快速原型验证 WASM 收益；生产级建议 Rust + wasm-pack 获得最佳性能与生态。
+
+#### 最佳实践
+
+- ✅ 先 Profiler 定位热点,再考虑 WASM——大多数页面卡顿与算力无关；
+- ✅ 优先复用现成 wasm 包（`ffmpeg.wasm`、`sql.js`），少自研；
+- ✅ WASM 跑在 Worker 中——同步执行不阻塞 UI，主线程只收发消息；
+- ✅ 数据传递用 Transferable（`ArrayBuffer`）——零拷贝，避免大数组在 JS↔WASM 间来回复制；
+- ⚠️ WASM 内存与 JS 堆之间的数据拷贝是隐形开销，批量传递、减少穿越次数是优化的核心；
+- ⚠️ AssemblyScript 适合原型验证（TypeScript 语法上手快），Rust + wasm-pack 适合生产级（性能最优 + 生态丰富）；
+- 📖 面试高频：WASM 适用与不适用场景、为什么操作 DOM 不适合 WASM、线性内存是什么、WASM + Worker 的组合模式、Transferable 传递的原理与代价。
+
+## 17.5 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】Popover API 替代了手写弹层的哪些样板代码？模态对话框该用什么？</b></summary>
+
+替代了:top-layer 置顶(摆脱 z-index 大战)、点击外部关闭、Esc 关闭、初步的焦点管理 —— 全部声明式完成。模态语义的对话框用原生 &lt;dialog&gt;(showModal 自带背景遮罩与焦点陷阱);非模态的轻弹层用 popover。选错会导致无障碍行为错误:模态用 popover 会缺焦点陷阱(Tab 跑到背后),非模态用 showModal 会错误阻断用户操作。
+</details>
+
+<details>
+<summary><b>2. 【挑战】SVG 与 Canvas 的本质区别是什么？各自的数据量边界？</b></summary>
+
+SVG 是保留模式:DOM 节点持久存在,浏览器管理重绘,天然支持事件与无障碍,适合交互多、元素 &lt;1k 的场景。Canvas 是立即模式:每次都要整帧重绘,没有对象模型,适合大量图元/像素操作/高频动画;节点数超过几千时 SVG 明显卡顿,需要降级到 Canvas 或分层优化。
+</details>
+
+<details>
+<summary><b>3. 【进阶】什么信号出现时才应该选择 Web Components？为什么纯 React 项目不必用？</b></summary>
+
+信号:组件需要跨框架、跨团队、跨应用复用(设计系统、微前端共享组件、浏览器扩展)。纯 React 项目内,框架自己的组件系统有更好的类型推导、状态管理与生态,WC 反而丢失这些能力 —— 技术选型跟着复用边界走,不跟新潮度走。
+</details>
+
+<details>
+<summary><b>4. 【挑战】为什么"用 WASM 操作 DOM"是反模式？判断是否上 WASM 的三问是什么？</b></summary>
+
+WASM 无法直接访问 DOM,每次操作都要通过胶水层跨越 JS↔WASM 边界,序列化与调用的开销往往超过计算收益。三问:① 热点真的是纯计算吗(先 Profiler);② 有现成的 C/C++/Rust 实现可复用吗;③ 能接受产物体积增长吗。生产用法:WASM 跑在 Worker 中,同步执行不阻塞 UI,数据用 Transferable 零拷贝传递。
+</details>
+
+<details>
+<summary><b>5. 【基础】ECharts 处理万级数据点的内置手段？图表组件卸载时必须做什么？</b></summary>
+
+large:true 大数据模式、sampling:'lttb' 降采样(保留波形)、progressive 渐进渲染(分批布局避免长任务)、showSymbol:false(不画每个数据点标记)。卸载时必须调用 chart.dispose() 释放实例与事件监听,window resize 时调用 chart.resize() —— 缺了前者会内存泄漏(呼应 1.6),缺了后者图表不随容器伸缩。大数据时还应关闭动画(animationDurationUpdate:0)。
+</details>
+
+<details>
+<summary><b>6. 【进阶】View Transitions 在 React/Vue 路由中怎么接入？DOM 更新回调有什么限制？</b></summary>
+
+在路由导航时包裹 `document.startViewTransition(() => { setRoute(next) / next() })`。DOM 更新回调必须同步完成——不能在里面 await 网络请求,否则浏览器会跳过过渡直接显示最终状态。React 中可用 `useTransition` 包裹 `startViewTransition`,Vue Router 在 `beforeEach` 钩子里包裹。不支持 VT 的浏览器直接执行回调,天然降级。
+</details>
+
+<details>
+<summary><b>7. 【基础】Custom Elements 的四个生命周期回调各在什么时机触发？disconnectedCallback 最容易漏什么？</b></summary>
+
+constructor(实例化,不可访问 DOM/属性)、connectedCallback(插入文档,可读属性/加监听)、disconnectedCallback(移出文档,应清理)、attributeChangedCallback(observedAttributes 中声明的属性变化时)。disconnectedCallback 最容易漏:定时器、事件监听、WebSocket 连接、WebGL context——尤其是"组件可能反复挂/卸"(connectedCallback 不是只执行一次),每次卸载都需彻底清理。
+</details>
+
+<details>
+<summary><b>8. 【进阶】Shadow DOM 内的事件为什么外部收不到？怎么解决？</b></summary>
+
+Shadow DOM 是 DOM 与样式的隔离边界,默认也会隔离事件——事件在 Shadow DOM 内冒泡到 Shadow Root 就停了,不会传到外部 DOM。解决:创建 CustomEvent 时设 `composed: true`(事件穿透 Shadow DOM 边界)+ `bubbles: true`(冒泡到父级)。不加 composed:true,React 的 onChange / Vue 的 @change 永远收不到。
+</details>
+
+<details>
+<summary><b>9. 【进阶】OffscreenCanvas 解决了什么问题？transferControlToOffside 有什么限制？</b></summary>
+
+解决:Canvas 渲染是主线程任务,万级粒子/复杂滤镜会把主线程打满导致 UI 卡顿。OffscreenCanvas + Worker 把渲染搬到 Worker 线程,主线程只收发消息。限制:transferControlToOffscreen 是单向不可逆的——主线程之后不能再获取该 canvas 的 2d 上下文;Worker 中没有 DOM API,所有输入通过 postMessage 传入;rAF 在 Worker 中可用。
+</details>
+
+<details>
+<summary><b>10. 【进阶】声明式 Shadow DOM 解决了什么问题？与 JS attachShadow 有什么冲突？</b></summary>
+
+解决了 WC 的 SSR 问题:传统 attachShadow 需客户端 JS 执行,SSR/无 JS 环境下组件内容不可见。声明式 Shadow DOM 用 &lt;template shadowrootmode="open"&gt; 在 HTML 里直接声明,浏览器解析时自动创建 Shadow DOM,无需 JS。冲突:如果已有声明式 Shadow DOM,JS 中再调 attachShadow 会报"已经挂载"——用 `this.shadowRoot ?? this.attachShadow()` 检测是否已有声明式 root。
+</details>
+
+<details>
+<summary><b>11. 【基础】:has() 选择器和 Container Queries 各替代了什么 JS 操作？</b></summary>
+
+:has() 替代"JS 判断子元素状态后加类名"的操作,如 `form:has(input:invalid) .submit { opacity:.5 }` 替代 `if (form.querySelector('input:invalid')) btn.classList.add('disabled')`。Container Queries 替代"JS 监听窗口大小后调整布局",如 `@container (min-width:300px) { .card { flex-direction:row } }` 替代 ResizeObserver + classList 切换。两者都把"JS 响应式"变成"CSS 声明式"——更高效(浏览器原生)、更可维护。
+</details>
+
+<details>
+<summary><b>12. 【挑战】WASM 的线性内存是什么？JS 与 WASM 间数据传递的"边界穿越"开销怎么最小化？</b></summary>
+
+线性内存是 WASM 的内存模型:一块连续的 ArrayBuffer,JS 和 WASM 共享访问,数据通过指针(偏移量)定位。边界穿越开销:每次 JS→WASM 或 WASM→JS 的数据复制都有开销,逐像素调用 WASM 会因频繁穿越而变慢。最小化:① 用 Transferable(ArrayBuffer)零拷贝传递;② 批量传递整帧数据而非逐元素;③ WASM 跑在 Worker 中,避免阻塞主线程的同时减少跨线程消息次数。
+</details>
+
+---
+
+## 17.6 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| Shadow DOM 样式 | 组件样式被外部覆盖而失控，或想用全局样式直接穿透进组件内部 | Shadow DOM 天然隔离样式；定制外观走 CSS 自定义属性（可穿透），需要精确开口用 `::part()`（呼应 17.3） |
+| Slot 投影 | 父级塞进 slot 的内容样式失效，或拿不到组件内部状态 | 投影内容仍归父级作用域、父级 CSS 生效，用 named slot 明确分工，必要时 `::slotted()` 精准控制 |
+| Shadow DOM 事件 | 组件内部抛的 `CustomEvent` 外部监听不到，React/Vue 监听器毫无反应 | 创建事件时同时设 `composed: true`（穿透边界）与 `bubbles: true`（向上冒泡），二者缺一外部都收不到 |
+| WASM 选型 | 小计算量也硬上 WASM，胶水层穿越开销盖过收益、产物体积还暴涨 | 先 Profiler 确认是纯计算热点、有可复用的 C/Rust 实现、能接受体积增长，三问全过再上（呼应 17.4） |
+| WASM 与 DOM | 想在 WASM 里直接操作 DOM，或逐元素穿越边界做小操作 | WASM 访问不到 DOM；批量传整帧数据、用 Transferable 零拷贝，重活放 Worker，别逐像素调 |
+| Proxy 语义 | 陷阱里手写转发却漏了 `Reflect`，破坏原型链、Receiver 与私有字段语义 | `get`/`set` 等陷阱内统一用 `Reflect.get/set(target, key, receiver)` 转发，保住继承与 this 语义 |
+| 可视化选型 | 数据量涨了仍死守 SVG，或交互密集的场景过早切到 Canvas | 交互多、图元不足 1k 用 SVG（保留模式，天然事件与无障碍）；大量图元或高频动画用 Canvas，超几千节点就降级（呼应 17.2） |
+| 曝光误报 | `IntersectionObserver` 首次 `observe` 会在下一帧立刻回调一次，被当成真实曝光记账 | 回调里校验 `isIntersecting` 与真实可见面积，用 `intersectionRatio` 阈值过滤首帧误报，或跳过首次回调 |

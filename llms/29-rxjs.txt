@@ -1,0 +1,987 @@
+# 第二十九部分：RxJS 响应式编程——从入门到精通（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/29-rxjs
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第二十九部分：RxJS 响应式编程——从入门到精通
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第二十七部分 · 手写前端框架](./27-mini-framework.md)｜下一篇：[第三十部分 · Lodash](./30-lodash.md)｜学习路线：[常用库学习路线](./libraries-learning-path.md)
+>
+> 🧪 实验室：`libraries/packages/rxjs-lab/`｜技术基线（RxJS 7.8 + TypeScript 5.x + Node 24）
+>
+> **本章定位**：RxJS 不是「回调的语法糖」，而是一套描述异步事件流的心智模型。本章按「模型 → 创建 → 组合 → 错误与多播 → 工程落地」五层递进，最后用测试与避坑清单把知识钉死。
+
+---
+
+## 29.1 心智模型与学习路线
+
+### 概念解析
+
+RxJS 的核心不是某个操作符，而是五个角色组成的心智模型：
+
+| 角色 | 一句话职责 | 易错点 |
+| --- | --- | --- |
+| Observable | 描述一条「未来会推送 0~N 个值」的流 | 创建不等于执行，订阅才执行 |
+| Observer | 消费流的三件套 `next` / `error` / `complete` | `error` 与 `complete` 是终态，只会有一个 |
+| Subscription | 订阅的资源句柄 | 不调用 `unsubscribe` 就会一直占用资源 |
+| Operator | 把一条流变换成另一条流的纯函数 | 操作符是惰性的，不订阅就不工作 |
+| Scheduler | 决定「在什么时机、用什么队列」投递 | 默认同步派发，容易误判执行顺序 |
+
+把 Observable 想成「异步版的数组」：数组是已经存在的多个值，Observable 是尚未到来的多个值；数组用 `map` 变换，Observable 用 `pipe` 组合。区别在于 Observable 还多出三件事——**惰性执行、可取消、可错误终止**。
+
+| 能力 | Promise | Observable |
+| --- | --- | --- |
+| 值数量 | 恰好 1 个 | 0~N 个，可无限 |
+| 执行时机 | 创建即执行 | 订阅才执行，可重复订阅 |
+| 取消 | 原生不支持 | `unsubscribe` 沿链路上游传播 |
+| 组合方式 | `then` / `catch` / `finally` | 数十个管道操作符 |
+| 多播 | 多个 `then` 共享同一结果 | 默认冷流，每个订阅者各跑一份 |
+
+**冷流与热流**是第二个必须建立的概念：
+
+- 冷流（cold）：每个订阅者都触发一次独立的生产过程，例如 `of(1, 2, 3)`、`from(fetch(...))`、`interval(1000)`。两个订阅者会拿到两套互不相干的值。
+- 热流（hot）：生产过程独立于订阅者，订阅者只是「接入正在发生的事件」，例如 DOM 事件、WebSocket、`Subject`。晚订阅的人收不到历史消息。
+- `share` / `shareReplay` 的作用就是把冷流转成热流，让多个消费者共享同一次执行结果。
+
+学习路线建议按四步走：第一步只练「创建 + `pipe` + `subscribe` + 取消」，建立流的手感；第二步吃透四个高阶映射操作符，能按业务语义选型；第三步补上错误处理、多播、调度与源码结构；第四步用实验室的确定性测试把行为固化成可回归的断言。不要一上来背操作符清单，先能把一个真实需求拆成「源流 → 变换 → 消费 → 清理」四段，再回查对应操作符。
+
+```typescript
+import { Observable } from 'rxjs';
+
+const countdown$ = new Observable<number>((subscriber) => {
+    let current = 3;
+    const id = setInterval(() => {
+        if (current === 0) {
+            subscriber.complete();
+            return;
+        }
+        subscriber.next(current--);
+    }, 1000);
+
+    // 返回 teardown：取消订阅时自动清理定时器
+    return () => clearInterval(id);
+});
+
+const subscription = countdown$.subscribe({
+    next: (value) => console.log(value),
+    complete: () => console.log('发射完成'),
+});
+
+setTimeout(() => subscription.unsubscribe(), 1500);
+```
+
+`new Observable` 的工厂函数返回的清理函数非常关键：它会在 `complete`、`error` 或手动 `unsubscribe` 时执行，是 RxJS 内存管理的最后一道闸门。
+
+```typescript
+import { BehaviorSubject, Subject } from 'rxjs';
+
+const events$ = new Subject<string>(); // 热流：晚订阅者收不到历史
+const state$ = new BehaviorSubject(0); // 热流 + 回放最近 1 个当前值
+
+const stop = events$.subscribe((event) => console.log('事件', event));
+events$.next('click');
+stop.unsubscribe();
+
+state$.subscribe((count) => console.log('当前计数', count));
+state$.next(1);
+```
+
+`Subject` 同时是 Observable 与 Observer：既能被订阅，又能主动 `next`。这也是「事件总线」最自然的实现基础，但把它当全局状态用时，要特别小心无初始值与订阅时序问题。
+
+### 典型应用场景
+
+- 搜索联想、输入校验、滚动位置等「高频事件流」的节流与切换
+- 多个接口并行加载、任意一个完成后再组合结果
+- WebSocket / SSE 长连接的重连、心跳与消息分发
+- 组件生命周期内的资源自动释放（路由切换、组件卸载）
+- 复杂的重试、超时、降级与缓存策略
+
+### 可运行代码示例
+
+实验室把事件总线封装成了类型安全的工厂：`createTypedBus` 只暴露 `on` / `emit` / `dispose`，底层用 `Subject` + `filter` + `map` + `takeUntil` 完成分发与销毁。
+
+```typescript
+import { createTypedBus } from './libraries/packages/rxjs-lab/src/index.js';
+
+type AppEvents = {
+    login: { userId: string };
+    logout: { userId: string };
+};
+
+const bus = createTypedBus<AppEvents>();
+const subscription = bus.on('login').subscribe(({ userId }) => {
+    console.log('欢迎', userId);
+});
+
+bus.emit('login', { userId: 'u-1' });
+subscription.unsubscribe();
+bus.dispose();
+```
+
+> 实验室验证：`cd libraries && pnpm --filter @fag/rxjs-lab test`
+
+### 最佳实践
+
+- 先问「这条流有几个值、什么时候结束」，再决定用 Promise 还是 Observable；只有一个值且不需要取消时，Promise 更简单。
+- 把「声明流」与「消费流」分开：业务逻辑写在 `pipe` 里，`subscribe` 只留在最外层。
+- 任何无限流都必须有退出条件：`take(n)`、`takeUntil(stop$)`、`first()` 或组件卸载时的 `unsubscribe`。
+- 冷流默认「一订阅一执行」，需要共享结果时显式加 `share` / `shareReplay`，不要靠「大家少订阅一次」来省请求。
+
+### 自测题
+
+<details>
+<summary><b>1. 【基础】Observable 与 Promise 的核心差异有哪些？</b></summary>
+
+Promise 只产出一个值且创建即执行、无法取消；Observable 可产出 0~N 个值、订阅时才执行、可通过 `unsubscribe` 取消，并拥有丰富的组合操作符。因此「一次请求」用 Promise 足够，「持续事件 + 组合 + 取消」才值得上 Observable。
+</details>
+
+<details>
+<summary><b>2. 【进阶】冷流与热流的本质区别是什么？Subject 属于哪一种？</b></summary>
+
+冷流的生产过程由每个订阅者独立触发，因此两次订阅会得到两份互不相干的值；热流的生产过程独立于订阅者，订阅只是接入正在发生的事件，晚订阅者拿不到历史。Subject 是热流且天然多播，所有订阅者共享同一条通道。
+</details>
+
+<details>
+<summary><b>3. 【挑战】请用 Observable、Subscription、Subject 的心智模型解释「订阅里再订阅」为什么容易泄漏。</b></summary>
+
+外层 `subscribe` 创建了一条独立的订阅链，内层 `subscribe` 又创建了另一条，两者之间没有资源关联；取消外层订阅不会自动取消内层，内层若来自 DOM 事件或无限定时器就会一直存活。正确做法是用 `switchMap` / `mergeMap` 把内层流提升为管道的一部分，让一次 `unsubscribe` 沿链路传播到底。
+</details>
+
+---
+
+## 29.2 入门
+
+### 概念解析
+
+入门阶段先掌握「创建流」与「用管道变换流」两件事。常用创建操作符可以按来源归类：
+
+| 来源 | 操作符 | 说明 |
+| --- | --- | --- |
+| 现成值 | `of` / `from` | `of(1, 2, 3)` 逐个同步发射；`from` 接收数组、Promise、迭代器 |
+| 时间 | `interval` / `timer` | 周期发射 / 延迟一次或周期发射 |
+| 事件 | `fromEvent` | 把 DOM、Node EventEmitter 包装成流 |
+| 惰性工厂 | `defer` | 每次订阅时才调用工厂函数 |
+| 空与错误 | `EMPTY` / `throwError` | 立即完成 / 立即报错 |
+| 组合 | `forkJoin` / `combineLatest` | 全部完成后取值 / 任一变化就组合最新值 |
+
+`pipe` 是 RxJS 的组合语法：每个操作符接收上游 Observable 并返回新的 Observable，整条链在订阅前不会执行任何副作用。这也解释了为什么「在 `pipe` 里写 `console.log` 却什么都没打印」——你只是声明了管道，还没订阅。
+
+```typescript
+import { defer, from, fromEvent, interval, of, timer } from 'rxjs';
+import { map, take } from 'rxjs/operators';
+
+const values$ = of(1, 2, 3);
+const fromArray$ = from(['a', 'b']);
+const fromPromise$ = from(Promise.resolve('ok'));
+const lazy$ = defer(() => of(Date.now())); // 每次订阅都重新取时间
+const ticks$ = interval(1000).pipe(take(3), map((index) => index + 1));
+const delayed$ = timer(500);
+
+const button = document.querySelector<HTMLButtonElement>('#save');
+const clicks$ = button ? fromEvent(button, 'click') : of(null);
+```
+
+`forkJoin` 与 `combineLatest` 是入门阶段最容易混的一对：前者像 `Promise.all`，等所有流都完成才发一次；后者要求每个流至少发过一次值，之后任意流更新都会带上其他流的最新值重新发射。
+
+```typescript
+import { combineLatest, forkJoin, of } from 'rxjs';
+import { delay } from 'rxjs/operators';
+
+const user$ = of({ id: 1, name: 'Ada' }).pipe(delay(10));
+const roles$ = of(['admin', 'editor']).pipe(delay(20));
+
+forkJoin({ user: user$, roles: roles$ }).subscribe(({ user, roles }) => {
+    console.log('全部到齐', user, roles);
+});
+
+combineLatest({ user: user$, roles: roles$ }).subscribe(({ user, roles }) => {
+    console.log('任一更新', user, roles);
+});
+```
+
+### 典型应用场景
+
+- 页面初始化时并行拉取用户信息、权限、配置，三者齐了再渲染
+- 把按钮点击、输入框输入、滚动等 DOM 事件流化后再做防抖、节流
+- 轮询接口：`timer(0, 5000)` 配合 `switchMap` 发起请求
+- 把已有 Promise 接入 RxJS 世界：`from(promise)`，但只在「只订阅一次」时安全
+- 组合多个表单字段的实时校验结果
+
+### 可运行代码示例
+
+下面的写法与实验室的 `fetchWithRetry` 等价：用 `defer` 保证每次订阅重新请求，用 `timeout` 限制单次尝试，用 `retry` 做有限次退避重试。
+
+```typescript
+import { defer, from, timer } from 'rxjs';
+import { retry, timeout } from 'rxjs/operators';
+
+function loadUser(id: number) {
+    return defer(() =>
+        from(fetch(`/api/users/${id}`).then((response) => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        })),
+    ).pipe(
+        timeout({ each: 3000 }),
+        retry({ count: 2, delay: (_, attempt) => timer(attempt * 200) }),
+    );
+}
+```
+
+注意 `from(fetch(...))` 是「立即发起请求、再把返回的 Promise 流化」，多个订阅者会复用同一个 Promise，而不是各发一次请求；要「每次订阅都重新请求」必须用 `defer` 包一层。
+
+### 最佳实践
+
+- 单值请求套壳用 `from(promise)` 时，确认只订阅一次；需要重复执行就用 `defer(() => from(factory()))`。
+- `forkJoin` 传入空数组会立即完成且不发射值；`combineLatest` 若某个流始终不发射，整条流也永远不会发射。
+- 创建流时就把错误路径想好：`throwError` 用于测试与分支降级，别让异常在订阅回调里裸奔。
+- 一次性取值优先用 `firstValueFrom` / `lastValueFrom`，避免为了拿一个结果手动 `subscribe`。
+- DOM 事件流不要忘记 `takeUntil` 或 `unsubscribe`，否则组件卸载后监听仍然存在。
+
+### 自测题
+
+<details>
+<summary><b>4. 【基础】`of`、`from`、`defer` 三个创建操作符分别适合什么输入？</b></summary>
+
+`of` 接收若干现成参数并逐个发射；`from` 接收数组、类数组、迭代器、Promise 等可转换来源；`defer` 接收一个工厂函数，在每次订阅时才调用工厂并订阅其返回的 Observable，适合需要「每次订阅都重新执行」的场景。
+</details>
+
+<details>
+<summary><b>5. 【进阶】`forkJoin` 与 `combineLatest` 的行为差异是什么？各举一个典型场景。</b></summary>
+
+`forkJoin` 等所有输入流都完成，只发射一次「各自最后一个值」；任一输入报错则整体报错，空数组会立即完成。`combineLatest` 等每个输入至少发射一次，之后任一输入更新都会组合最新值发射，永不主动等待完成。前者适合并行首屏加载，后者适合多字段联动与实时组合。
+</details>
+
+<details>
+<summary><b>6. 【挑战】为什么 `from(fetch(url))` 在两次订阅时不会发两次请求？如何改成每次订阅都重新请求？</b></summary>
+
+`fetch(url)` 在调用时就已经执行并返回 Promise，`from` 只是把这个已存在的 Promise 转成 Observable，多个订阅者观察的是同一个 Promise，因此只发一次请求。改成 `defer(() => from(fetch(url)))` 后，每次订阅都会调用工厂、重新执行 `fetch`，从而得到真正冷的行为。
+</details>
+
+---
+
+## 29.3 进阶
+
+### 概念解析
+
+进阶的核心是**高阶映射**：源流每发出一个值，就把它映射成一条内层流，再把内层流的结果「压平」回一条流。四个操作符的差异只在于「内层流同时存在几条、是否取消、是否保序」：
+
+| 操作符 | 并发内层流 | 顺序 | 新值到来时 | 典型场景 |
+| --- | --- | --- | --- | --- |
+| `switchMap` | 最多 1 条 | 不保证（只留最新） | 取消旧内层流 | 搜索联想、路由参数、实时预览 |
+| `concatMap` | 1 条 | 严格保序 | 排队等待 | 串行写操作、按序上传 |
+| `mergeMap` | 不限（可配 `concurrent`） | 完成顺序决定 | 并行执行 | 独立任务并行、批量请求 |
+| `exhaustMap` | 1 条 | 忽略新值 | 丢弃新值 | 防重复提交、登录按钮 |
+
+记忆口诀：**要最新用 switch，要顺序用 concat，要并行用 merge，忙时忽略用 exhaust**。选错操作符的后果往往不是报错，而是「请求发出去了但结果被取消」「重复提交了两次」「日志顺序乱了」这类业务事故。
+
+```typescript
+import { fromEvent } from 'rxjs';
+import { debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs/operators';
+
+const input = document.querySelector<HTMLInputElement>('#search');
+
+if (input) {
+    fromEvent(input, 'input')
+        .pipe(
+            map((event) => (event.target as HTMLInputElement).value.trim()),
+            debounceTime(300),
+            distinctUntilChanged(),
+            switchMap((keyword) =>
+                fetch(`/api/search?q=${encodeURIComponent(keyword)}`).then((response) =>
+                    response.json(),
+                ),
+            ),
+        )
+        .subscribe((results) => console.log(results));
+}
+```
+
+这里的 `switchMap` 保证「用户还在打字时，上一次请求的结果被取消」，只让最后一次输入的结果落地。注意 `fetch` 本身不会因为取消订阅而自动中止网络请求，需要把 `AbortSignal` 传进去才算真正取消。
+
+```typescript
+import { from, of } from 'rxjs';
+import { concatMap, delay, map } from 'rxjs/operators';
+
+const steps = ['创建草稿', '上传附件', '提交审核'];
+
+from(steps)
+    .pipe(
+        concatMap((step) => of(`${step} 完成`).pipe(delay(100))),
+        map((message) => `[日志] ${message}`),
+    )
+    .subscribe((line) => console.log(line));
+```
+
+如果这里换成 `mergeMap`，三条日志会几乎同时出现，顺序取决于各自耗时；换成 `switchMap`，前两步会被直接取消，只剩最后一步。写操作必须用 `concatMap`，这不是风格问题，而是正确性问题。
+
+### 典型应用场景
+
+- 搜索框联想：`debounceTime` + `distinctUntilChanged` + `switchMap`
+- 表单连续保存：`concatMap` 保证请求按用户操作顺序落库
+- 批量上传或批量刷新：`mergeMap` 配 `concurrent: 3` 控制并发
+- 登录、支付按钮：`exhaustMap` 在请求未完成时忽略后续点击
+- 路由参数变化后重新取数：`switchMap` 自动取消上一页的数据请求
+
+### 可运行代码示例
+
+实验室的 `latestSwitch` 就是 `switchMap` 的语义封装，专门用来演示「最新值胜出」：
+
+```typescript
+import { Subject, of } from 'rxjs';
+import { delay } from 'rxjs/operators';
+import { latestSwitch } from './libraries/packages/rxjs-lab/src/index.js';
+
+const keyword$ = new Subject<string>();
+
+latestSwitch(keyword$, (keyword) => of(`结果:${keyword}`).pipe(delay(50))).subscribe((result) =>
+    console.log(result),
+);
+
+keyword$.next('rx');
+keyword$.next('rxjs'); // 前一个内层流被取消，只会打印「结果:rxjs」
+```
+
+> 实验室验证：`cd libraries && pnpm --filter @fag/rxjs-lab test`
+
+### 最佳实践
+
+- 输入框、路由参数等「高频且只关心最终值」的源，一律优先 `switchMap`。
+- 写请求、顺序敏感任务用 `concatMap`；用 `switchMap` 做写操作可能中途取消，造成服务端状态不一致。
+- `mergeMap` 必须评估并发规模，给 `concurrent` 设上限，避免瞬间打满连接池。
+- `exhaustMap` 会在忙碌时静默丢弃事件，适合幂等且可提示「处理中」的按钮，不适合必须逐条处理的消息队列。
+- 取消订阅不等于取消底层副作用：HTTP 请求要传 `AbortSignal`，定时器要在 teardown 里清理。
+
+### 自测题
+
+<details>
+<summary><b>7. 【基础】`switchMap`、`concatMap`、`mergeMap`、`exhaustMap` 的核心区别是什么？</b></summary>
+
+四者都是把内层流压平：`switchMap` 只保留最新内层流，新值到来就取消旧的；`concatMap` 严格串行排队；`mergeMap` 并行执行所有内层流；`exhaustMap` 在当前内层流未完成时丢弃新值。区别可归纳为「并发数、是否取消、是否保序」三个维度。
+</details>
+
+<details>
+<summary><b>8. 【进阶】搜索联想、按序保存、批量并行上传、防重复提交分别应该选哪个操作符？</b></summary>
+
+搜索联想用 `switchMap`，只保留最后一次输入的结果；按序保存用 `concatMap`，保证请求按操作顺序串行落库；批量并行上传用 `mergeMap` 并设置 `concurrent` 上限；防重复提交用 `exhaustMap`，请求未完成时忽略新的点击。
+</details>
+
+<details>
+<summary><b>9. 【挑战】用 `switchMap` 提交订单可能造成什么业务问题？如何修正？</b></summary>
+
+用户在请求未完成时再次点击，`switchMap` 会取消前一次订阅，但 HTTP 请求可能已经在服务端执行，于是出现「前端以为取消了、后端却创建了两笔订单」。修正方式是写操作改用 `concatMap` 串行处理，或在 UI 层用 `exhaustMap` 防重复触发，同时给请求带上幂等键。
+</details>
+
+---
+
+## 29.4 精通
+
+### 概念解析
+
+精通阶段要同时处理四件事：**错误、多播、调度、生命周期**。
+
+**错误处理**的关键是位置。`catchError` 只捕获它上游的错误，下游再抛出的错误它管不到；`retry` 必须在 `catchError` 之前才有机会重试；`finalize` 无论成功、失败还是取消都会执行，适合关 loading、释放锁。
+
+```typescript
+import { defer, from, of, timer } from 'rxjs';
+import { catchError, finalize, retry, timeout } from 'rxjs/operators';
+
+const orders$ = defer(() =>
+    from(fetch('/api/orders').then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+    })),
+).pipe(
+    timeout({ each: 3000 }),
+    retry({ count: 2, delay: (_, attempt) => timer(attempt * 200) }),
+    catchError((error) => {
+        console.error('最终失败，走降级', error);
+        return of([]);
+    }),
+    finalize(() => console.log('无论成功失败都会执行')),
+);
+```
+
+**多播**解决「同一条冷流被多个消费者重复执行」的问题。`share()` 等价于「自动 connect 的 Subject + refCount」；`shareReplay({ bufferSize: 1, refCount: true })` 会把最后一个值缓存给后来的订阅者，但引用计数归零后会重新执行源流。把 `refCount` 设为 `false` 虽然能长期缓存，却可能永久持有源流与缓存值，SPA 长驻页面要谨慎。
+
+```typescript
+import { defer, from } from 'rxjs';
+import { shareReplay } from 'rxjs/operators';
+
+const config$ = defer(() => from(fetch('/api/config').then((response) => response.json()))).pipe(
+    shareReplay({ bufferSize: 1, refCount: true }),
+);
+
+config$.subscribe((config) => console.log('组件 A', config));
+config$.subscribe((config) => console.log('组件 B', config)); // 复用同一次请求
+```
+
+**调度器**决定任务进入哪个队列：`queueScheduler` 同步排队（适合递归但怕栈溢出）、`asapScheduler` 走微任务、`asyncScheduler` 走宏任务（`interval`、`timer` 默认使用）。业务代码很少手动指定，但测试必须依赖 `TestScheduler` 的虚拟时钟，否则 `debounceTime(300)` 会让单测真的等 300ms。
+
+```typescript
+import { TestScheduler } from 'rxjs/testing';
+import { debounceTime } from 'rxjs/operators';
+
+const scheduler = new TestScheduler((actual, expected) => {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error('marble 断言失败');
+    }
+});
+
+scheduler.run(({ cold, expectObservable }) => {
+    const source$ = cold('-a--b--c--|', { a: 1, b: 2, c: 3 });
+
+    // 每个 '-' 是一帧；debounceTime(2) 后三个值分别在 3、6、9 帧落地
+    expectObservable(source$.pipe(debounceTime(2))).toBe('---a--b--c-|', {
+        a: 1,
+        b: 2,
+        c: 3,
+    });
+});
+```
+
+**源码结构**可以用一句话串起来：`Observable` 的构造函数保存 `_subscribe`，`subscribe` 时创建 `Subscriber` 并调用它；每个操作符本质上是「接收源 Observable、返回新 Observable」的函数，内部通过 `operate` / `lift` 把 `OperatorSubscriber` 挂到链上。`Subscriber` 既是 Observer 又是 Subscription，内部维护 teardown 集合；`unsubscribe` 从末端逐级向上游调用，这就是取消能传播的原因。自定义操作符时，要么把错误、完成、清理原样转发，要么用 `operate` 让 RxJS 帮你管理订阅关系。
+
+**背压与节流**：RxJS 没有真正的「消费者反向施压」机制，常用手段是 `debounceTime`（静默期后取最后一个）、`throttleTime`（周期内取第一个）、`auditTime`（周期内取最后一个）、`sampleTime`（周期采样）以及 `bufferTime`（聚合成数组）。选择哪一个，取决于你要保留「最新值」「首个值」还是「全部值」。
+
+### 典型应用场景
+
+- 接口失败后的指数退避重试、超时降级与 loading 收尾
+- 配置、字典等低频数据在多个组件间共享缓存
+- 用 marble 测试验证防抖、切换、重试等时间相关逻辑
+- 长列表滚动、拖拽、输入等高频事件的节流采样
+- 封装带自动清理的自定义操作符
+
+### 可运行代码示例
+
+实验室的 `summarizeStream` 用 `scan` 做增量归约、用 `takeLast(1)` 只保留最终摘要，并用 `defaultIfEmpty` 处理空流，避免 `reduce` 的 `EmptyError`：
+
+```typescript
+import { lastValueFrom, of } from 'rxjs';
+import { summarizeStream } from './libraries/packages/rxjs-lab/src/index.js';
+
+const summary = await lastValueFrom(summarizeStream(of(3, 1, 2)));
+console.log(summary); // { count: 3, first: 3, last: 2 }
+```
+
+> 实验室验证：`cd libraries && pnpm --filter @fag/rxjs-lab test`
+
+### 最佳实践
+
+- `catchError` 放在链路的最后一段，只处理你真正能降级的错误；需要重试的逻辑放在它前面。
+- `retry` 永远配上限与退避，禁止无限重试；对 4xx 这类不可恢复错误用 `shouldRetry` 直接短路。
+- `shareReplay` 显式写清 `refCount` 与 `bufferSize`，不要依赖默认值；缓存敏感数据时设置重置策略。
+- 时间相关逻辑全部用 `TestScheduler` 跑 marble 测试，单测里不出现真实等待。
+- 自定义操作符必须转发 `error` 与 `complete`，并在 teardown 中释放自己创建的资源。
+
+### 自测题
+
+<details>
+<summary><b>10. 【基础】`catchError`、`retry`、`finalize` 各自负责什么？</b></summary>
+
+`catchError` 捕获上游错误并返回一条替代流，让链路继续；`retry` 在错误到达下游前重新订阅上游，可配置次数与延迟；`finalize` 在流终止时执行清理，无论终止原因是完成、错误还是取消。三者通常按「retry → catchError → finalize」的顺序组合。
+</details>
+
+<details>
+<summary><b>11. 【进阶】`shareReplay({ bufferSize: 1, refCount: true })` 在最后一个订阅者取消后会发生什么？</b></summary>
+
+`refCount: true` 时引用计数归零会断开与源流的连接，缓存也随之失效；下一次订阅会重新执行源 Observable。这能避免长驻缓存泄漏，但意味着「组件全部卸载后再回来」会重新发请求。若需要跨路由长期缓存，应显式设计缓存生命周期，而不是把 `refCount` 改成 `false` 了事。
+</details>
+
+<details>
+<summary><b>12. 【挑战】从源码结构角度解释：为什么 `unsubscribe` 能取消整条操作符链？自定义操作符要注意什么？</b></summary>
+
+`Observable.subscribe` 会创建 `Subscriber`，每个操作符返回的新 Observable 在订阅时会把下游 `Subscriber` 与上游 `Subscriber` 通过 `operate` 连接起来，形成一条订阅链；每个 `Subscriber` 都持有 teardown 集合。末端 `unsubscribe` 会先执行自身 teardown，再逐级调用上游的 `unsubscribe`，因此定时器、事件监听与内层流都会被清理。自定义操作符必须把 `next` / `error` / `complete` 正确转发给下游，并在 teardown 中释放自己创建的资源，否则取消会在这一环断掉。
+</details>
+
+---
+
+## 29.5 实战
+
+### 概念解析
+
+框架集成的核心只有一句：**把订阅的生命周期绑定到视图的生命周期**。React 在 `useEffect` 的清理函数里取消订阅；Vue 在 `onBeforeUnmount` 或 `effectScope` 里取消；SSR 阶段不要在渲染函数里订阅，否则服务端会留下悬挂的流。
+
+```tsx
+import { useEffect, useState } from 'react';
+import { fromEvent } from 'rxjs';
+import { debounceTime, map } from 'rxjs/operators';
+
+export function SearchBox() {
+    const [keyword, setKeyword] = useState('');
+
+    useEffect(() => {
+        const input = document.querySelector<HTMLInputElement>('#search');
+        if (!input) return;
+
+        const subscription = fromEvent(input, 'input')
+            .pipe(
+                debounceTime(300),
+                map((event) => (event.target as HTMLInputElement).value),
+            )
+            .subscribe(setKeyword);
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    return <p>当前输入：{keyword}</p>;
+}
+```
+
+```typescript
+import { onBeforeUnmount, ref, watch } from 'vue';
+import { Subject } from 'rxjs';
+import { debounceTime, switchMap } from 'rxjs/operators';
+
+export function useSearch() {
+    const keyword = ref('');
+    const results = ref<string[]>([]);
+    const keyword$ = new Subject<string>();
+
+    const subscription = keyword$
+        .pipe(
+            debounceTime(300),
+            switchMap((value) =>
+                fetch(`/api/search?q=${encodeURIComponent(value)}`).then((response) =>
+                    response.json(),
+                ),
+            ),
+        )
+        .subscribe((data: string[]) => {
+            results.value = data;
+        });
+
+    watch(keyword, (value) => keyword$.next(value));
+    onBeforeUnmount(() => {
+        subscription.unsubscribe();
+        keyword$.complete();
+    });
+
+    return { keyword, results };
+}
+```
+
+最常见的反模式是「订阅里再订阅」，它让取消链路断裂；正确姿势是用高阶映射把两条流合成一条：
+
+```typescript
+import { of } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
+
+const source$ = of(1, 2);
+const loadDetail = (id: number) => of(`详情 ${id}`);
+
+// 反模式：两个独立的 Subscription，取消外层不会取消内层
+source$.subscribe((id) => {
+    loadDetail(id).subscribe((detail) => console.log(detail));
+});
+
+// 正确：一条链、一次取消
+source$.pipe(switchMap((id) => loadDetail(id))).subscribe((detail) => console.log(detail));
+```
+
+另一个高频场景是「用事件总线解耦模块」，但总线本身不应该承担状态管理职责。需要「当前值」时用 `BehaviorSubject`，需要「历史回放」时用 `ReplaySubject`，纯通知才用 `Subject`。
+
+### 典型应用场景
+
+- 搜索框、筛选器、表格分页的请求编排
+- WebSocket 消息分发与断线重连
+- 全局错误提示、登录态变化等跨模块通知
+- 表单字段联动校验与异步唯一性检查
+- 埋点、快捷键、拖拽等 UI 事件流
+
+### 可运行代码示例
+
+把事件总线与生命周期收集组合起来，可以实现「从登录到登出期间的会话事件留痕」：
+
+```typescript
+import { lastValueFrom } from 'rxjs';
+import {
+    collectUntil,
+    createTypedBus,
+} from './libraries/packages/rxjs-lab/src/index.js';
+
+type SessionEvents = {
+    login: { userId: string };
+    logout: { userId: string };
+};
+
+const bus = createTypedBus<SessionEvents>();
+const sessionEvents = lastValueFrom(collectUntil(bus.on('login'), bus.on('logout')));
+
+bus.emit('login', { userId: 'u-1' });
+bus.emit('login', { userId: 'u-2' });
+bus.emit('logout', { userId: 'u-2' });
+
+sessionEvents.then((events) => console.log(events));
+bus.dispose();
+```
+
+> 实验室验证：`cd libraries && pnpm --filter @fag/rxjs-lab test`
+
+### 最佳实践
+
+- 在框架层封装 `useObservable` / `useSubscription`，把取消订阅变成默认行为，而不是每个组件各写一遍。
+- 组件只订阅「已经处理好错误」的流；错误边界与降级在数据层完成，避免 UI 层收到裸错误。
+- 不要用 `Subject` 模拟全局 store；需要状态就用 `BehaviorSubject` 并配只读选择器，避免任意模块都能 `next`。
+- WebSocket / SSE 断线重连用 `retry` + 退避 + `catchError`，并在重连成功后重新订阅消息流。
+- SSR 场景下所有订阅都必须是有限的，或在请求结束前用 `takeUntil` 主动收尾。
+
+### 自测题
+
+<details>
+<summary><b>13. 【基础】React 中为什么必须在 `useEffect` 的清理函数里取消订阅？</b></summary>
+
+组件卸载或依赖变化时，`useEffect` 会重新执行，旧订阅若不取消就会继续持有 DOM 引用、定时器和闭包，造成内存泄漏与「已卸载组件仍在 setState」。把 `subscription.unsubscribe()` 放进返回的清理函数，可以保证订阅与视图生命周期一一对应。
+</details>
+
+<details>
+<summary><b>14. 【进阶】一个 SPA 页面越用越卡，怀疑是 RxJS 泄漏，你会如何定位？</b></summary>
+
+先检查所有无限流（`interval`、`fromEvent`、WebSocket、`Subject`）是否有 `takeUntil` 或 `unsubscribe`；再用 DevTools 的 Performance/Memory 面板观察监听器与定时器数量是否随路由切换增长；最后在关键流上加 `finalize` 日志，确认组件卸载时是否真的触发清理。常见根因是「订阅里再订阅」与「共享服务里创建的 Subject 从不 complete」。
+</details>
+
+<details>
+<summary><b>15. 【挑战】设计一个 WebSocket 消息流：断线要指数退避重连，重连后只保留最新一条连接，页面卸载要全部清理。你会怎么组合操作符？</b></summary>
+
+用 `defer` 包住「创建 WebSocket 并返回消息 Observable」，失败时用 `retry({ delay: (_, n) => timer(2 ** n * 500) })` 做指数退避；外层用 `switchMap` 保证重连时旧连接被取消；用 `takeUntil(destroy$)` 绑定页面生命周期，`finalize` 里关闭 socket。若需要心跳，可在连接内部用 `interval` 发送 ping，并同样挂到 `takeUntil` 上。
+</details>
+
+### 实战案例：草稿自动保存
+
+在线文档编辑器要把用户输入的草稿定期同步到服务端，防止刷新或断网丢内容。保存触发频率高、单次耗时不可控，界面还需要反馈「保存中 / 已保存 / 失败」三种状态。组件卸载时必须把整条保存流收口，否则会出现「页面已经没了、订阅还在写状态」的泄漏。
+
+```typescript
+import { Subject } from 'rxjs';
+import { debounceTime, switchMap, tap } from 'rxjs/operators';
+
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed';
+
+function createAutoSave(
+    saveDraft: (draft: string) => Promise<void>,
+    onStatus: (status: SaveStatus) => void,
+) {
+    const input$ = new Subject<string>();
+
+    const subscription = input$.pipe(
+        debounceTime(800),
+        tap(() => onStatus('saving')),
+        switchMap((draft) =>
+            saveDraft(draft).then(
+                () => 'saved' as SaveStatus,
+                () => 'failed' as SaveStatus,
+            ),
+        ),
+    ).subscribe(onStatus);
+
+    return {
+        push: (draft: string) => input$.next(draft),
+        destroy: () => {
+            subscription.unsubscribe();
+            input$.complete();
+        },
+    };
+}
+```
+
+实现要点与取舍：
+
+- `debounceTime` 放在管道最前面：停止输入 800ms 才触发一次保存，而不是每个按键都打接口。副作用是「保存中」也要等静默期结束才亮起；想让用户「输入即看到待保存提示」，需要在 `push` 里额外发一次状态。
+- `switchMap` 的语义是「只保存最新草稿」：新输入到来时旧保存被放弃。草稿场景可以接受，但如果每次保存都不允许丢弃（例如按次计费的审计日志），要换成 `concatMap` 排队。
+- 踩坑点：`saveDraft` 失败若直接抛错，`switchMap` 的内层流会 `error` 并终结整条外层流——之后用户再怎么输入都不会再保存，界面永远停在「保存中」。必须像上面这样把失败转换成 `failed` 状态值。
+- `destroy` 里同时做 `unsubscribe` 与 `complete`：前者断开下游消费，后者保证上游不再接收新输入，两者缺一都可能在组件卸载后继续写状态。
+
+### 实战案例：WebSocket 心跳与自动重连
+
+行情推送、协作光标这类页面依赖 WebSocket 长连接，而连接会因为网络切换、网关空闲回收等原因静默断开。需要心跳保活、断线指数退避重连，并把不同 `type` 的消息分流给各自的业务模块。整条流还要随页面卸载统一收口，避免销毁后仍尝试重连。
+
+```typescript
+import { Subject, defer, interval, timer } from 'rxjs';
+import { filter, finalize, map, retry, share, takeUntil } from 'rxjs/operators';
+import { webSocket } from 'rxjs/webSocket';
+
+type ServerMessage = { type: 'tick' | 'notice'; payload: unknown };
+type ClientMessage = { type: 'ping' };
+
+function createRealtimeChannel(url: string, destroy$: Subject<void>) {
+    // defer 让每次重连都新建连接；retry 负责指数退避并封顶 15 秒
+    const source$ = defer(() => {
+        const socket = webSocket<ServerMessage | ClientMessage>(url);
+        const heartbeat = interval(15000).subscribe(() => socket.next({ type: 'ping' }));
+        // 断线时 socket 以 error 终结，finalize 保证心跳定时器随之停止
+        return socket.pipe(finalize(() => heartbeat.unsubscribe()));
+    }).pipe(
+        retry({ delay: (_, attempt) => timer(Math.min(2 ** attempt * 500, 15000)) }),
+        takeUntil(destroy$),
+        share(),
+    );
+
+    const pick = (type: 'tick' | 'notice') =>
+        source$.pipe(
+            filter((m): m is ServerMessage => m.type === type),
+            map((m) => m.payload),
+        );
+
+    return { ticks$: pick('tick'), notices$: pick('notice') };
+}
+```
+
+实现要点与取舍：
+
+- `share()` 必须放在 `retry` 与 `takeUntil` 之后：`ticks$` / `notices$` 的多个订阅者复用同一条 WebSocket；若放在 `retry` 之前，每个订阅者会各自重连、各自心跳，服务端会看到连接数暴涨。
+- 心跳借用 `socket` 这个 Subject 的双向能力直接 `next`，不必把上行流合并进下行流；`interval` 的订阅在 `finalize` 里清理，断线、重连、页面卸载三条路径都会停表。
+- 踩坑点：`webSocket` 断开时是以 `error` 终结流而不是 `complete`；如果忘了 `retry`，一次网络抖动就会让页面从此「静默失联」——不报错、只是再也收不到消息。
+- 退避必须封顶（`Math.min(..., 15000)`）：`2 ** attempt` 在十几次重连后会变成天文数字，`timer` 拿到非法延迟直接抛错。
+- 与自测题 15 提到的「外层 `switchMap` 切换连接」相比，这里用 `defer` + `retry` 把重连收进一条流里，语义等价但少一层嵌套；消息量大的场景可进一步用 `multiplex` 按需订阅子通道。
+
+### 实战案例：批量聚合上传
+
+埋点上报、收藏同步这类场景事件零散产生，逐条请求既慢又浪费连接。目标是把事件攒成批（攒满条数或超时就算一批）、限制并发上传数，单批失败自动重试，重试仍失败也不许拖垮整条上传流。
+
+```typescript
+import { Subject, from, of, timer } from 'rxjs';
+import { bufferTime, catchError, filter, mergeMap, retry } from 'rxjs/operators';
+
+interface TrackEvent {
+    name: string;
+    props: Record<string, unknown>;
+}
+
+function createBatchUploader(upload: (batch: TrackEvent[]) => Promise<void>) {
+    const events$ = new Subject<TrackEvent>();
+
+    events$.pipe(
+        // 最长攒 3 秒或攒满 20 条就 flush 一批
+        bufferTime(3000, null, 20),
+        filter((batch) => batch.length > 0),
+        mergeMap(
+            (batch) => from(upload(batch)).pipe(
+                retry({ count: 2, delay: () => timer(1000) }),
+                catchError(() => {
+                    console.warn('批次上传失败，已丢弃', batch.length, '条');
+                    return of(null);
+                }),
+            ),
+            3,
+        ),
+    ).subscribe();
+
+    return (event: TrackEvent) => events$.next(event);
+}
+```
+
+实现要点与取舍：
+
+- `bufferTime(3000, null, 20)` 一个操作符同时表达「超时 flush」与「攒满 flush」：第二参传 `null` 表示缓冲窗口按 `bufferTimeSpan` 周期重建；若只按条数攒，`bufferCount(20)` 更直白。
+- 踩坑点：`bufferTime` 即便窗口内没有事件，也会在周期到点时 flush 出空数组，不 `filter` 长度就会周期性发出空气请求，服务端日志里全是无意义调用。
+- `mergeMap` 的第三参 `3` 是并发生命线：上游一旦积压，没有上限就会瞬间发出几十个请求打满连接池，与「攒批降负载」的初衷背道而驰。
+- `retry` 重试的是「整批」：服务端必须按幂等键去重，否则「一半成功 + 整批重试」会造成重复上报；对丢失敏感的上报可改为失败后把事件重新 `next` 回 `events$` 排队。
+- 页面关闭时缓冲区里未 flush 的事件会丢，可在 `beforeunload` 里把残余事件用 `navigator.sendBeacon` 兜底发出。
+
+### 实战案例：拖拽动画
+
+自定义滑块需要跟手拖拽，`pointermove` 的触发频率与屏幕刷新率无关，直接在事件回调里写样式可能出现一帧内多次重排或丢帧。用 `animationFrames` 建立与浏览器渲染同步的帧循环，每帧读取最新指针位置再写一次样式，指针抬起即停。
+
+```typescript
+import { animationFrames, fromEvent } from 'rxjs';
+import { map, startWith, switchMap, takeUntil, withLatestFrom } from 'rxjs/operators';
+
+function makeDraggable(track: HTMLElement, onProgress: (ratio: number) => void) {
+    const pointerUp$ = fromEvent(track, 'pointerup');
+
+    fromEvent<PointerEvent>(track, 'pointerdown')
+        .pipe(
+            switchMap((down) => {
+                const rect = track.getBoundingClientRect();
+                const pointerX$ = fromEvent<PointerEvent>(track, 'pointermove').pipe(
+                    map((move) => move.clientX),
+                    startWith(down.clientX),
+                );
+
+                // 以渲染帧为主时钟：每帧取一次最新指针位置，只写一次样式
+                return animationFrames().pipe(
+                    withLatestFrom(pointerX$),
+                    map(([, x]) => Math.min(Math.max((x - rect.left) / (rect.width || 1), 0), 1)),
+                    takeUntil(pointerUp$),
+                );
+            }),
+        )
+        .subscribe(onProgress);
+}
+```
+
+实现要点与取舍：
+
+- `withLatestFrom` 是这里的灵魂：`animationFrames()` 当主时钟（每帧一次），`pointermove` 高频更新只被「读取」而不「触发」下游；若反过来用 `combineLatest`，下游发射频率又会被 `pointermove` 拉高，帧率控制形同虚设。
+- `switchMap` 保证再次按下时旧的帧循环被取消；`takeUntil(pointerUp$)` 挂在 `animationFrames` 那条内层流上，抬起即停，整条内层流（含 `pointermove` 监听）随 `switchMap` 的 teardown 一并清理。
+- 踩坑点：`getBoundingClientRect` 在 `pointerdown` 时缓存一次，绝不能搬进帧循环——每帧读布局会触发强制回流，拖拽立刻卡顿。
+- `rect.width || 1` 防除零：隐藏状态下的元素宽度为 0，不做保护会得到 `NaN`，样式写入直接失效。
+- 触屏要处理 `pointercancel`（来电、手势抢占），可把它与 `pointerup` 用 `merge` 合成同一条「结束流」；指针移出元素还需配合 `setPointerCapture`。
+
+### 进阶技巧：手写自定义操作符
+
+```typescript
+import { type Observable } from 'rxjs';
+import { tap } from 'rxjs/operators';
+
+// 返回「接收源流、返回新流」的纯函数，与内置操作符同构
+function logProgress<T>(label: string): (source: Observable<T>) => Observable<T> {
+    return (source) =>
+        source.pipe(
+            tap({
+                subscribe: () => console.log(`[${label}] 被订阅`),
+                next: (value) => console.log(`[${label}]`, value),
+                error: (error) => console.error(`[${label}] 出错`, error),
+                complete: () => console.log(`[${label}] 完成`),
+                unsubscribe: () => console.log(`[${label}] 被取消`),
+            }),
+        );
+}
+
+// 用法与内置操作符一致：stream$.pipe(logProgress('搜索'), debounceTime(300))
+```
+
+- 自定义操作符就是 `(source: Observable<T>) => Observable<R>` 的纯函数：需要配置时包一层工厂，`pipe` 对「内置」与「手写」一视同仁，因为它只认函数签名。
+- 内部用现有操作符组合实现，不要绕过 `pipe` 手搓 `Subscriber`：组合式实现自动继承取消传播、错误转发与调度语义。
+- 踩坑点：在自定义操作符里手动 `subscribe` 是最常见的错误——手动订阅创建了一条独立订阅链，下游 `unsubscribe` 传不进来，清理与生命周期全部断裂，marble 测试也无法控制其时序。正确姿势是让返回的新 Observable 建立在 `source.pipe(...)` 之上，把订阅时机交给链路。
+- `tap` 的 Observer 形式额外提供 `subscribe` / `unsubscribe` 钩子，覆盖了普通 `next` 回调够不着的「订阅即发生」与「取消才发生」两个时机。
+- 调试操作符定位完问题就该移除，或用环境变量包住，避免生产环境日志量失控。
+
+### 进阶技巧：用 TestScheduler 验证时间行为
+
+29.4 已经用 `cold` 验证过 `debounceTime`，这里补上 `hot` 流与多流组合的断言，并给出 marble 语法速查。
+
+```typescript
+import { combineLatest } from 'rxjs';
+import { map } from 'rxjs/operators';
+import { TestScheduler } from 'rxjs/testing';
+
+const scheduler = new TestScheduler((actual, expected) => {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error('marble 断言失败');
+    }
+});
+
+scheduler.run(({ cold, hot, expectObservable }) => {
+    // a 在第 1、6 帧发射，第 12 帧完成；b 在第 2、5 帧发射，第 9 帧完成
+    const a$ = hot('-a----a-----|', { a: 1 });
+    const b$ = cold('--b--b---|', { b: 'x' });
+
+    // 期待：第 2、5、6 帧各组合发射一次，第 12 帧整体完成
+    expectObservable(
+        combineLatest([a$, b$]).pipe(map(([a, b]) => `${a}${b}`)),
+    ).toBe('--r--rr-----|', { r: '1x' });
+});
+```
+
+- `-` 是一帧虚拟时间（`scheduler.run` 内默认 1 帧 = 1ms）；空格仅为多流对齐，不计时间。
+- 字母与数字是发射点，具体值通过第二个参数的映射对象给出；`#` 表示 error，`|` 表示 complete。
+- `(abc)` 表示同一帧内连续发射多个值，适合「同帧多事件」的断言。
+- hot 流用 `^` 标记「被订阅时」的基准点，`^` 之前的 `-` 表示订阅前已流逝的时间；cold 流每次订阅从零帧开始，没有这个概念。
+- `expectObservable(stream, '^--!').toBe(...)` 的第二个 marble 断言「订阅从第 0 帧开始、第 3 帧取消」，验证取消行为全靠它。
+
+### 进阶技巧：调度器选型
+
+```typescript
+import { animationFrameScheduler, asyncScheduler, fromEvent, queueScheduler } from 'rxjs';
+import { observeOn } from 'rxjs/operators';
+
+// 高频 UI：把下游投递对齐到渲染帧，一帧内的多次 pointermove 只执行一次回调
+fromEvent<PointerEvent>(window, 'pointermove')
+    .pipe(observeOn(animationFrameScheduler))
+    .subscribe((event) => console.log('本帧最后一次坐标', event.clientX));
+
+// 宏任务定时：timer / interval 默认就由 asyncScheduler 驱动
+asyncScheduler.schedule(() => console.log('1 秒后执行'), 1000);
+
+// 同步队列：递归调度在队列里展开，而不是压进调用栈
+queueScheduler.schedule(function tick(state: number) {
+    if (state > 0) {
+        console.log(state);
+        this.schedule(state - 1);
+    }
+}, 0, 3);
+```
+
+- `asyncScheduler` 是时间类操作符的默认引擎（`interval`、`timer`、`debounceTime` 底层都用它，走宏任务）；想让回调「下一轮事件循环」再跑，用它而不是裸 `setTimeout`，这样测试时可被 `TestScheduler` 接管。
+- `asapScheduler` 走微任务，适合「本轮同步代码结束后尽快执行」，比 `asyncScheduler` 早一拍；不要拿它做 UI 渲染节流，那不是它的职责。
+- `queueScheduler` 同步排队：普通调用下任务立即执行，递归调度时自动改为队列展开，防止 `RangeError: Maximum call stack size exceeded`。
+- `animationFrameScheduler` 与渲染帧对齐并天然丢弃同帧多余投递，是拖拽、滚动跟随等 DOM 写入的首选；页面切后台时 `requestAnimationFrame` 暂停，任务顺延到回前台后执行。
+- `observeOn` 决定「它之后」的投递时机：只放在贴近 UI 更新的那一段，整条链都加只会白白延迟数据。
+
+---
+
+## 29.6 综合自测题
+
+<details>
+<summary><b>16. 【基础】两个组件各自订阅同一个 `defer(() => from(fetch(...)))`，会发几次请求？如何只发一次？</b></summary>
+
+会发两次：`defer` 是冷流，每个订阅都会重新执行工厂并调用 `fetch`。若希望共享一次请求，在管道末尾加 `shareReplay({ bufferSize: 1, refCount: true })`，让两个组件共享同一次执行结果；同时要接受「最后一个订阅取消后缓存失效」的语义。
+</details>
+
+<details>
+<summary><b>17. 【进阶】提交表单按钮用 `switchMap` 为什么可能产生重复订单？`exhaustMap` 和 `concatMap` 分别如何解决？</b></summary>
+
+`switchMap` 会取消上一次订阅，但已发出的 HTTP 请求未必能在服务端取消，于是用户连点两次就可能创建两笔订单。`exhaustMap` 在请求未完成时直接丢弃新的点击，从入口防重复；`concatMap` 则把第二次点击排队，等第一次完成后再发，二者都避免了并发提交，但业务语义不同。
+</details>
+
+<details>
+<summary><b>18. 【挑战】写出一个带指数退避与随机抖动的重试管道（最多 4 次），并说明抖动的作用。</b></summary>
+
+```typescript
+import { timer, throwError, type Observable } from 'rxjs';
+import { retry } from 'rxjs/operators';
+
+function withBackoff<T>(source: Observable<T>, maxRetries = 4): Observable<T> {
+    return source.pipe(
+        retry({
+            count: maxRetries,
+            delay: (error, attempt) => {
+                if (attempt > maxRetries) return throwError(() => error);
+                const base = 2 ** attempt * 200;
+                const jitter = Math.random() * 100;
+                return timer(base + jitter);
+            },
+        }),
+    );
+}
+```
+
+抖动让大量客户端不会在同一毫秒一起重试，避免「服务刚恢复又被重试风暴打挂」。`delay` 回调既是等待策略也是最后一次短路点，配合 `catchError` 才能把最终错误交给业务降级。
+</details>
+
+<details>
+<summary><b>19. 【挑战】设计 marble 测试验证「连续输入时只保留最后一次请求结果」，写出关键断言思路。</b></summary>
+
+用 `TestScheduler` 构造一条 `cold` 输入流，在虚拟时间上连续发出多个值；用 `switchMap` 映射成不同延迟的 `cold` 内层流，让早期的内层流晚于后续内层流完成；断言最终输出只包含最后一个输入对应的结果，且早期内层流的订阅已被取消。整个过程不出现真实等待，帧数完全可控，失败时 marble 图能直接指出时间点。
+</details>
+
+<details>
+<summary><b>20. 【进阶】`catchError` 放在 `retry` 之前和之后，行为有什么区别？</b></summary>
+
+放在 `retry` 之前：错误先被 `catchError` 转成替代流，`retry` 看不到错误，不会重试。放在 `retry` 之后：`retry` 先获得重试机会，次数耗尽后才把最终错误交给 `catchError` 降级。因此「先重试、后兜底」的顺序才是正确的，把 `catchError` 写在前面会静默吞掉重试。
+</details>
+
+---
+
+## 29.7 本章避坑清单
+
+| 坑 | 后果 | 避法 |
+| --- | --- | --- |
+| 只 `subscribe` 不 `unsubscribe` | 定时器、DOM 监听与闭包长期驻留，SPA 越用越卡 | 用 `takeUntil(destroy$)` 或组件清理钩子统一取消 |
+| 订阅里再订阅 | 取消外层无法取消内层，资源泄漏且错误难追踪 | 用 `switchMap` / `concatMap` / `mergeMap` 压平成一条链 |
+| 搜索用 `mergeMap` | 旧请求晚到会覆盖新结果，列表闪烁 | 搜索联想一律 `switchMap` + `debounceTime` + `distinctUntilChanged` |
+| 写请求用 `switchMap` | 中途取消但服务端已执行，产生重复订单 | 写操作改用 `concatMap`，入口用 `exhaustMap` 防连点 |
+| 无限重试 | 下游故障时把服务打垮，形成重试风暴 | `retry` 设上限、加指数退避与随机抖动 |
+| `catchError` 放错位置 | 错误被提前吞掉，`retry` 永远不触发 | 顺序固定为 `retry` → `catchError` → `finalize` |
+| 每个组件各订阅一次冷请求 | 同一份配置被重复请求多次 | 管道末尾加 `shareReplay`，明确缓存与重置策略 |
+| `shareReplay` 不写 `refCount` | 长驻缓存持有源流与大数据，难以回收 | 显式声明 `refCount` 与 `bufferSize`，按业务设计缓存生命周期 |
+| 把 `Subject` 当全局状态 | 新订阅者拿不到当前值，状态时序错乱 | 当前值用 `BehaviorSubject`，历史回放用 `ReplaySubject` |
+| 在 `subscribe` 回调里抛错 | 错误逃出流体系，`catchError` 接不住 | 用 `throwError` 或在管道内 `map` 时抛出 |
+| 用 `setTimeout` 手写防抖 | 清理遗漏、时序与测试都难保证 | 用 `debounceTime` / `throttleTime`，测试用 `TestScheduler` |
+| 单测里真实等待 300ms | 测试慢且偶发失败 | 用 marble 测试的虚拟时间，不依赖真实时钟 |
+| 忘记清理 DOM 事件流 | 组件卸载后事件仍在触发 | `fromEvent` 订阅必须挂 `takeUntil` 或手动取消 |
+| 自定义操作符不转发错误 | 下游收不到 `error`，链路静默卡死 | 完整转发 `next` / `error` / `complete` 并实现 teardown |
+| SSR 中订阅无限流 | 服务端请求悬挂，渲染超时 | 所有流必须有限，或在渲染结束前 `takeUntil` 收尾 |
+
+---
+
+> **学习建议**：先把手感建立在「创建 → 管道 → 取消」三件事上，再逐个吃透四个高阶映射操作符的差异。遇到异步 bug 时，先画出「谁订阅、谁取消、谁共享」三张图，大多数问题会在画图阶段暴露。最后用实验室的确定性测试兜底——能写进 marble 的行为，才是真正掌握的行为。

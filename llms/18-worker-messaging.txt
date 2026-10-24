@@ -1,0 +1,2610 @@
+# 第十八部分：Worker 家族与跨标签页通信（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/18-worker-messaging
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第十八部分：Worker 家族与跨标签页通信
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[Web 新能力与可视化](./17-web-platform.md)｜下一篇：[常用业务功能代码片段](./19-business-snippets.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-18" target="_blank" rel="noopener">EP.18《Worker 家族与跨 Tab》</a>
+
+## 本部分内容
+
+> 一份围绕"**多线程 / 多上下文 / 多标签页通信**"主题的 JavaScript 高级知识点系统文档。
+> 覆盖：浏览器并发模型、DedicatedWorker（Web Worker）、SharedWorker、ServiceWorker、MessageChannel、跨 Tab 通信全方案、综合实战与坑点清单。
+>
+> **阅读约定**：
+> - 示例以 TypeScript 为主，标注 `[浏览器]` 的代码需在页面 / Worker 环境中运行（Node 环境无 DOM、无 ServiceWorker）；
+> - ⚠️ 表示常见坑，✅ 表示推荐写法，❌ 表示反例；
+> - 技术基线：Chrome/Edge 120+、Firefox 120+、Safari 16.4+（2024 年后主流版本）。
+
+## 目录
+
+- [模块一：浏览器并发模型基础](#模块一-浏览器并发模型基础)
+- [模块二：DedicatedWorker（Web Worker）详解](#模块二-dedicatedworker-web-worker-详解)
+- [模块三：SharedWorker 共享线程详解](#模块三-sharedworker-共享线程详解)
+- [模块四：MessageChannel / MessagePort 端口通信](#模块四-messagechannel-messageport-端口通信)
+- [模块五：ServiceWorker 详解](#模块五-serviceworker-详解)
+- [模块六：跨 Tab / 窗口通信全方案](#模块六-跨-tab-窗口通信全方案)
+- [模块七：综合实战](#模块七-综合实战)
+- [模块八：Worklet 家族（Paint / Animation / Audio）](#模块八-worklet-家族-paint-animation-audio)
+- [模块九：框架与构建工具集成](#模块九-框架与构建工具集成)
+- [模块十：坑点速查、调试与自测](#模块十-坑点速查、调试与自测)
+
+---
+
+# 模块一：浏览器并发模型基础
+
+理解 Worker 之前，必须先搞清楚"JavaScript 单线程"到底是哪个层面的结论。
+
+## 1.1 浏览器的多进程架构
+
+现代浏览器是**多进程**应用（以 Chrome 为代表）：
+
+| 进程 | 数量 | 职责 |
+| ---- | ---- | ---- |
+| 浏览器主进程（Browser Process） | 1 | 界面、标签页管理、前进后退、网络请求派发、文件 I/O |
+| 渲染进程（Renderer Process） | 默认每个站点一个（Site Isolation） | 页面渲染、JS 执行、事件循环——我们写的前端代码几乎都运行在这里 |
+| GPU 进程 | 1 | 光栅化、合成、WebGL/Canvas GPU 指令 |
+| 网络进程 / 音频进程 / 实用进程 | 若干 | 网络服务、沙箱工具进程等 |
+
+关键点：**同一个渲染进程内可以有多个标签页**（同站点、同一 Browsing Instance 的页面往往共享渲染进程），而一个渲染进程内部包含多个线程：
+
+- **主线程（Main Thread）**：运行 JS、操作 DOM、执行样式计算 / 布局（Layout）/ 绘制（Paint）的大部分工作；
+- **合成线程、光栅线程**：处理图层合成与位图光栅化；
+- **Worker 线程**：DedicatedWorker、SharedWorker 都运行在渲染进程内的独立线程上；
+- **ServiceWorker 线程**：由浏览器统一管理，独立于任何页面的线程。
+
+## 1.2 "JS 单线程"的准确含义
+
+- 一个**执行上下文（Realm）**内，JS 代码永远只有一份调用栈，同一时刻只做一件事；
+- 但**一个页面可以同时存在多个执行上下文**：主线程 + N 个 Worker，每个上下文都有**独立的 V8 Isolate、独立的堆内存、独立的事件循环**，由操作系统调度到不同 CPU 核心真正并行执行；
+- Worker 与主线程之间**不共享堆内存**（SharedArrayBuffer 除外），只能通过消息传递（message passing）交换数据。
+
+这与其他语言"共享内存 + 锁"的多线程模型截然不同，从根源上避免了 DOM 数据竞争——DOM 只能被主线程访问。
+
+## 1.3 事件循环回顾（Worker 也有自己的事件循环）
+
+每个 Worker 内部都有一套独立的事件循环：
+
+1. 从**任务队列（宏任务 Task）**取一个任务执行：脚本求值、`setTimeout` 回调、`postMessage` 到达的消息、fetch 回调等；
+2. 清空**微任务队列（Microtask）**：`Promise.then`、`queueMicrotask`、`MutationObserver`（Worker 中无 DOM，故无后者）；
+3. 必要时渲染（Worker 线程没有渲染步骤）；
+4. 重复。
+
+⚠️ 重要推论：
+
+- 主线程向 Worker `postMessage`，**接收回调一定是异步的**（排在接收方事件循环的任务队列里），不存在"发完立刻收到"；
+- Worker 里写 `while(true)` 同样会卡死**该 Worker 自己**，但主线程依然流畅；
+- Worker 里的 `Promise` 微任务不会跨线程插队，只在自己的循环里消化。
+
+## 1.4 Worker 家族全景对比
+
+| 维度 | DedicatedWorker | SharedWorker | ServiceWorker |
+| ---- | ---- | ---- | ---- |
+| 归属 | **单个页面**独占 | **同源多个页面**共享一个实例 | 浏览器级后台代理，与页面解耦 |
+| 生命周期 | 页面关闭 / `terminate()` 即销毁 | 所有连接端口都关闭后可被回收 | 安装后持久存在，空闲时挂起、事件唤醒 |
+| DOM 访问 | ❌ | ❌ | ❌ |
+| 拦截网络请求 | ❌ | ❌ | ✅ `fetch` 事件（核心能力） |
+| 典型用途 | 计算卸载、大数据处理 | 跨 Tab 共享状态 / 单 WebSocket 复用 | 离线缓存、消息推送、后台同步、跨 Tab 中继 |
+| HTTPS 要求 | ❌ | ❌ | ✅ 必须 HTTPS（localhost 例外） |
+| 通信方式 | 直接 `postMessage` | 多端口 `MessagePort` | `postMessage` + Clients API + 事件 |
+| 持久全局变量 | Worker 存活期间有效 | 跨页面共享且存活期间有效 | ❌ 不可靠（随时可能被终止），状态须落 IndexedDB/Cache |
+
+> 家族里还有 **Worklet**（PaintWorklet、AnimationWorklet、AudioWorklet），是运行在渲染管线更底层的轻量类 Worker 单元，API 受限、与样式/音频处理强相关，本文不展开。
+
+---
+
+# 模块二：DedicatedWorker（Web Worker）详解
+
+DedicatedWorker 是最常用的 Worker 类型，俗称"Web Worker"，**专属于创建它的那一个页面**。
+
+## 2.1 创建与双向通信
+
+### 主线程代码
+
+```typescript
+// 文件: src/main.ts
+// 创建 Worker：传脚本 URL。⚠️ URL 相对于"文档地址"解析，而不是当前脚本地址！
+// ✅ 推荐用 new URL(..., import.meta.url) 显式锚定脚本位置，避免部署到子路径后 404
+const worker = new Worker(new URL('./workers/calc.worker.ts', import.meta.url), {
+    name: 'calc-worker',   // 仅用于 DevTools 中识别
+    type: 'classic',       // 'classic'（默认）| 'module'（可用 import 语法）
+});
+
+// 主线程 → Worker
+worker.postMessage({ type: 'SUM_RANGE', payload: { from: 1, to: 1_000_000_000 } });
+
+// Worker → 主线程
+worker.onmessage = (e: MessageEvent<{ type: string; payload: number }>) => {
+    if (e.data.type === 'SUM_RESULT') {
+        console.log('计算结果:', e.data.payload); // 主线程不卡顿
+    }
+};
+
+// Worker 内部抛出未捕获错误时触发（ErrorEvent）
+worker.onerror = (e: ErrorEvent) => {
+    console.error(`Worker 错误: ${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`);
+    e.preventDefault?.(); // 阻止错误冒泡到控制台未捕获错误（视场景使用）
+};
+
+// 收到的消息无法被结构化克隆时触发
+worker.onmessageerror = () => console.error('消息反序列化失败');
+
+// 页面不再需要时立即销毁（❌ 不要只置 null，Worker 线程不会因此退出）
+worker.terminate();
+```
+
+### Worker 线程代码
+
+```typescript
+// 文件: src/workers/calc.worker.ts
+// Worker 内部没有 window，全局对象叫 self（即 DedicatedWorkerGlobalScope）
+// 不能访问 document、DOM、window.parent 等
+
+self.onmessage = (e: MessageEvent) => {
+    if (e.data.type === 'SUM_RANGE') {
+        const { from, to } = e.data.payload;
+        let sum = 0;
+        for (let i = from; i <= to; i++) sum += i; // CPU 密集型任务放这里
+        // Worker → 主线程
+        self.postMessage({ type: 'SUM_RESULT', payload: sum });
+    }
+};
+
+// Worker 内部未捕获错误也可以自己兜底
+self.addEventListener('error', (e) => {
+    // 返回 false / 不 preventDefault 时，错误继续派发到创建者的 onerror
+});
+
+// Worker 内的未处理 Promise 拒绝
+self.addEventListener('unhandledrejection', (e) => {
+    console.error('Worker 内未处理的 rejection:', e.reason);
+});
+```
+
+## 2.2 Worker 内可用 / 不可用 API
+
+| 能力 | 是否可用 | 说明 |
+| ---- | ---- | ---- |
+| `fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` | ✅ | 可在后台线程发起网络请求、维持长连接 |
+| `setTimeout` / `setInterval` / `queueMicrotask` | ✅ | 独立事件循环 |
+| `IndexedDB` / `Cache API` | ✅ | 本地存储 |
+| `importScripts()` | ✅（仅 classic worker） | 同步加载其他脚本；module worker 用 `import` |
+| `atob/btoa`、`URL`、`Blob`、`FileReader`、`crypto.subtle` | ✅ | 工具类 API 基本齐全 |
+| `OffscreenCanvas` | ✅ | 把 Canvas 绘图整体搬进 Worker（主线程拿 `transferControlToOffscreen()`） |
+| `navigator` / `location` | ✅（受限版） | 只有只读属性 |
+| `document` / `window` / DOM | ❌ | 任何 DOM 读写都不行 |
+| `alert` / `confirm` / `prompt` | ❌ | UI 对话框只能主线程弹 |
+| 主线程 DOM 上的事件 | ❌ | click/scroll 等需要主线程转发 |
+| `localStorage` / `sessionStorage` | ❌ | 同步 API，禁止在 Worker 使用；用 IndexedDB 替代 |
+
+## 2.3 Module Worker 与经典 Worker
+
+```typescript
+// ✅ Module Worker：可以用 ESM import，享受打包器的代码分割 / Tree Shaking
+const worker = new Worker(new URL('./m.worker.ts', import.meta.url), { type: 'module' });
+```
+
+```javascript
+// m.worker.ts 内部
+import { heavyCompute } from '../utils/math';   // 正常 ESM 导入
+import('wasm-feature-detect').then(/* ... */); // 动态 import 也支持
+```
+
+⚠️ 坑点：
+
+- classic worker 里只能用全局的 `importScripts(a.js, b.js)` **同步**加载脚本，脚本间共享全局作用域，容易污染；
+- Worker 脚本本身受同源策略限制：**脚本 URL 必须与页面同源**。跨域脚本需对方返回 CORS 头，或用 `importScripts()`（classic 模式，同样要求 CORS）曲线引入；
+- Vite / Webpack 中务必使用 `new Worker(new URL('./x.worker.ts', import.meta.url), { type: 'module' })` 的写法，构建工具才能正确打包 Worker 产物。
+
+## 2.4 数据传递的三种方式
+
+### 方式一：结构化克隆（Structured Clone，默认）
+
+`postMessage` 默认对数据做**深拷贝**（结构化克隆算法）：
+
+- ✅ 支持：对象、数组、Map、Set、ArrayBuffer、TypedArray、Date、RegExp、Blob、File、ImageBitmap、`Error`、循环引用；
+- ❌ 不支持：**函数、DOM 节点、类的原型链**（克隆后是普通对象，`instanceof MyClass` 失效）、`WeakMap/WeakSet`、getter/setter、Proxy 代理语义。
+
+⚠️ 拷贝大对象有明显开销。传 200MB 的 ArrayBuffer 会真的复制 200MB。
+
+### 方式二：Transferable（转让，零拷贝）
+
+把对象的**所有权转移**给接收方，发送方失去访问权，几乎零成本：
+
+```typescript
+const buf = new ArrayBuffer(64 * 1024 * 1024); // 64MB
+// 第二参数是 transfer 列表
+worker.postMessage({ buf }, [buf]);
+// ⚠️ 此后主线程的 buf 变为 detached（byteLength === 0），再访问会抛错
+```
+
+可转移对象：`ArrayBuffer`、`MessagePort`、`ImageBitmap`、`OffscreenCanvas`、`ReadableStream` 等。
+
+✅ 适合"生产者→消费者"单向大数据流（解码后图像、文件分片）。需要继续使用时，接收方处理完再转移回来即可。
+
+### 方式三：SharedArrayBuffer（共享内存）
+
+双方访问**同一块物理内存**，无拷贝、无消息延迟，但需要处理并发：
+
+```http
+// 必须由服务端返回以下两个响应头，页面才会进入 crossOriginIsolated 状态
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+```typescript
+// 主线程
+const shared = new SharedArrayBuffer(16);
+worker.postMessage({ shared }); // 注意：SAB 不放进 transfer 列表
+new Int32Array(shared)[0] = 1;
+
+// Worker 内
+self.onmessage = (e) => {
+    const view = new Int32Array(e.data.shared);
+    Atomics.add(view, 0, 41);    // 原子操作，结果 42
+    Atomics.wait(view, 1, 0);    // ⚠️ Atomics.wait 不能在主线程调用（会抛错），只能在 Worker 阻塞等待
+};
+console.log(self.crossOriginIsolated); // true 才表示环境满足要求
+```
+
+✅ 适合音视频缓冲区、WASM 堆、高频小数据；⚠️ 必须配合 `Atomics` 做同步，否则有可见性 / 竞态问题，且 COEP 会影响页面所有跨域资源加载。
+
+## 2.5 错误处理全景
+
+| 错误来源 | 主线程监听 | 说明 |
+| ---- | ---- | ---- |
+| Worker 内未捕获异常 | `worker.onerror` | 拿到 message/filename/lineno，线程仍在运行（除非异常致命） |
+| 消息无法克隆 | `worker.onmessageerror` | 两端各自的克隆失败事件 |
+| Worker 内 Promise 未捕获 | Worker 内 `self.onunhandledrejection` | ❌ 不会自动冒到主线程，需 Worker 自己上报 |
+| 创建失败（404/MIME 错） | `worker.onerror` | Worker 脚本必须以合法 JS MIME 返回 |
+
+✅ 推荐约定：Worker 内所有任务都包 try/catch，统一回传 `{ ok: false, error }` 结构，而不是依赖 error 事件：
+
+```typescript
+self.onmessage = async (e) => {
+    const { id } = e.data;
+    try {
+        const result = await handleTask(e.data);
+        self.postMessage({ id, ok: true, result });
+    } catch (err) {
+        self.postMessage({ id, ok: false, error: (err as Error).message });
+    }
+};
+```
+
+## 2.6 内联 Worker（Blob URL）
+
+不想为 Worker 单独发一个文件，或需要动态生成 Worker 代码时：
+
+```typescript
+// 把函数源码"包一层"放进 Blob，再用 blob: URL 创建 Worker
+function createWorkerFromFunction(fn: () => void): Worker {
+    const blob = new Blob([`(${fn.toString()})()`], { type: 'text/javascript' });
+    const url = URL.createObjectURL(blob);
+    const worker = new Worker(url);
+    worker.addEventListener('error', () => URL.revokeObjectURL(url)); // 出错时回收
+    return worker; // ⚠️ 别在创建后立刻 revoke，Worker 启动仍需读取该 URL
+}
+```
+
+⚠️ 注意 CSP：站点设置了 `worker-src 'self'` 时会禁止 blob Worker，需要加 `worker-src 'self' blob:`。
+
+## 2.7 任务超时与可取消的 RPC 封装
+
+把 Worker 包装成"请求-响应"式的 Promise RPC，并支持超时：
+
+```typescript
+// 文件: src/worker-rpc.ts
+type Req = { id: number; type: string; payload: unknown };
+type Res<T = unknown> = { id: number; ok: boolean; result?: T; error?: string };
+
+class WorkerRPC {
+    private worker: Worker;
+    private seq = 0;
+    private pending = new Map<number, {
+        resolve: (v: unknown) => void;
+        reject: (e: Error) => void;
+        timer: ReturnType<typeof setTimeout>;
+    }>();
+
+    constructor(url: URL) {
+        this.worker = new Worker(url, { type: 'module' });
+        this.worker.onmessage = (e: MessageEvent<Res>) => {
+            const { id, ok, result, error } = e.data;
+            const task = this.pending.get(id);
+            if (!task) return;
+            clearTimeout(task.timer);
+            this.pending.delete(id);
+            ok ? task.resolve(result) : task.reject(new Error(error));
+        };
+    }
+
+    call<T>(type: string, payload: unknown, timeout = 10_000): Promise<T> {
+        const id = ++this.seq;
+        return new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pending.delete(id);
+                // 超时不 terminate 整个 Worker（会杀掉其他任务），只让本请求失败
+                reject(new Error(`任务 ${type} 超时`));
+            }, timeout);
+            this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
+            const req: Req = { id, type, payload };
+            this.worker.postMessage(req);
+        });
+    }
+
+    dispose() {
+        this.worker.terminate(); // 真正销毁线程
+        this.pending.forEach(t => { clearTimeout(t.timer); t.reject(new Error('worker 已销毁')); });
+        this.pending.clear();
+    }
+}
+```
+
+## 2.8 Worker 池（Pool）
+
+Worker 创建有成本（约几十 ms + 数 MB 内存），常驻 + 池化复用是标准做法：
+
+```typescript
+// 文件: src/worker-pool.ts
+// 设计要点：
+// 1. 固定数量 Worker（navigator.hardwareConcurrency - 1，给主线程留一个核心）；
+// 2. 每个 Worker 同时只处理一个任务，忙则排队；
+// 3. 任务复用 2.7 的 id 关联机制。
+class WorkerPool {
+    private workers: { worker: Worker; busy: boolean }[] = [];
+    private queue: { task: unknown; resolve: Function; reject: Function }[] = [];
+    private seq = 0;
+    private callbacks = new Map<number, { resolve: Function; reject: Function }>();
+
+    constructor(url: URL, size = Math.max(1, navigator.hardwareConcurrency - 1)) {
+        for (let i = 0; i < size; i++) {
+            const worker = new Worker(url, { type: 'module' });
+            worker.onmessage = (e) => {
+                const slot = this.workers.find(w => w.worker === worker)!;
+                slot.busy = false;
+                const cb = this.callbacks.get(e.data.id);
+                this.callbacks.delete(e.data.id);
+                cb && (e.data.ok ? cb.resolve(e.data.result) : cb.reject(new Error(e.data.error)));
+                this.pump(); // 腾出空位，继续消费队列
+            };
+            this.workers.push({ worker, busy: false });
+        }
+    }
+
+    run<T>(task: unknown): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const id = ++this.seq;
+            this.callbacks.set(id, { resolve, reject });
+            this.queue.push({ task: { ...(task as object), id }, resolve, reject });
+            this.pump();
+        });
+    }
+
+    private pump() {
+        const idle = this.workers.find(w => !w.busy);
+        const job = this.queue.shift();
+        if (!idle || !job) return;
+        idle.busy = true;
+        idle.worker.postMessage(job.task);
+    }
+
+    destroy() {
+        this.workers.forEach(w => w.worker.terminate());
+        this.workers = [];
+    }
+}
+```
+
+## 2.9 适用场景与反模式
+
+✅ 适合：复杂排序/搜索、加解密（`crypto.subtle` 本身已异步，重 WASM 计算另说）、代码高亮、Excel 式大表格计算、图片像素处理（配合 OffscreenCanvas）、WASM 重计算、大 JSON parse/stringify、独立长连接心跳。
+
+❌ 反模式：
+
+- 为了"异步"而开 Worker——网络 IO、定时器本就不阻塞主线程，开 Worker 只增加通信成本；
+- 高频小消息（如每帧、每 mousemove 一次）——结构化克隆开销可能超过计算本身，应批量 + `requestAnimationFrame` 攒批；
+- Worker 内做 DOM 测量（`getBoundingClientRect` 等）——做不了，必须主线程取值后传入；
+- 忘记 `terminate()`：SPA 切路由后 Worker 仍常驻，累积内存泄漏。
+
+## 2.10 OffscreenCanvas：把渲染搬进 Worker
+
+2.9 提到的"图片像素处理（配合 OffscreenCanvas）"是 Worker 里**唯一能做绘制与像素操作的途径**。OffscreenCanvas 把画布从 DOM 体系中解耦：Canvas 2D / WebGL 渲染循环可以整体跑在 Worker 线程，主线程只负责展示，重滤镜、粒子、图表重算不再挤占主线程。
+
+两种获得方式：
+
+| 方式 | 写法 | 适用 |
+| ---- | ---- | ---- |
+| 从 DOM 画布移交 | `canvas.transferControlToOffscreen()` | 页面上要**显示**这个画布，但渲染在 Worker 算 |
+| 纯离屏创建 | `new OffscreenCanvas(w, h)` | 不需要显示，只要产出结果（缩略图、导出图片、像素统计） |
+
+```typescript
+// 文件: src/main.ts —— 主线程：移交画布控制权
+const canvas = document.querySelector('#stage') as HTMLCanvasElement;
+const dpr = devicePixelRatio;
+canvas.width = canvas.clientWidth * dpr;   // ⚠️ 尺寸必须在移交前设置好
+canvas.height = canvas.clientHeight * dpr;
+
+const offscreen = canvas.transferControlToOffscreen();
+// ⚠️ 调用后主线程不能再对 canvas getContext，内容完全由 Worker 接管
+
+const worker = new Worker(new URL('./render.worker.ts', import.meta.url), { type: 'module' });
+// OffscreenCanvas 是 Transferable：零拷贝移交所有权，此后主线程侧引用不可再用
+worker.postMessage({ type: 'INIT', canvas: offscreen, dpr }, [offscreen]);
+
+// 主线程事件 → 传坐标给 Worker（画布无 DOM，收不到鼠标/触摸事件）
+canvas.addEventListener('pointermove', (e) => {
+    worker.postMessage({ type: 'POINTER', x: e.offsetX * dpr, y: e.offsetY * dpr });
+});
+```
+
+```typescript
+// 文件: src/render.worker.ts —— Worker：独立渲染循环
+self.onmessage = (e: MessageEvent) => {
+    if (e.data.type !== 'INIT') return;
+    const canvas: OffscreenCanvas = e.data.canvas;
+    const ctx = canvas.getContext('2d')!;
+
+    function frame() {
+        // 重计算 + 绘制全在 Worker 线程，主线程滚动/交互完全不掉帧
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawParticles(ctx, e.data.dpr);
+        // ⚠️ Worker 没有 requestAnimationFrame（rAF 绑定文档渲染管线），
+        // 用 setTimeout(16) 近似 60fps；需要严格对齐显示刷新时，
+        // 改为主线程 rAF 里 postMessage 'TICK' 驱动 Worker 每帧绘制
+        setTimeout(frame, 16);
+    }
+    frame();
+};
+```
+
+只需要"产出结果"（不显示）时更简单，直接在 Worker 里出文件：
+
+```typescript
+// Worker 内：生成缩略图并回传，无需插入 DOM，也无需 URL.createObjectURL
+const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.9 });
+const bitmap = await self.createImageBitmap(blob); // ImageBitmap 同样是 Transferable
+self.postMessage(bitmap, [bitmap]);                // 零拷贝转回主线程展示
+```
+
+⚠️ 限制与注意：
+
+- **无 DOM**：OffscreenCanvas 收不到任何交互事件，必须主线程监听后 postMessage 坐标；窗口缩放同样要主线程通知 Worker 重设 `canvas.width/height`（内容会清空，需重绘）；
+- **字体**：Worker 里没有 `document.fonts`，需主线程 `document.fonts.load()` 完成后通知 Worker，或 Worker 侧用 `FontFace` 自行加载；
+- WebGL 同理可迁移（`canvas.getContext('webgl')`），Three.js 官方有 OffscreenCanvas 示例可参考；
+- Safari 较晚支持 `transferControlToOffscreen`，务必特性检测 `'OffscreenCanvas' in window`，不支持时降级为主线程渲染。
+
+---
+
+# 模块三：SharedWorker 共享线程详解
+
+DedicatedWorker 是"一个页面一个"，**SharedWorker 允许同源的多个页面（Tab、iframe）共用同一个 Worker 实例**——这是它实现跨 Tab 通信的根基。
+
+## 3.1 核心模型：一个实例 + 多个 MessagePort
+
+```
+ Tab A ──portA──┐
+ Tab B ──portB──┼──► 同一个 SharedWorker 全局环境（变量、连接单例全部共享）
+ Tab C ──portC──┘
+```
+
+- 页面侧拿到的不是 Worker 本身，而是一个 **MessagePort**：`sharedWorker.port`；
+- Worker 侧通过 `connect` 事件接收每个连接的端口；
+- 判断"是否同一个实例"的规则：**同源 + 完全相同的脚本 URL（含 query/hash）+ 相同 name**。
+
+## 3.2 完整示例：跨 Tab 共享计数器
+
+### 页面代码（每个 Tab 都加载同一份）
+
+```typescript
+// 文件: src/shared-counter.ts
+const sw = new SharedWorker(new URL('./counter.shared.worker.ts', import.meta.url), {
+    name: 'counter-shared', // 同名 + 同 URL 才会复用同一实例
+    type: 'module',
+});
+
+// ✅ 用 onmessage 赋值会隐式调用 port.start()；
+// ⚠️ 若用 addEventListener('message', ...) 必须手动 sw.port.start()，否则收不到消息！
+sw.port.onmessage = (e: MessageEvent<{ count: number }>) => {
+    console.log('当前所有 Tab 的共享计数:', e.data.count);
+};
+
+document.querySelector('#inc')!.onclick = () => sw.port.postMessage({ type: 'INC' });
+
+// 页面关闭时礼貌通知（也可靠心跳兜底，见 3.4）
+window.addEventListener('beforeunload', () => {
+    sw.port.postMessage({ type: 'LEAVE' });
+    sw.port.close();
+});
+```
+
+### SharedWorker 代码
+
+```typescript
+// 文件: src/workers/counter.shared.worker.ts
+// 全局环境是 SharedWorkerGlobalScope，比 Dedicated 多了 onconnect
+let count = 0;                       // 所有连接共享这一个变量
+const ports = new Set<MessagePort>(); // 维护所有在线页面的端口
+
+self.onconnect = (e: MessageEvent) => {
+    const port = e.ports[0]; // 每个连接对应一个端口
+    ports.add(port);
+
+    port.postMessage({ count }); // 新 Tab 连上时先同步一次当前值
+
+    port.onmessage = (ev: MessageEvent) => {
+        if (ev.data.type === 'INC') {
+            count++;
+            broadcast({ count }); // 一改全通知，天然的跨 Tab 广播
+        } else if (ev.data.type === 'LEAVE') {
+            ports.delete(port);
+            port.close();
+        }
+    };
+
+    // 端口侧抛错时及时清理，避免向已关闭端口 postMessage 报错
+    port.addEventListener('messageerror', () => ports.delete(port));
+};
+
+function broadcast(msg: unknown) {
+    for (const p of ports) {
+        try { p.postMessage(msg); } catch { ports.delete(p); }
+    }
+}
+```
+
+## 3.3 杀手级场景：全浏览器只维持一条 WebSocket
+
+如果每个 Tab 都与服务器建立 WebSocket，10 个 Tab = 10 条连接。用 SharedWorker 可以让**同一浏览器同源只保留一条连接**，所有 Tab 共享：
+
+```typescript
+// 文件: src/workers/ws.shared.worker.ts
+type ClientMsg =
+    | { type: 'OPEN' }
+    | { type: 'SEND'; payload: string }
+    | { type: 'CLOSE' };
+
+const ports = new Set<MessagePort>();
+let ws: WebSocket | null = null;
+
+function ensureSocket() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    ws = new WebSocket('wss://example.com/realtime');
+
+    ws.onmessage = (ev) => {
+        // 服务端消息扇出给所有 Tab
+        ports.forEach(p => { try { p.postMessage({ type: 'MSG', payload: ev.data }); } catch { /* noop */ } });
+    };
+    ws.onclose = () => {
+        ports.forEach(p => { try { p.postMessage({ type: 'SERVER_CLOSED' }); } catch { /* noop */ } });
+        ws = null; // 下次有页面需要时重连
+    };
+}
+
+self.onconnect = (e) => {
+    const port = e.ports[0];
+    ports.add(port);
+    ensureSocket(); // 第一个 Tab 接入时建连，之后复用
+
+    port.onmessage = (ev: MessageEvent<ClientMsg>) => {
+        const msg = ev.data;
+        if (msg.type === 'OPEN') {
+            ensureSocket();
+        } else if (msg.type === 'SEND') {
+            ensureSocket();
+            ws?.send(msg.payload); // 任意 Tab 发消息，共用同一条连接
+        } else if (msg.type === 'CLOSE') {
+            ports.delete(port);
+            port.close();
+            // ⚠️ 最后一个 Tab 离开时主动断开，避免空转
+            if (ports.size === 0 && ws) { ws.close(); ws = null; }
+        }
+    };
+};
+```
+
+收益：服务端连接数骤降、鉴权/重连逻辑只写一份、消息天然在多 Tab 间一致。
+
+## 3.4 端口生命周期与"僵尸连接"问题
+
+⚠️ 浏览器**不会在 Tab 崩溃 / 异常退出时总是可靠地触发清理回调**，`beforeunload` 在崩溃、杀进程场景下也不执行。僵尸端口会一直留在 Set 里。两种工程化兜底：
+
+1. **心跳机制**：页面每 5s 发 `PING`，Worker 记录 `lastSeen`，每 15s 扫描，超时即剔除；
+2. 向端口 `postMessage` 抛异常时惰性剔除。
+
+```typescript
+// SharedWorker 内
+const health = new WeakMap<MessagePort, number>();
+
+setInterval(() => {
+    const now = Date.now();
+    ports.forEach(p => {
+        if (now - (health.get(p) ?? 0) > 15_000) { // 15s 无心跳
+            ports.delete(p);
+            try { p.close(); } catch { /* noop */ }
+        }
+    });
+}, 15_000);
+
+// port.onmessage 中：if (msg.type === 'PING') health.set(port, Date.now());
+```
+
+SharedWorker 自身的生命周期：当**所有端口都被 close / 所属文档全部销毁**后，浏览器可随时终止该 Worker（再次有页面 new 同一个 URL 时冷启动）。⚠️ 因此它不适合存"必须持久"的数据——持久数据落 IndexedDB。
+
+## 3.5 调试与兼容性
+
+- **Chrome**：访问 `chrome://inspect/#workers`，Shared workers 区可点 inspect 打开独立 DevTools；
+- **Edge**：同 Chromium 方式；
+- **Firefox**：`about:debugging#/runtime/this-firefox` → Workers；
+- 普通页面 DevTools 的 Sources 面板一般也能看到 SharedWorker 脚本。
+
+兼容性：Chrome/Edge/Firefox 均支持；**Safari 从 16.0 开始支持**。若需兼容更早 Safari，用 BroadcastChannel 或 localStorage 方案降级（见模块六）。
+
+---
+
+# 模块四：MessageChannel / MessagePort 端口通信
+
+SharedWorker 的底层通信原语就是 MessageChannel。理解它，才能做复杂的三方通信编排。
+
+## 4.1 基本模型
+
+```typescript
+// 创建一对相互连通的端口
+const channel = new MessageChannel();
+const port1 = channel.port1;
+const port2 = channel.port2;
+
+port1.onmessage = (e) => console.log('port1 收到:', e.data);
+port2.postMessage('你好'); // 立刻触发 port1 的 message（异步排队，非同步执行）
+```
+
+两个端口是对等的：谁 postMessage，对面就收。**端口可以被 transfer 到任何上下文**（Worker、iframe、其他 Tab），从而建立一条不经过"创建者中介"的直连通道。
+
+## 4.2 关键规则：start() 语义
+
+- `port.onmessage = fn` 赋值会**隐式 start**；
+- `port.addEventListener('message', fn)` 不会自动 start，必须手动 `port.start()`，否则消息一直排队不派发；
+- `port.close()` 后端口进入断开状态，缓冲区消息丢弃。
+
+## 4.3 场景一：主线程牵线，两个 Worker 直连
+
+默认情况下 A-Worker 想给 B-Worker 发消息必须经主线程转发。可以让主线程建立通道后把两个端口分别转移（transfer）给两个 Worker：
+
+```typescript
+// 主线程
+const channel = new MessageChannel();
+workerA.postMessage({ type: 'CONNECT', port: channel.port1 }, [channel.port1]);
+workerB.postMessage({ type: 'CONNECT', port: channel.port2 }, [channel.port2]);
+// ⚠️ 端口一旦转移，主线程手里的 channel.port1/port2 立刻失效（neutered）
+```
+
+```typescript
+// workerA 内
+let peer: MessagePort;
+self.onmessage = (e) => {
+    if (e.data.type === 'CONNECT') {
+        peer = e.data.port;
+        peer.onmessage = ev => console.log('A 直连收到 B:', ev.data);
+        peer.postMessage('A → B，不经过主线程');
+    }
+};
+```
+
+## 4.4 场景二：ServiceWorker ↔ 页面的长连接通道
+
+一次性 `postMessage` 像发短信，MessagePort 像"接通的电话"，可以在 SW 与页面间建立持续双向通道（示例见 5.7）。
+
+## 4.5 场景三：跨窗口直连
+
+`window.postMessage` 也支持 transfer MessagePort。两个同源（甚至经目标源校验的跨源）窗口可以握手上端口，之后用端口做高频通信，绕开对 `window` 引用的依赖：
+
+```typescript
+// 父页面把 port2 随首条消息转给弹窗
+popup.postMessage({ type: 'HANDSHAKE', port: channel.port2 }, TARGET_ORIGIN, [channel.port2]);
+// 弹窗侧：
+window.addEventListener('message', (e) => {
+    if (e.origin !== PARENT_ORIGIN) return;
+    if (e.data.type === 'HANDSHAKE') {
+        const port = e.ports[0];
+        port.onmessage = (ev) => console.log(ev.data);
+        port.postMessage('端口已接通');
+    }
+});
+```
+
+## 4.6 场景四：主线程当 hub，构建点对点消息总线
+
+多个 DedicatedWorker 之间默认无法互相通信（只能经主线程中转）。用 MessageChannel 给每个 Worker 分配一条**专用通道**，主线程作为路由中心按 `to` 字段投递——Worker ↔ Worker 高频数据不再每次绕主线程克隆两遍，主线程只负责"接线"：
+
+```typescript
+// 文件: src/bus.ts —— 主线程消息总线
+const workers = new Map<string, Worker>();
+
+export function registerWorker(name: string, worker: Worker) {
+    workers.set(name, worker);
+    worker.onmessage = (e) => route(e.data, name); // 端口未接续的消息走默认通道
+}
+
+// 为两个端点建立专用通道：port1 留在 A 的对侧处理，port2 转交给 B
+export function connect(a: string, b: string) {
+    const channel = new MessageChannel();
+    const target = workers.get(b);
+    if (target) {
+        // B 收到 port2 后 start 监听；port1 收到的消息即来自 B
+        target.postMessage({ type: 'CHANNEL_OPEN', peer: a }, [channel.port2]);
+        channel.port1.onmessage = (e) => route({ ...e.data, from: b, direct: true }, a);
+        return channel.port1;
+    }
+    throw new Error(`端点 ${b} 未注册`);
+}
+
+function route(msg: { to?: string; direct?: boolean }, from: string) {
+    if (msg.direct) { // 已走专用端口直连的消息，只投递给目标
+        workers.get(msg.to!)?.postMessage({ ...msg, from });
+        return;
+    }
+    if (msg.to) {
+        workers.get(msg.to)?.postMessage({ ...msg, from }); // 点对点
+    } else {
+        workers.forEach((w) => w.postMessage({ ...msg, from })); // 广播
+    }
+}
+```
+
+> 同样的模式可以推广到 SW 与弹窗：`connect()` 里拿不到 Worker 时，把 port2 通过 `postMessage(..., [port])` 转交给对应端即可（见 5.7 的 MessagePort 长通道）。
+
+## 4.7 端口转移规则与常见陷阱
+
+MessagePort 是 Transferable 对象，转移遵循三条硬规则：
+
+1. **只能转移一次**：`postMessage(msg, [port])` 后发送方持有的引用立即 neuter，再用它 postMessage 会抛错；
+2. **不转移就是"哑分身"**：忘了把 port 放进 transfer 列表时，结构化克隆出的副本无法用于通信——对端能收到对象但永远等不到消息，这是**最常见的静默失败**；
+3. **收下必须 start**：接收方用 `addEventListener('message')` 监听时必须手动 `port.start()`；赋值 `port.onmessage` 才会隐式启动（见 4.2）。
+
+```typescript
+// ❌ 静默失败：port 没进 transfer 列表，对端收到的是"哑端口"
+worker.postMessage({ port: channel.port2 });
+
+// ✅ 正确：第二参数声明转移
+worker.postMessage({ port: channel.port2 }, [channel.port2]);
+```
+
+另外注意**端口与内存**：只要任何一端持有未 close 的 port，关联对象就不会被回收；长生命周期页面里废弃的 port 要显式 `close()`，否则会缓慢泄漏。
+
+---
+
+# 模块五：ServiceWorker 详解
+
+ServiceWorker（简称 SW）是**浏览器在网页之外运行的事件驱动型后台脚本**，本质是一个"客户端可编程网络代理"。它是 PWA 的核心，也是跨 Tab 通信的特殊枢纽。
+
+## 5.1 核心特性与限制
+
+- ✅ 可以**拦截作用域内所有 fetch 请求**（导航、静态资源、XHR/fetch，甚至图片）；
+- ✅ 安装后**与具体页面解耦**：页面全部关闭后仍可被事件唤醒（push、sync、fetch）；
+- ✅ 可使用 Cache API、IndexedDB；
+- ❌ 无 DOM、无 localStorage；空闲即被**挂起（terminate）**，事件来了再唤醒——**全局变量不可靠**；
+- ❌ 必须 **HTTPS**（localhost / 127.0.0.1 例外）；
+- ⚠️ 脚本必须以 JavaScript MIME 类型返回；作用域默认是脚本所在目录。
+
+## 5.2 注册与作用域
+
+```typescript
+// 文件: src/register-sw.ts [浏览器]
+async function registerSW() {
+    if (!('serviceWorker' in navigator)) return; // 不支持时静默降级为普通在线应用
+    try {
+        const registration = await navigator.serviceWorker.register('/sw.js', {
+            scope: '/', // 默认 '/sw.js' 所在目录；想扩大需服务端加 Service-Worker-Allowed 头
+            updateViaCache: 'imports', // SW 脚本本身的更新检查是否走 HTTP 缓存
+        });
+        console.log('SW 注册成功, scope:', registration.scope);
+    } catch (err) {
+        console.error('SW 注册失败:', err);
+    }
+}
+window.addEventListener('load', registerSW); // ✅ 等 load 后再注册，避免抢占首屏带宽
+```
+
+⚠️ `/sw.js` 放在站点根目录才能默认代理全站；放在 `/assets/sw.js` 则默认只能控制 `/assets/` 下页面。
+
+## 5.3 生命周期（重点中的重点）
+
+```mermaid
+stateDiagram-v2
+    [*] --> 安装中: register()/浏览器发现新版本
+    安装中 --> 已安装等待: install 成功（旧 SW 仍控制页面）
+    已安装等待 --> 激活中: 旧 SW 释放控制（全部 Tab 关闭）\n或 self.skipWaiting()
+    激活中 --> 激活: activate 完成（清理旧缓存）
+    激活 --> 激活: 拦截 fetch / 接收 message/push/sync
+    激活 --> 挂起: 空闲，浏览器终止线程
+    挂起 --> 激活: 任意 SW 事件唤醒
+    安装中 --> 废弃: install 失败
+```
+
+各阶段要点：
+
+1. **install**：一次性预缓存关键资源。`event.waitUntil(promise)` 告诉浏览器"等 promise 结束才算安装成功"；
+2. **waiting**：新版本已安装但**不接管**，直到旧 SW 无客户端（24 小时后浏览器也可能强制升级）；
+3. **activate**：清理上一版旧缓存；`clients.claim()` 让自己立即控制已打开的页面；
+4. **激活后**：页面**下次加载**起请求才经过 SW（首跳不受控，除非 claim）；之后 SW 随时可能被挂起，所有事件处理都要 `waitUntil` 续期。
+
+```javascript
+// 文件: public/sw.js
+const CACHE = 'app-v1';
+const PRE_CACHE = ['/', '/index.html', '/assets/main.css', '/assets/app.js'];
+
+self.addEventListener('install', (event) => {
+    event.waitUntil(
+        caches.open(CACHE).then(cache => cache.addAll(PRE_CACHE))
+    );
+    self.skipWaiting(); // ⚠️ 强制跳过 waiting（配合 5.6 的更新提示流程才安全）
+});
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil((async () => {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))); // 清旧缓存
+        await self.clients.claim(); // 立即接管当前打开的页面
+    })());
+});
+```
+
+## 5.4 拦截请求：五种缓存策略
+
+`fetch` 事件里用 `respondWith()` 返回响应。响应可来自网络、Cache，或手工合成：
+
+```javascript
+// sw.js
+self.addEventListener('fetch', (event) => {
+    const { request } = event;
+    const url = new URL(request.url);
+
+    // 只处理同源 GET；❌ 不要拦截 POST 等写入请求做缓存
+    if (request.method !== 'GET' || url.origin !== self.location.origin) return;
+
+    // 策略 1：Cache First（缓存优先）——适合带 hash 的静态资源
+    if (url.pathname.startsWith('/assets/')) {
+        event.respondWith(
+            caches.match(request).then(hit => hit || fetch(request).then(res => {
+                const copy = res.clone(); // ⚠️ Response 流只能消费一次，缓存副本
+                caches.open(CACHE).then(c => c.put(request, copy));
+                return res;
+            }))
+        );
+        return;
+    }
+
+    // 策略 2：Network First（网络优先，失败回退缓存）——适合 HTML 导航请求
+    if (request.mode === 'navigate') {
+        event.respondWith((async () => {
+            try {
+                const fresh = await fetch(request);
+                const cache = await caches.open(CACHE);
+                cache.put('/index.html', fresh.clone());
+                return fresh;
+            } catch {
+                const cached = await caches.match('/index.html');
+                return cached || new Response('离线且无缓存', { status: 503 });
+            }
+        })());
+        return;
+    }
+
+    // 策略 3：Stale While Revalidate（先返缓存，后台更新）——适合可容忍短暂过期的资源
+    event.respondWith(
+        caches.match(request).then(async cached => {
+            const networkPromise = fetch(request).then(res => {
+                caches.open(CACHE).then(c => c.put(request, res.clone()));
+                return res;
+            }).catch(() => cached);
+            return cached || networkPromise;
+        })
+    );
+});
+
+// 另外两种常见策略：
+// 策略 4：Cache Only —— install 阶段预缓存的核心壳资源
+// 策略 5：Network Only —— 实时接口，直接放行 fetch(request)
+```
+
+⚠️ 注意：SW 内 `fetch` 默认**不带页面的 HTTP 缓存语义差异问题不大**，但要手工处理跨域请求的 `mode`/`credentials`；`respondWith` 抛错或返回拒绝 Promise 时，浏览器按"网络错误"处理。
+
+## 5.5 离线判据与导航兜底
+
+```javascript
+// sw.js
+self.addEventListener('fetch', (event) => {
+    if (request.mode === 'navigate') {
+        event.respondWith(
+            fetch(request).catch(() => caches.match('/offline.html')) // 离线兜底页
+        );
+    }
+});
+```
+
+## 5.6 更新机制（版本化最佳实践）
+
+SW 的更新检查时机：
+
+- 每次**导航**到作用域内页面；
+- `registration.update()` 手动触发；
+- 距上次检查超过 24 小时强制检查；
+- 浏览器对 **sw.js 本身**做**逐字节对比**（内容不同才视为新版本，注释变化也算）；`updateViaCache` 控制其 HTTP 缓存行为。
+
+完整的"发现新版本 → 提示用户 → 立即生效"流程：
+
+```javascript
+// sw.js：新版本安装进入 waiting 后通知所有页面
+self.addEventListener('install', () => { self.skipWaiting(); });
+
+// 或者不 skipWaiting，由用户确认后再激活（更稳）：
+self.addEventListener('message', (event) => {
+    if (event.data === 'SKIP_WAITING') self.skipWaiting();
+});
+```
+
+```typescript
+// 页面侧
+let refreshing = false;
+navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    location.reload(); // 新 SW 接管后刷新一次，保证页面资源与缓存版本一致
+});
+
+async function watchUpdate() {
+    const reg = await navigator.serviceWorker.ready;
+    if (reg.waiting) promptUpdate(reg.waiting); // 首次加载就已有等待中的版本
+    reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        nw?.addEventListener('statechange', () => {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                promptUpdate(nw); // 老页面存在且新版 installed → 提示用户
+            }
+        });
+    });
+    // 也可定时检查：setInterval(() => reg.update(), 60 * 60 * 1000)
+}
+
+function promptUpdate(worker: ServiceWorker) {
+    if (confirm('发现新版本，是否立即刷新？')) {
+        worker.postMessage('SKIP_WAITING');
+    }
+}
+```
+
+## 5.7 SW ↔ 页面双向通信
+
+### 页面 → SW
+
+```typescript
+// 必须等 SW 激活就绪；controller 在首跳可能为 null（未被控制时）
+navigator.serviceWorker.ready.then(reg => {
+    reg.active?.postMessage({ type: 'PREFETCH', urls: ['/api/list'] });
+});
+```
+
+### SW → 页面（Clients API）
+
+```javascript
+// sw.js
+self.addEventListener('message', async (event) => {
+    if (event.data.type === 'BROADCAST') {
+        // 拿到所有受控窗口客户端，逐个转发（SW 没有"自动广播"API）
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        clients.forEach(client => {
+            // event.source 是发送方 Client，可按需排除自己避免回声
+            if (client.id !== event.source?.id) {
+                client.postMessage({ type: 'RELAY', from: event.source.id, data: event.data.payload });
+            }
+        });
+    }
+});
+```
+
+```typescript
+// 页面侧接收
+navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
+    console.log('SW 转发来的消息:', e.data);
+});
+```
+
+### 用 MessagePort 建立长通道
+
+```typescript
+// 页面：SW 激活后把一个端口交给它
+navigator.serviceWorker.ready.then(reg => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = e => console.log('持续通道收到:', e.data);
+    reg.active.postMessage({ type: 'OPEN_CHANNEL' }, [channel.port2]);
+});
+```
+
+```javascript
+// sw.js：持有端口，即使没有 fetch 也能主动推消息（SW 被挂起时由事件唤醒派发）
+let pagePort;
+self.addEventListener('message', (event) => {
+    if (event.data.type === 'OPEN_CHANNEL') pagePort = event.ports[0];
+});
+```
+
+## 5.8 后台同步与推送通知
+
+两者都属于"SW 的离线超能力"：**Background Sync** 把"重试"交给浏览器（网络恢复时自动执行，哪怕页面早已关闭）；**Push** 让服务端经由推送服务唤醒 SW（用户没开网站也能收到通知）。共同前提：异步任务必须放进 `event.waitUntil`，否则 SW 会在任务完成前被杀。
+
+### 5.8.1 Push 通知完整闭环
+
+Web Push 的角色分工：页面订阅 → 订阅凭证交给服务端 → 服务端用凭证 + VAPID 私钥发消息 → 浏览器推送服务（FCM 等）投递 → SW 被唤醒展示通知。
+
+```typescript
+// 文件: src/push.ts —— 页面侧：请求权限并订阅
+async function subscribePush() {
+    // ⚠️ 权限请求必须由用户手势触发（放在点击回调里），不要页面加载就弹
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return null;
+
+    const reg = await navigator.serviceWorker.ready;
+    // applicationServerKey：服务端 VAPID 公钥（Base64URL → Uint8Array）
+    const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true, // Chrome 强制要求：每次推送必须展示可见通知
+        applicationServerKey: urlB64ToUint8Array(PUBLIC_KEY),
+    });
+    // 订阅凭证交给服务端存库：endpoint 每台设备不同，是服务端的"收件地址"
+    await fetch('/api/push/subscribe', { method: 'POST', body: JSON.stringify(sub) });
+    return sub;
+}
+```
+
+```javascript
+// sw.js —— SW 侧：收到推送必须展示通知（userVisibleOnly 的约定）
+self.addEventListener('push', (event) => {
+    const payload = event.data?.json() ?? { title: '新消息', body: '' };
+    event.waitUntil(self.registration.showNotification(payload.title, {
+        body: payload.body,
+        icon: '/icon.png',
+        badge: '/badge.png',
+        tag: payload.tag,            // 相同 tag 的通知互相覆盖，防止轰炸
+        data: { url: payload.url },  // 供点击跳转使用
+    }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+    event.waitUntil((async () => {
+        const url = event.notification.data?.url || '/';
+        const cs = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        const hit = cs.find((c) => c.url.includes(url));
+        // 已有对应窗口就 focus，否则新开——体验优于一律 openWindow
+        hit ? await hit.focus() : await self.clients.openWindow(url);
+    })());
+});
+```
+
+```javascript
+// server/push.js —— 服务端（Node + web-push 库）
+const webpush = require('web-push');
+webpush.setVapidDetails('mailto:ops@example.com', PUBLIC_KEY, PRIVATE_KEY);
+
+await webpush.sendNotification(subscription, JSON.stringify({
+    title: '订单已发货',
+    body: '点击查看物流详情',
+    url: '/orders/123',
+}));
+// 发送返回 404/410 = 订阅已失效（用户清数据/退订），服务端应删除该凭证
+```
+
+### 5.8.2 Background Sync 完整示例：离线发帖也能成功
+
+```typescript
+// 页面侧：发送失败 → 存 IndexedDB 队列 → 注册一次性同步
+async function submitPost(content: string) {
+    try {
+        await fetch('/api/posts', { method: 'POST', body: JSON.stringify({ content }) });
+    } catch {
+        await idbAdd('outbox', { content, ts: Date.now() });  // ① 入队（IDB 封装见 6.7）
+        const reg = await navigator.serviceWorker.ready;
+        await reg.sync.register('outbox-flush');               // ② 注册一次性同步
+    }
+}
+```
+
+```javascript
+// sw.js：网络恢复（哪怕页面已关）后浏览器唤醒 SW 执行
+self.addEventListener('sync', (event) => {
+    if (event.tag !== 'outbox-flush') return;
+    event.waitUntil((async () => {
+        const items = await idbAll('outbox');
+        for (const item of items) {
+            const res = await fetch('/api/posts', { method: 'POST', body: JSON.stringify(item) });
+            if (!res.ok) throw new Error('retry later'); // 抛错 → 浏览器按退避间隔自动重试
+            await idbDelete('outbox', item.id);
+        }
+    })());
+});
+```
+
+⚠️ 要点：
+
+- Sync 的触发时机由浏览器决定（要求网络恢复 + 页面有打开过的会话），**不能当定时任务用**；周期同步 `periodicSync` 仅 Chromium 支持，且要求 PWA 已安装；
+- `sync.register` 必须在 SW 就绪后调用（用 `navigator.serviceWorker.ready` 等待）；
+- iOS 16.4+ 才支持 Web Push，且要求 PWA 已添加到主屏幕；`periodicSync` 在 iOS 上不可用。
+
+## 5.9 ServiceWorker 避坑清单
+
+- ⚠️ **全局变量随时丢失**：SW 挂起后内存清空，跨事件状态必须存 IndexedDB/Cache；
+- ⚠️ **event.waitUntil 是续期手段**：异步操作不放进 waitUntil，SW 可能在 promise 完成前被终止；
+- ⚠️ 缓存版本不更新导致用户"永远用旧版"：文件名加内容 hash + 缓存版本号 + 5.6 更新流程；
+- ⚠️ 开发期在 DevTools → Application → Service Workers 勾选 **Update on reload** 和 **Bypass for network**；
+- ⚠️ Safari ITP 可能在用户长期不访问后清除 SW 与缓存，离线能力不能假设永久存在；
+- ⚠️ SW 注册是"粘性"的：一旦上线有 bug 的 SW，所有用户都会持续加载它，**上线 SW 前必须有回滚预案**（可发布一个只执行 `self.skipWaiting()` + 清缓存的"自毁 SW"）。
+
+---
+
+# 模块六：跨 Tab / 窗口通信全方案
+
+"跨 Tab 通信"本质是多个**浏览上下文（Browsing Context）**之间的数据同步。不同方案在同源要求、持久性、时效性、能否跨设备上差异巨大。
+
+## 6.1 方案总览
+
+| 方案 | 同源要求 | 实时性 | 持久化 | 跨设备 | 适用场景 |
+| ---- | ---- | ---- | ---- | ---- | ---- |
+| BroadcastChannel API | 必须同源 | 实时（事件） | ❌ | ❌ | 同源多 Tab 广播，**首选** |
+| localStorage + storage 事件 | 必须同源 | 近实时 | ✅（约 5MB） | ❌ | 广播 + 状态持久化，兼容性最好 |
+| window.postMessage | 可跨源（需校验 origin） | 实时 | ❌ | ❌ | 弹窗 / iframe 这类"持有引用"的窗口 |
+| SharedWorker | 必须同源 | 实时 | Worker 存活期内 | ❌ | 广播 + 共享连接 / 共享内存状态 |
+| ServiceWorker 中继 | 必须同源 | 近实时 | 配合 Cache/IDB | ❌ | 已是 PWA、SW 已注册的应用 |
+| IndexedDB | 必须同源 | 需配合通知机制 | ✅（大容量） | ❌ | 大数据共享、离线队列 |
+| Web Locks API | 必须同源 | —（协调用） | ❌ | ❌ | Leader 选举、互斥锁 |
+| Cookie 轮询 | 必须同源（domain 可配置） | 延迟大 | ✅（4KB） | ❌ | 极老旧环境兜底，不推荐 |
+| WebSocket / SSE（服务端中转） | 无（服务端仲裁） | 实时 | 由服务端决定 | ✅ | 跨设备、跨浏览器、跨用户协同 |
+| WebRTC DataChannel | 经信令交换 | 实时 | ❌ | ✅ | P2P 低延迟大数据 |
+
+## 6.2 BroadcastChannel（同源广播首选）
+
+```typescript
+// 文件: src/bus/broadcast.ts [浏览器]
+// 所有同源页面用相同频道名即可互通
+const channel = new BroadcastChannel('app-channel');
+
+// 发送（任意可结构化克隆的数据）
+channel.postMessage({ type: 'THEME_CHANGE', theme: 'dark', at: Date.now() });
+
+// 接收
+channel.onmessage = (e: MessageEvent) => {
+    if (e.data.type === 'THEME_CHANGE') applyTheme(e.data.theme);
+};
+
+// ⚠️ 关键特性：消息会发给"其他"上下文，自己不会收到（无回声问题）；
+// 同源的 Worker / SharedWorker / ServiceWorker 中也能创建同名频道；
+// 不在线的 Tab 收不到历史消息（无持久化、无补发）。
+channel.close(); // 页面销毁前可显式关闭（不关闭也会随页面回收）
+```
+
+⚠️ 边界：
+
+- 浏览器隐私模式 / 不同浏览器配置文件之间互不相通；
+- Safari < 15.4 不支持，需 localStorage 兜底（见 6.10 的组合封装）；
+- 消息大小同样受结构化克隆成本约束，别当数据总线传大数组。
+
+## 6.3 localStorage + storage 事件（兼容性之王）
+
+`localStorage` 是同源页面**共享**的持久存储。当一个 Tab 修改它时，**其他所有同源 Tab** 会收到 `storage` 事件：
+
+```typescript
+// Tab A：写入
+localStorage.setItem('theme', JSON.stringify({ value: 'dark', ts: Date.now() }));
+
+// Tab B/C：监听
+window.addEventListener('storage', (e: StorageEvent) => {
+    // e.key：被改的键；e.oldValue/e.newValue：新旧值（都是字符串）
+    // e.storageArea：被操作的 Storage 对象；e.url：触发写入的页面地址
+    if (e.key === 'theme' && e.newValue) {
+        applyTheme(JSON.parse(e.newValue).value);
+    }
+});
+```
+
+⚠️ 必知细节：
+
+1. **写入的那个 Tab 自己不触发 storage 事件**（同 BroadcastChannel），本地状态直接在写入处更新即可；
+2. 写入**相同的值**在多数浏览器中不触发事件（值未变化），所以消息体里带上时间戳 / 自增 id 保证每次都是新值（✅ 见上面示例的 `ts`）；
+3. 只能存字符串，对象要 `JSON.stringify`；容量通常 5MB 左右；
+4. `sessionStorage` **不跨 Tab 共享**，不适用本方案；
+5. 隐私模式或"阻止第三方 Cookie"等设置下可能受限或抛异常，写入要 try/catch；
+6. 优点是天然持久：新打开的 Tab 直接读 localStorage 即可获得最后状态——**这是 BroadcastChannel 做不到的**，二者常组合使用。
+
+## 6.4 window.postMessage（弹窗 / iframe 双向通信）
+
+当两个窗口**存在引用关系**时（`window.open` 返回值、`iframe.contentWindow`、`window.opener`），用 `postMessage` 直接通信，**支持跨源**。
+
+### 父 → 弹窗（含握手时序处理）
+
+```typescript
+// 文件: src/bus/popup.ts [浏览器]
+const TARGET_ORIGIN = 'https://child.example.com'; // ⚠️ 生产环境禁止用 '*'
+
+const popup = window.open(`${TARGET_ORIGIN}/auth.html`, 'auth-popup', 'width=480,height=640');
+if (!popup) {
+    alert('弹窗被浏览器拦截，请允许弹出窗口'); // window.open 被拦截时返回 null
+    return;
+}
+
+window.addEventListener('message', (event: MessageEvent) => {
+    // ✅ 安全铁律 1：校验来源 origin
+    if (event.origin !== TARGET_ORIGIN) return;
+    // ✅ 进一步确认消息确实来自这个弹窗，而不是别的 iframe
+    if (event.source !== popup) return;
+
+    if (event.data?.type === 'CHILD_READY') {
+        // 子窗口就绪后才能发消息（解决"父发得太早，子还没绑监听"的时序问题）
+        popup.postMessage({ type: 'INIT', token: 'xxx' }, TARGET_ORIGIN);
+    }
+    if (event.data?.type === 'AUTH_RESULT') {
+        console.log('登录结果:', event.data.payload);
+        popup.close();
+    }
+});
+```
+
+```typescript
+// auth.html（子窗口）
+const PARENT_ORIGIN = 'https://app.example.com'; // 最好通过 URL query 由父方传入并校验白名单
+
+// 子窗口加载完先报到；⚠️ 若打开链接带 rel="noopener"，window.opener 将为 null，无法回连
+if (window.opener) {
+    window.opener.postMessage({ type: 'CHILD_READY' }, PARENT_ORIGIN);
+}
+
+window.addEventListener('message', (event) => {
+    if (event.origin !== PARENT_ORIGIN) return; // ✅ 安全铁律：子页面同样必须校验
+    if (event.data.type === 'INIT') {
+        // ...完成授权后回传结果
+        window.opener?.postMessage({ type: 'AUTH_RESULT', payload: { ok: true } }, PARENT_ORIGIN);
+    }
+});
+```
+
+### 父 ↔ iframe
+
+```typescript
+const iframe = document.querySelector<HTMLIFrameElement>('#child')!;
+
+iframe.addEventListener('load', () => {
+    iframe.contentWindow?.postMessage({ type: 'PING' }, 'https://child.example.com');
+});
+
+window.addEventListener('message', (event) => {
+    if (event.origin !== 'https://child.example.com') return;
+    if (event.source !== iframe.contentWindow) return; // 确认来源
+    console.log('iframe 回包:', event.data);
+});
+```
+
+✅ 安全要点总结：
+
+- 接收方**永远校验 `event.origin`**（白名单），绝不盲信 `event.data`；
+- 发送方 `targetOrigin` 指定精确源，不用 `'*'`，防止窗口被导航到恶意站点后泄露数据；
+- 数据里不要直接传 HTML 后 `innerHTML`，防止 XSS；
+- 跨源时只能用 `postMessage`，不能直接读对方的 `document`、`localStorage`。
+
+## 6.5 SharedWorker 作为消息总线
+
+即模块三的模式：所有 Tab 各持一个端口连入同一 SharedWorker，Worker 充当发布订阅中心。相比 BroadcastChannel 的增量能力：
+
+- 可在 Worker 内保存**服务端连接、鉴权状态、最近消息缓存**（新 Tab 连上立刻补全量状态，BroadcastChannel 做不到）；
+- 可做消息扇出、去重、合并；
+- 代价是 Safari 16 以下不支持，需要降级。
+
+## 6.6 ServiceWorker 作为中继
+
+如 5.7 所示：页面 A → SW → `clients.matchAll()` 遍历 → 页面 B/C。
+
+特点：
+
+- 即使页面正在导航、主脚本还没加载，SW 依然存活可中转；
+- 天然适合"离线消息暂存"：SW 收到 push 时若无页面在线，可先写 IndexedDB，页面上线后投递；
+- 代价：要先成功注册 SW、HTTPS、逻辑链路更长。BroadcastChannel 在 SW 内同样可用，**SW + BroadcastChannel 组合**是比手写 Clients 遍历更简洁的广播实现。
+
+## 6.7 IndexedDB + Web Locks：大数据共享与 Leader 选举
+
+### IndexedDB：同源共享的大容量持久库
+
+所有同源 Tab 看到同一份 IndexedDB。但 IDB **没有变更通知 API**，通常的组合是：**数据写 IDB（大、持久）+ 通知走 BroadcastChannel / storage 事件（小、即时）**。
+
+```typescript
+// 写入方：消息正文存 IDB，广播里只传 id
+await idb.messages.add({ id: 1024, content: hugePayload });
+channel.postMessage({ type: 'NEW_MESSAGE', id: 1024 });
+// 接收方：收到通知后按 id 去 IDB 拉取，避免克隆大对象
+```
+
+### Web Locks API：跨 Tab 互斥与 Leader 选举
+
+`navigator.locks` 提供跨 Tab 分布式锁：持锁的 Tab 关闭 / 崩溃后锁**自动释放**，天然适合选主。
+
+```typescript
+// 文件: src/bus/leader.ts [浏览器]
+async function runLeaderElection(onBecomeLeader: () => void, onLose?: () => void) {
+    // 申请一把名为 app-leader 的独占锁；回调不返回，锁就一直被本 Tab 持有
+    await navigator.locks.request('app-leader', { mode: 'exclusive' }, async () => {
+        onBecomeLeader(); // 拿到锁 = 本 Tab 当选 Leader
+        await new Promise<void>(() => { /* 永不 resolve：长期持锁 */ });
+    });
+    // 走到这里说明锁丢了（一般是 steal 被抢占）
+    onLose?.();
+}
+
+runLeaderElection(() => {
+    console.log('本 Tab 是 Leader：建立唯一 WebSocket...');
+    const ws = new WebSocket('wss://example.com/push');
+    ws.onmessage = (e) => {
+        // Leader 收到服务端推送后，通过 BroadcastChannel 扇出给所有 Follower Tab
+        new BroadcastChannel('app-channel').postMessage({ type: 'PUSH', data: e.data });
+    };
+});
+```
+
+工作机制：多个 Tab 同时 `request` 同名锁时排队，第一个获得，其余等待；Leader Tab 崩溃 → 锁自动释放 → 队列中下一个 Tab 立即获选，**无需心跳、无脑裂**。还支持 `{ ifAvailable: true }`（非阻塞试探）与 `steal: true`（强制接管）。
+
+## 6.8 服务端中转：WebSocket / SSE（唯一能跨设备的方案）
+
+以上所有方案都只在**同一浏览器内**有效。跨设备、跨浏览器实例协同必须经服务端：
+
+```typescript
+// 架构：浏览器(任意 Tab/设备) ──WS/SSE──► 服务端房间 ──► 其他连接
+// 配合 6.7 的 Leader 选举：同一浏览器只让 Leader Tab 建 WS，
+// Leader 再用 BroadcastChannel 扇给本机其他 Tab，节省服务端连接数。
+const socket = new WebSocket('wss://example.com/room/123');
+socket.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    new BroadcastChannel('room-123').postMessage(msg); // 本机多 Tab 同步
+};
+```
+
+- SSE（Server-Sent Events）：服务端单向推送、自动重连、走 HTTP，适合"只推不写"的通知场景；
+- WebSocket：全双工，适合聊天、协同编辑。
+
+## 6.9 其他非主流方案（了解即可）
+
+- **Cookie 共享 + 定时轮询**：同域 Cookie 跨 Tab 共享，但仅 4KB、读 Cookie 无事件只能轮询，已淘汰；
+- **WebRTC DataChannel**：浏览器间 P2P 直连，仍需信令服务器交换 SDP，适合大文件 / 低延迟场景；
+- **`window.opener` 直接调函数**：仅同源、引用存活时可行（如 `opener.callback(x)`），强耦合、易受导航影响，postMessage 是更安全的替代；
+- **URL hash / window.name**：上古黑科技，现代项目不要用。
+
+## 6.10 选型决策树
+
+```mermaid
+flowchart TD
+    A[需要跨 Tab 通信?] --> B{需要跨设备/跨浏览器?}
+    B -- 是 --> C[WebSocket / SSE 服务端中转]
+    B -- 否 --> D{两个窗口持有引用?<br/>弹窗/iframe}
+    D -- 是 --> E[window.postMessage<br/>严格校验 origin]
+    D -- 否 --> F{需要共享连接/<br/>内存状态?}
+    F -- 是且不需兼容老Safari --> G[SharedWorker 总线]
+    F -- 否 --> H{已注册 PWA /<br/>需离线唤醒?}
+    H -- 是 --> I[ServiceWorker + BroadcastChannel]
+    H -- 否 --> J[BroadcastChannel 为主<br/>storage 事件兜底+持久化]
+    J --> K[大数据落 IndexedDB<br/>协调互斥用 Web Locks]
+```
+
+---
+
+# 模块七：综合实战
+
+## 7.1 跨 Tab 登录态同步（登出一处，处处登出）
+
+需求：任意 Tab 退出登录，其他所有 Tab 立即跳登录页；新 Tab 打开时自动读到当前登录态。
+
+```typescript
+// 文件: src/bus/auth-sync.ts [浏览器]
+class AuthSync {
+    private channel?: BroadcastChannel;
+    private storageKey = 'auth-session';
+
+    start(onLogout: () => void, onLogin: (session: unknown) => void) {
+        if ('BroadcastChannel' in window) {
+            this.channel = new BroadcastChannel('auth');
+            this.channel.onmessage = e => this.handle(e.data, onLogout, onLogin);
+        }
+        // storage 兜底：老浏览器 + 天然持久化双通道
+        window.addEventListener('storage', (e) => {
+            if (e.key !== this.storageKey || !e.newValue) return;
+            this.handle(JSON.parse(e.newValue), onLogout, onLogin);
+        });
+    }
+
+    // 本地直接改状态 + 广播 + 落盘（storage 方案需要持久值）
+    emitLogout() {
+        localStorage.setItem(this.storageKey, JSON.stringify({ status: 'out', ts: Date.now() }));
+        this.channel?.postMessage({ status: 'out' });
+        // 写入 Tab 自己收不到事件，主动执行一次
+        this.handle({ status: 'out' }, () => location.assign('/login'), () => {});
+    }
+
+    emitLogin(session: unknown) {
+        localStorage.setItem(this.storageKey, JSON.stringify({ status: 'in', session, ts: Date.now() }));
+        this.channel?.postMessage({ status: 'in', session });
+    }
+
+    private handle(msg: any, onLogout: () => void, onLogin: (s: unknown) => void) {
+        if (msg.status === 'out') onLogout();
+        if (msg.status === 'in') onLogin(msg.session);
+    }
+}
+```
+
+⚠️ 安全注意：token 存 localStorage 有 XSS 窃取风险，安全等级高的系统应使用 `HttpOnly + Secure + SameSite` Cookie 承载会话，localStorage 只放"是否登录"的非敏感标志位。
+
+## 7.2 跨 Tab 主题同步（BroadcastChannel + 持久化最简版）
+
+```typescript
+const bus = new BroadcastChannel('theme');
+
+function applyTheme(theme: 'light' | 'dark') {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('theme', JSON.stringify({ theme, ts: Date.now() }));
+    bus.postMessage({ theme }); // 其他 Tab 实时跟随
+}
+
+bus.onmessage = e => document.documentElement.dataset.theme = e.data.theme;
+window.addEventListener('storage', e => {
+    if (e.key === 'theme' && e.newValue) {
+        document.documentElement.dataset.theme = JSON.parse(e.newValue).theme;
+    }
+});
+
+// 新 Tab 初始化：直接读最后一次持久值
+const saved = localStorage.getItem('theme');
+if (saved) document.documentElement.dataset.theme = JSON.parse(saved).theme;
+```
+
+## 7.3 Leader 选举 + 单连接扇出（生产级实现）
+
+整合 6.7 + 6.8 + 6.2：每个 Tab 启动都参与 Web Locks 选主；Leader 建立**唯一** WebSocket，负责重连与心跳，并把服务端消息经 BroadcastChannel 扇出；Follower 的上行消息也走同一频道请 Leader 代发。Leader 崩溃 → 锁由浏览器自动释放 → 排队中的某个 Follower 立即升主重建连接。
+
+```typescript
+// 文件: src/leader-ws.ts —— 零依赖完整实现（任一 Tab 引入即可）
+const LOCK = 'ws-leader';
+const bus = new BroadcastChannel('ws-bus');
+
+// ---------- Leader：唯一持有 WebSocket 的 Tab ----------
+let attempt = 0;
+
+function becomeLeader() {
+    console.info('[leader] 当选，建立唯一连接');
+    const ws = new WebSocket('wss://example.com/rt');
+
+    ws.onopen = () => { attempt = 0; };
+    ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        bus.postMessage({ type: 'SERVER_MSG', msg }); // ① 扇出给所有 Tab（含自己）
+    };
+    // full-jitter 指数退避重连：断开后重新走一遍选主（可能已不是本 Tab 当选）
+    ws.onclose = () => {
+        const delay = Math.random() * Math.min(30_000, 500 * 2 ** attempt++);
+        setTimeout(() => tryBecomeLeader(), delay);
+    };
+
+    // ② Follower 的上行消息由 Leader 代发
+    bus.onmessage = ({ data }) => {
+        if (data.type === 'UP' && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(data.msg));
+        }
+    };
+}
+
+// ---------- 全体 Tab：参与选主 ----------
+function tryBecomeLeader() {
+    // 回调返回永不 resolve 的 Promise = 长期持锁；页面关闭/崩溃时浏览器自动释放
+    navigator.locks.request(LOCK, { mode: 'exclusive' }, async () => {
+        becomeLeader();
+        await new Promise<void>(() => {});
+    }).catch(() => {}); // 未抢到锁时 request 的 Promise 会在持锁者释放后 resolve
+}
+tryBecomeLeader();
+
+// ---------- 所有 Tab 统一消费入口 ----------
+let lastSeq = -1;
+bus.addEventListener('message', ({ data }) => {
+    if (data.type !== 'SERVER_MSG') return;
+    // ③ Leader 交接瞬间新旧可能同时扇出，用服务端单调 seq 去重
+    if (data.msg.seq <= lastSeq) return;
+    lastSeq = data.msg.seq;
+    render(data.msg); // 业务渲染（按需实现）
+});
+
+// 上行 API：调用方无需关心谁是 Leader
+export function sendUp(msg: unknown) {
+    bus.postMessage({ type: 'UP', msg });
+}
+```
+
+设计要点：
+
+- **交接期重复扇出**：新旧 Leader 切换的一瞬间可能都在广播，消费端必须用服务端单调递增 `seq` 去重，否则 UI 会出现"消息闪回"；
+- **不会双连接**：多个 Follower 同时重试选主时，Web Locks 保证同一时刻只有一个 Tab 当选——这是选 Web Locks 而非自研心跳投票的核心原因（锁由浏览器进程托管，无脑裂窗口）；
+- **省电**：Follower 监听 `document.visibilityState`，Tab 隐藏时暂停动画渲染但仍接收数据；非 Leader Tab 也可直接不渲染、只存数据；
+- **不丢消息**：未发送的上行队列落 IndexedDB（封装见 6.7），新 Leader 当选后先 flush 队列再发新消息。
+
+## 7.4 大数据计算卸载（Worker + 进度回调 + 可取消）
+
+```typescript
+// 主线程：处理百万行 CSV 解析
+const worker = new Worker(new URL('./csv.worker.ts', import.meta.url), { type: 'module' });
+
+worker.postMessage({ id: 1, type: 'PARSE_CSV', payload: file /* File 可结构化克隆 */ });
+
+worker.onmessage = (e) => {
+    const { id, type } = e.data;
+    if (type === 'PROGRESS') progressBar.value = e.data.percent;       // Worker 主动回报进度
+    if (type === 'DONE') renderTable(e.data.rows);
+    if (type === 'ERROR') toast.error(e.data.message);
+};
+
+cancelBtn.onclick = () => worker.postMessage({ id: 1, type: 'CANCEL' }); // 协作式取消
+// 紧急情况下也可 worker.terminate() 强杀（但会丢失所有上下文）
+```
+
+```typescript
+// csv.worker.ts：协作式取消 + 分片让步事件循环，避免 worker 内长任务饿死消息
+let cancelled = false;
+self.onmessage = async (e) => {
+    if (e.data.type === 'CANCEL') { cancelled = true; return; }
+    if (e.data.type === 'PARSE_CSV') {
+        const rows: unknown[] = [];
+        const text = await e.data.payload.text();
+        const lines = text.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            if (cancelled) return self.postMessage({ type: 'CANCELLED' });
+            rows.push(parseLine(lines[i]));
+            if (i % 5000 === 0) {
+                self.postMessage({ type: 'PROGRESS', percent: i / lines.length });
+                await new Promise(r => setTimeout(r, 0)); // 让出事件循环，取消指令有机会被处理
+            }
+        }
+        self.postMessage({ type: 'DONE', rows });
+    }
+};
+```
+
+## 7.5 PWA 离线壳 + SW 更新提示（最小闭环）
+
+整合 5.3 / 5.4 / 5.6：
+
+- `install`：预缓存 App Shell（HTML/CSS/核心 JS/offline.html）；
+- `fetch`：HTML 走 Network First（保证总能拿到最新入口），静态资源走 Cache First（带 hash 可长期缓存），离线导航兜底 offline.html；
+- `activate`：按版本号清理旧缓存；
+- 页面：`updatefound` 检测 waiting 版本 → 弹提示 → 用户确认后 `postMessage('SKIP_WAITING')` → `controllerchange` → `location.reload()`；
+- DevTools 验收：Offline 勾选后刷新仍出页面 → 缓存策略生效；Update on reload 保证开发不被旧 SW 坑。
+
+---
+
+# 模块八：Worklet 家族（Paint / Animation / Audio）
+
+Worklet 是比 Worker **更轻量、与渲染/音频管线深度绑定**的一类执行单元。它不是用来"通用计算卸载"的，而是让开发者把一段代码注入浏览器的**渲染线程或音频线程**，在每一帧 / 每一个音频采样块被浏览器同步回调。
+
+## 8.1 Worklet 与 Worker 的本质区别
+
+| 维度 | Worker | Worklet |
+| ---- | ---- | ---- |
+| 调度方式 | 独立事件循环，自己安排任务 | **被宿主管线按帧 / 按采样块同步回调**，没有独立事件循环 |
+| 通信 | `postMessage` 异步消息 | Paint/Animation 主要靠 CSS 属性 / 时间线输入；AudioWorklet 用 `port.postMessage` |
+| 运行线程 | Worker 线程 | Paint/Animation 在**渲染主线程相关的绘制管线**；AudioWorklet 在**实时音频线程** |
+| 生命周期 | 自行创建/销毁 | 浏览器根据是否有元素/动画/音频节点使用它来决定 |
+| API 丰富度 | 较完整（fetch、IDB、定时器…） | **极度受限**，只保留完成本职工作所需的最小 API |
+| 加载方式 | `new Worker(url)` | `CSS.paintWorklet.addModule(url)` / `audioWorklet.addModule(url)` |
+
+⚠️ 一句话选型：**通用计算找 Worker，自定义绘制 / 滚动联动动画 / 低延迟音频处理才找 Worklet**。
+
+## 8.2 CSS Painting API（PaintWorklet）
+
+PaintWorklet 允许用 Canvas 2D 子集 API 定义一个"可被 CSS 引用的绘制函数"，浏览器在需要绘制元素背景/边框/mask 时调用它。它天生享受**无效化（invalidatation）重绘只在必要时发生**、且绘制结果随元素尺寸/DPR 自动伸缩。
+
+```javascript
+// 文件: examples/18-05-worklet/paint-worklet.js
+// PaintWorklet 全局环境：没有 window，通过 registerPaint 注册绘制类
+class CornerBeads {
+    // 声明关心的自定义属性（类型化后浏览器才知道如何解析与触发重绘）
+    static get inputProperties() {
+        return ['--bead-color', '--bead-count'];
+    }
+    // 也可用 inputArguments 接收 paint(...) 括号里的参数
+
+    paint(ctx, size, properties) {
+        // ctx：受限版 CanvasRenderingContext2D（部分方法不可用）
+        // size：元素边框盒尺寸 { width, height }，随元素大小自动变化
+        const count = parseInt(properties.get('--bead-count').toString(), 10) || 8;
+        ctx.fillStyle = properties.get('--bead-color').toString() || '#3b82f6';
+
+        const r = 4;
+        // 在元素底边均匀画一排小圆点（典型用途：程序化背景、占位骨架、图表纹理）
+        for (let i = 0; i < count; i++) {
+            const x = (size.width / (count - 1)) * i;
+            ctx.beginPath();
+            ctx.arc(x, size.height - r - 2, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+}
+
+registerPaint('corner-beads', CornerBeads); // 名字即 CSS 中 paint(corner-beads) 的引用
+```
+
+```html
+<!-- 文件: examples/18-05-worklet/index.html -->
+<style>
+    .beads {
+        width: 320px;
+        height: 64px;
+        border: 1px dashed #94a3b8;
+        --bead-color: #ef4444;
+        --bead-count: 12;
+        background: paint(corner-beads); /* 引用注册名 */
+    }
+</style>
+<div class="beads"></div>
+<script>
+    // 能力检测 + 加载（Worklet 脚本与页面同源，HTTPS/localhost 或普通静态服务器均可）
+    if ('paintWorklet' in CSS) {
+        CSS.paintWorklet.addModule('./paint-worklet.js');
+    } else {
+        // 不支持时降级为普通背景图 / 纯 CSS 方案
+        document.querySelector('.beads').style.background = '#f1f5f9';
+    }
+</script>
+```
+
+要点：
+
+- 修改 `--bead-*` 自定义属性会触发对应元素重绘；想在 JS 中主动请求重绘可在 Worklet 内用 `registerPaint` 返回对象的 `paint` + 页面侧不透明属性变更驱动；
+- ctx 是 **Polyfill 过的受限 2D 上下文**（无文字渲染、无部分合成操作），适合几何图形、噪声、网格、棋盘、骨架屏纹理；
+- 浏览器会自动在**多个绘制实例间复用同一个 Worklet 模块**，且高 DPR 屏幕输出清晰，无需手写 devicePixelRatio 缩放。
+
+## 8.3 AnimationWorklet 与滚动驱动动画
+
+AnimationWorklet 让动画的**时间源不再是墙上时钟，而是滚动位置等进度输入**，回调运行在渲染管线中，即使主线程繁忙滚动动画也不丢帧：
+
+```javascript
+// animator-worklet.js（示意）
+registerAnimator('scroll-parallax', class {
+    animate(currentTime, effect) {
+        // currentTime 由关联的 ScrollTimeline 提供（滚动进度映射的本地时间）
+        effect.localTime = currentTime; // 把滚动进度直接喂给关键帧效果
+    }
+});
+```
+
+```javascript
+// 页面侧（Chromium 系；需特性检测）
+if ('animationWorklet' in CSS && 'ScrollTimeline' in window) {
+    await CSS.animationWorklet.addModule('./animator-worklet.js');
+    new WorkletAnimation(
+        'scroll-parallax',
+        new KeyframeEffect(document.querySelector('#bg'), [
+            { transform: 'translateY(0)' },
+            { transform: 'translateY(-120px)' },
+        ]),
+        new ScrollTimeline({ source: document.scrollingElement })
+    ).play();
+}
+```
+
+⚠️ 实践现状（2026）：滚动驱动动画的主流写法已收敛为**纯 CSS / Web Animations API 的原生 ScrollTimeline**，无需 Worklet：
+
+```css
+/* 等价能力的现代原生写法，Chromium 已稳定 */
+@keyframes parallax { to { transform: translateY(-120px); } }
+#bg {
+    animation: parallax linear;
+    animation-timeline: scroll(root block);
+}
+```
+
+✅ 建议：优先用 `animation-timeline: scroll()/view()`；只有需要**每帧自定义计算**（复杂弹簧、多元素联动的非关键帧逻辑）时才考虑 AnimationWorklet，并做好降级。
+
+## 8.4 AudioWorklet（低延迟音频处理）
+
+AudioWorklet 取代了已废弃的 `ScriptProcessorNode`（后者在主线程处理音频，易卡顿爆音）。处理代码运行在**实时音频线程**，每次回调固定处理 128 个采样（规范定值），对时序极其敏感：
+
+```javascript
+// 文件: examples/18-05-worklet/vumeter-processor.js
+class VUMeterProcessor extends AudioWorkletProcessor {
+    constructor() {
+        super();
+        this.peak = 0;
+    }
+
+    process(inputs) {
+        // inputs[0]：第一个输入；每个输入是 [声道][128 个采样] 的二维数组
+        const channel = inputs[0]?.[0];
+        if (channel) {
+            for (let i = 0; i < channel.length; i++) {
+                const abs = Math.abs(channel[i]);
+                if (abs > this.peak) this.peak = abs;
+            }
+            // 节流：音量变化明显时才往主线程发，避免每 128 样本一次消息造成风暴
+            if (this.peak > 0.001) this.port.postMessage({ level: this.peak });
+            this.peak *= 0.95; // 简单回落
+        }
+        return true; // ⚠️ 返回 false 节点会被销毁；持续处理必须返回 true
+    }
+}
+registerProcessor('vumeter', VUMeterProcessor);
+```
+
+```javascript
+// 文件: examples/18-05-worklet/audio-main.js [浏览器]
+async function startMeter(stream) {
+    const ctx = new AudioContext();
+    await ctx.audioWorklet.addModule('./vumeter-processor.js'); // 必须先加载模块
+
+    const source = ctx.createMediaStreamSource(stream);          // 麦克风输入
+    const meter = new AudioWorkletNode(ctx, 'vumeter');         // 用注册名建节点
+    source.connect(meter);
+    // meter 不 connect(destination)：只分析不发声，避免回授啸叫
+
+    meter.port.onmessage = (e) => {
+        document.querySelector('#level').style.width = `${e.data.level * 100}%`;
+    };
+}
+```
+
+⚠️ 音频线程铁律：
+
+- `process()` 内**禁止分配对象、禁止 console、禁止锁等待**——任何一次超过约 2.9ms（128 样本 / 44.1kHz）的延迟都可能爆音；
+- 与主线程交换数据只能通过 `node.port.postMessage`，或用 `AudioWorkletNode` 构造参数里声明的 AudioParam（每个采样块自动取当前值）；
+- 大数据/配置（如滤波器系数表）在启动时一次性通过 port 传入，不要在 process 里做计算初始化；
+- 浏览器自动暂停的 AudioContext 需用户手势后 `ctx.resume()`。
+
+## 8.5 其他 Worklet 与兼容性
+
+- **LayoutWorklet**（CSS Layout API，`display: layout(xxx)` 自定义布局）：曾在 Chromium 实验，未进入稳定版，❌ 不要在生产使用；
+- 兼容性（2026 基线）：PaintWorklet / AudioWorklet 在 Chromium 系与 Firefox 已支持，Safari 对 PaintWorklet 支持较晚——**全部必须特性检测后使用，并准备 CSS/图片降级**；
+- 调试：PaintWorklet 代码在 DevTools Sources 中可找到独立上下文断点；AudioWorklet 的 process 不适合打断点（会直接中断音频流），用计数 + 节流 port 消息观测。
+
+> 本模块可运行示例：<a href="./examples/18-05-worklet/index.html" target="_blank" rel="noopener">examples/18-05-worklet/</a>（PaintWorklet 底纹 + AudioWorklet 音量条），运行方式见模块九 9.7。
+
+---
+
+# 模块九：框架与构建工具集成
+
+Worker / SW 在工程中落地，90% 的问题出在**构建工具如何打包 Worker 脚本**与**框架组件生命周期如何管理 Worker**。
+
+## 9.1 Vite 中的 Worker
+
+Vite 原生支持标准写法，且提供显式后缀导入：
+
+```typescript
+// ✅ 方式一：标准构造 + URL 锚定（Vite dev/build 都支持，产物自动分包）
+const worker = new Worker(new URL('./workers/calc.worker.ts', import.meta.url), {
+    type: 'module',
+});
+
+// ✅ 方式二：Vite 后缀导入（语义更显式，TS 需 vite/client 类型）
+import CalcWorker from './workers/calc.worker.ts?worker';
+// 产物内联为 Blob URL（无法利用独立缓存 / CSP 更严时才用）：
+import InlineWorker from './workers/calc.worker.ts?worker&inline';
+
+const worker = new CalcWorker();
+```
+
+SharedWorker 加后缀 `?sharedworker`：
+
+```typescript
+import CounterWorker from './workers/counter.shared.worker.ts?sharedworker';
+const sw = new CounterWorker(); // 等价于 new SharedWorker(产物 URL)
+```
+
+注意事项：
+
+- ⚠️ 不要把 URL 写成动态拼接字符串（`new Worker('./workers/' + name + '.worker.ts')`），构建工具无法静态分析，生产构建会丢文件；
+- Vite 默认 dev 用 ESM、build 输出独立 chunk；需要兼容更老环境时在 `vite.config.ts` 设 `worker.format: 'iife'`，并用 `worker.plugins` 给 Worker 构建复用 esbuild/其他插件；
+- Worker 内 `import` 的第三方依赖会被一起打进 worker chunk，Tree Shaking 正常生效。
+
+```typescript
+// vite.config.ts 中与 Worker 相关的配置项
+export default defineConfig({
+    worker: {
+        format: 'es', // 'es' | 'iife'
+        // plugins: () => [] // Worker 专用插件链
+    },
+});
+```
+
+## 9.2 Webpack 5 / Rspack 中的 Worker
+
+Webpack 5 同样支持标准 `new Worker(new URL(...))`，会自动产出独立 chunk：
+
+```typescript
+const worker = new Worker(new URL('./workers/calc.worker.ts', import.meta.url));
+```
+
+- Webpack 4 及以下需要 `worker-loader`，Webpack 5 起**不要再装 worker-loader**；
+- 跨域 CDN 部署时通过 `output.publicPath` 保证 worker chunk URL 正确；
+- Rspack 对齐 Webpack 5 行为，写法一致。
+
+## 9.3 React Hooks 完整示例
+
+核心纪律：**Worker 在 effect 里创建、在 cleanup 里 terminate**；React 18+ StrictMode 开发期双挂载会创建两次，cleanup 写对就不会泄漏。下面给出一组可直接用于生产的 Hook。
+
+### 9.3.1 `useWorker`：带请求 id 关联 + 超时 + 可取消
+
+```tsx
+// 文件: src/hooks/use-worker.ts
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+// 消息协议（两端约定）
+type Req = { id: number; payload: unknown };
+type Res<T> = { id: number; ok: true; result: T } | { id: number; ok: false; error: string };
+
+export function useWorker<Input, Output>(
+    factory: () => Worker,
+    deps: unknown[] = [],
+    timeout = 15_000,
+) {
+    const workerRef = useRef<Worker | null>(null);
+    const seqRef = useRef(0);
+    const pendingRef = useRef<
+        Map<number, { resolve: (v: Output) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>
+    >(new Map());
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    // 创建 / 销毁：effect 清理时 terminate，避免 StrictMode 双挂残留
+    useEffect(() => {
+        const worker = factory();
+        workerRef.current = worker;
+
+        worker.onmessage = (e: MessageEvent<Res<Output>>) => {
+            const { id } = e.data;
+            const task = pendingRef.current.get(id);
+            if (!task) return;
+            clearTimeout(task.timer);
+            pendingRef.current.delete(id);
+            setBusy(pendingRef.current.size > 0);
+            e.data.ok ? task.resolve(e.data.result) : task.reject(new Error(e.data.error));
+        };
+        worker.onerror = (ev) => {
+            setError(`Worker 错误: ${ev.message} @ ${ev.filename}:${ev.lineno}`);
+        };
+        worker.onmessageerror = () => setError('Worker 消息反序列化失败');
+
+        return () => {
+            worker.terminate(); // ✅ 必须在 cleanup 中终止
+            workerRef.current = null;
+            pendingRef.current.forEach((t) => {
+                clearTimeout(t.timer);
+                t.reject(new Error('Worker 已销毁'));
+            });
+            pendingRef.current.clear();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, deps);
+
+    // 请求-响应：用自增 id 关联，支持并发多任务
+    const run = useCallback((payload: Input): Promise<Output> => {
+        return new Promise<Output>((resolve, reject) => {
+            const worker = workerRef.current;
+            if (!worker) return reject(new Error('Worker 未就绪'));
+
+            const id = ++seqRef.current;
+            const timer = setTimeout(() => {
+                pendingRef.current.delete(id);
+                setBusy(pendingRef.current.size > 0);
+                reject(new Error(`Worker 任务超时(${timeout}ms)`));
+            }, timeout);
+
+            pendingRef.current.set(id, { resolve, reject, timer });
+            setBusy(true);
+            setError(null);
+
+            const req: Req = { id, payload };
+            worker.postMessage(req);
+        });
+    }, [timeout]);
+
+    // 协作式取消：给 Worker 发取消信号（Worker 内自行判断中断）
+    const cancel = useCallback(() => {
+        workerRef.current?.postMessage({ id: -1, type: 'CANCEL' });
+    }, []);
+
+    return { run, busy, error, cancel };
+}
+
+/* 使用示例
+const { run, busy, error } = useWorker<File, Row[]>(
+    () => new Worker(new URL('./csv.worker.ts', import.meta.url), { type: 'module' }),
+    [],
+);
+const rows = await run(file);
+*/
+```
+
+要点：
+
+- **请求 id 关联**：避免多个并发 `run()` 互相串扰（原版单 listener 无法处理并发）；
+- **busy 基于 pending 计数**：多个任务并发时全部完成才归零；
+- **超时**：仅拒绝当前 Promise，**不 terminate 整个 Worker**（否则其他任务被杀）；
+- **cleanup 里 reject 全部 pending**：组件卸载后 pending 的 Promise 不会永远挂起。
+
+### 9.3.2 `useBroadcastChannel`：订阅式跨 Tab 通信
+
+```tsx
+// 文件: src/hooks/use-broadcast-channel.ts
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+export function useBroadcastChannel<T = unknown>(name: string) {
+    const [message, setMessage] = useState<T | null>(null);
+    const channelRef = useRef<BroadcastChannel | null>(null);
+
+    useEffect(() => {
+        if (!('BroadcastChannel' in window)) return;
+        const ch = new BroadcastChannel(name);
+        channelRef.current = ch;
+        ch.onmessage = (e: MessageEvent<T>) => setMessage(e.data);
+        return () => {
+            ch.close(); // ✅ 卸载即退订，避免向已销毁组件 setState
+            channelRef.current = null;
+        };
+    }, [name]);
+
+    // post 用 ref 里的同一通道，避免每次 new 一个短连接
+    const post = useCallback((data: T) => {
+        channelRef.current?.postMessage(data);
+    }, []);
+
+    return { message, post, supported: 'BroadcastChannel' in window };
+}
+```
+
+### 9.3.3 `useSharedWorker`：多 Tab 共享状态
+
+```tsx
+// 文件: src/hooks/use-shared-worker.ts
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+// 通用消息协议：type 区分，payload 携带数据
+type SWMessage =
+    | { type: 'STATE'; state: unknown }
+    | { type: 'PING' }
+    | { type: 'LEAVE' }
+    | { type: 'ACTION'; action: string; payload?: unknown };
+
+export function useSharedWorker<T = unknown>(
+    scriptURL: URL | string,
+    name: string,
+) {
+    const [state, setState] = useState<T | null>(null);
+    const [online, setOnline] = useState(0);
+    const portRef = useRef<MessagePort | null>(null);
+    const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    useEffect(() => {
+        const sw = new SharedWorker(scriptURL, { name });
+        const port = sw.port;
+        portRef.current = port;
+
+        // ⚠️ 用 onmessage 会隐式 start；若用 addEventListener 需手动 port.start()
+        port.onmessage = (e: MessageEvent<SWMessage>) => {
+            const msg = e.data;
+            if (msg.type === 'STATE') setState(msg.state as T);
+            // 其它类型按需扩展
+        };
+
+        // 心跳：防止崩溃 Tab 变成僵尸端口
+        heartbeatRef.current = setInterval(() => port.postMessage({ type: 'PING' }), 3000);
+
+        return () => {
+            port.postMessage({ type: 'LEAVE' });
+            port.close();
+            portRef.current = null;
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+        };
+    }, [scriptURL, name]);
+
+    const send = useCallback((action: string, payload?: unknown) => {
+        portRef.current?.postMessage({ type: 'ACTION', action, payload } as SWMessage);
+    }, []);
+
+    return { state, online, send };
+}
+```
+
+### 9.3.4 `useWebLocks`：Leader 选举（跨 Tab 单连接模式）
+
+```tsx
+// 文件: src/hooks/use-web-locks.ts
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+/**
+ * 申请一把跨 Tab 独占锁，持锁者为 Leader；Leader 崩溃后锁自动释放，
+ * 等待队列中的下一个 Tab 立即当选，无需心跳检测。
+ */
+export function useWebLocks(lockName: string) {
+    const [isLeader, setIsLeader] = useState(false);
+    const onBecomeLeaderRef = useRef<(() => void) | null>(null);
+
+    const runAsLeader = useCallback((fn: () => void) => {
+        onBecomeLeaderRef.current = fn;
+    }, []);
+
+    useEffect(() => {
+        let released = false;
+        let releaseFn: (() => void) | null = null;
+
+        navigator.locks.request(lockName, { mode: 'exclusive' }, async () => {
+            if (released) return;
+            setIsLeader(true);
+            onBecomeLeaderRef.current?.();
+            // 永不 resolve 的 Promise：只要组件活着就一直持锁
+            await new Promise<void>((resolve) => { releaseFn = resolve; });
+            setIsLeader(false);
+        });
+
+        return () => {
+            released = true;
+            releaseFn?.(); // 释放锁，让排队者当选
+        };
+    }, [lockName]);
+
+    return { isLeader, runAsLeader };
+}
+
+/* 使用示例：只有 Leader 建一条 WebSocket，其余 Tab 通过 BroadcastChannel 接收扇出
+const { isLeader, runAsLeader } = useWebLocks('app-ws-leader');
+runAsLeader(() => {
+    const ws = new WebSocket('wss://...');
+    ws.onmessage = e => new BroadcastChannel('ws-bus').postMessage(e.data);
+});
+*/
+```
+
+### 9.3.5 `useServiceWorker`：注册 + 就绪 + 更新提示
+
+```tsx
+// 文件: src/hooks/use-service-worker.ts
+import { useCallback, useEffect, useState } from 'react';
+
+export function useServiceWorker(swUrl = '/sw.js') {
+    const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
+    const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
+    const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+    useEffect(() => {
+        if (!('serviceWorker' in navigator)) return;
+
+        let reg: ServiceWorkerRegistration;
+        navigator.serviceWorker.register(swUrl).then((r) => {
+            reg = r;
+            setRegistration(r);
+            if (r.waiting) setWaitingWorker(r.waiting); // 已有等待中的新版本
+
+            r.addEventListener('updatefound', () => {
+                const nw = r.installing;
+                nw?.addEventListener('statechange', () => {
+                    if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                        setWaitingWorker(nw); // 提示用户刷新
+                    }
+                });
+            });
+        });
+
+        // 新 SW 接管后刷新一次，保证页面与缓存版本一致
+        let refreshing = false;
+        const onControllerChange = () => {
+            if (refreshing) return;
+            refreshing = true;
+            location.reload();
+        };
+        navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+
+        const onOnline = () => setIsOffline(false);
+        const onOffline = () => setIsOffline(true);
+        window.addEventListener('online', onOnline);
+        window.addEventListener('offline', onOffline);
+
+        return () => {
+            navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+            window.removeEventListener('online', onOnline);
+            window.removeEventListener('offline', onOffline);
+        };
+    }, [swUrl]);
+
+    // 用户确认后让 waiting 的 SW 立刻激活
+    const activateWaiting = useCallback(() => {
+        waitingWorker?.postMessage('SKIP_WAITING');
+        setWaitingWorker(null);
+    }, [waitingWorker]);
+
+    // 手动检查更新（可在页面 visibilitychange 时调用）
+    const checkUpdate = useCallback(() => registration?.update(), [registration]);
+
+    return { registration, waitingWorker, isOffline, activateWaiting, checkUpdate };
+}
+```
+
+## 9.4 Vue 3 组合式 API 完整示例
+
+Vue 3 与 React 的核心差别：**用 `shallowRef`/`markRaw` 避免深层响应式代理**，**`onScopeDispose` 统一清理**，长生命周期单例放模块顶层或 `provide/inject`。
+
+### 9.4.1 `useWorker`：带请求 id 关联 + 超时 + 取消
+
+```typescript
+// 文件: src/composables/useWorker.ts
+import { markRaw, onScopeDispose, ref, shallowRef } from 'vue';
+
+type Req = { id: number; payload: unknown };
+type Res<T> = { id: number; ok: true; result: T } | { id: number; ok: false; error: string };
+
+export function useWorker<Input = unknown, Output = unknown>(
+    factory: () => Worker,
+    timeout = 15_000,
+) {
+    // ⚠️ Worker 实例必须 shallowRef + markRaw，否则 postMessage 会被 Proxy 拦截
+    const worker = shallowRef<Worker | null>(null);
+    const busy = ref(false);
+    const error = ref<string | null>(null);
+    const pending = new Map<
+        number,
+        { resolve: (v: Output) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
+    >();
+    let seq = 0;
+
+    worker.value = markRaw(factory());
+    const w = worker.value!;
+
+    w.onmessage = (e: MessageEvent<Res<Output>>) => {
+        const task = pending.get(e.data.id);
+        if (!task) return;
+        clearTimeout(task.timer);
+        pending.delete(e.data.id);
+        busy.value = pending.size > 0;
+        e.data.ok ? task.resolve(e.data.result) : task.reject(new Error(e.data.error));
+    };
+    w.onerror = (ev) => { error.value = `Worker 错误: ${ev.message}`; };
+
+    function run(payload: Input): Promise<Output> {
+        return new Promise<Output>((resolve, reject) => {
+            const id = ++seq;
+            const timer = setTimeout(() => {
+                pending.delete(id);
+                busy.value = pending.size > 0;
+                reject(new Error(`Worker 任务超时(${timeout}ms)`));
+            }, timeout);
+            pending.set(id, { resolve, reject, timer });
+            busy.value = true;
+            error.value = null;
+            w.postMessage({ id, payload } as Req);
+        });
+    }
+
+    const cancel = () => w.postMessage({ id: -1, type: 'CANCEL' });
+
+    // ✅ onScopeDispose：组件卸载 / effectScope 停止时统一销毁
+    onScopeDispose(() => {
+        w.terminate();
+        pending.forEach((t) => { clearTimeout(t.timer); t.reject(new Error('Worker 已销毁')); });
+        pending.clear();
+    });
+
+    return { worker, busy, error, run, cancel };
+}
+```
+
+### 9.4.2 `useBroadcastChannel`
+
+```typescript
+// 文件: src/composables/useBroadcastChannel.ts
+import { onScopeDispose, ref } from 'vue';
+
+export function useBroadcastChannel<T = unknown>(name: string) {
+    const message = ref<T | null>(null);
+    const supported = 'BroadcastChannel' in window;
+    let channel: BroadcastChannel | null = null;
+
+    if (supported) {
+        channel = new BroadcastChannel(name);
+        channel.onmessage = (e: MessageEvent<T>) => { message.value = e.data; };
+    }
+
+    const post = (data: T) => channel?.postMessage(data);
+
+    onScopeDispose(() => channel?.close());
+
+    return { message, post, supported };
+}
+```
+
+### 9.4.3 `useSharedWorker`
+
+```typescript
+// 文件: src/composables/useSharedWorker.ts
+import { markRaw, onScopeDispose, ref, shallowRef } from 'vue';
+
+type SWMessage =
+    | { type: 'STATE'; state: unknown }
+    | { type: 'PING' }
+    | { type: 'LEAVE' }
+    | { type: 'ACTION'; action: string; payload?: unknown };
+
+export function useSharedWorker<T = unknown>(scriptURL: URL | string, name: string) {
+    const state = ref<T | null>(null);
+    const online = ref(0);
+    const port = shallowRef<MessagePort | null>(null);
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+    const sw = new SharedWorker(scriptURL, { name });
+    port.value = markRaw(sw.port);
+
+    sw.port.onmessage = (e: MessageEvent<SWMessage>) => {
+        if (e.data.type === 'STATE') state.value = e.data.state as T;
+    };
+
+    heartbeat = setInterval(() => sw.port.postMessage({ type: 'PING' }), 3000);
+
+    const send = (action: string, payload?: unknown) => {
+        sw.port.postMessage({ type: 'ACTION', action, payload } as SWMessage);
+    };
+
+    onScopeDispose(() => {
+        sw.port.postMessage({ type: 'LEAVE' });
+        sw.port.close();
+        if (heartbeat) clearInterval(heartbeat);
+    });
+
+    return { state, online, port, send };
+}
+```
+
+### 9.4.4 `useWebLocks`：Leader 选举
+
+```typescript
+// 文件: src/composables/useWebLocks.ts
+import { onScopeDispose, ref } from 'vue';
+
+export function useWebLocks(lockName: string) {
+    const isLeader = ref(false);
+    let release: (() => void) | null = null;
+
+    navigator.locks.request(lockName, { mode: 'exclusive' }, async () => {
+        isLeader.value = true;
+        await new Promise<void>((resolve) => { release = resolve; });
+        isLeader.value = false;
+    });
+
+    // 组件卸载时释放锁，让位给排队的 Tab
+    onScopeDispose(() => release?.());
+
+    return { isLeader };
+}
+```
+
+### 9.4.5 `useServiceWorker`
+
+```typescript
+// 文件: src/composables/useServiceWorker.ts
+import { onScopeDispose, ref } from 'vue';
+
+export function useServiceWorker(swUrl = '/sw.js') {
+    const registration = ref<ServiceWorkerRegistration | null>(null);
+    const waitingWorker = ref<ServiceWorker | null>(null);
+    const isOffline = ref(!navigator.onLine);
+
+    let refreshing = false;
+    const onControllerChange = () => {
+        if (refreshing) return;
+        refreshing = true;
+        location.reload();
+    };
+    const onOnline = () => { isOffline.value = false; };
+    const onOffline = () => { isOffline.value = true; };
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register(swUrl).then((reg) => {
+            registration.value = reg;
+            if (reg.waiting) waitingWorker.value = reg.waiting;
+
+            reg.addEventListener('updatefound', () => {
+                const nw = reg.installing;
+                nw?.addEventListener('statechange', () => {
+                    if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                        waitingWorker.value = nw;
+                    }
+                });
+            });
+        });
+
+        navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+        window.addEventListener('online', onOnline);
+        window.addEventListener('offline', onOffline);
+    }
+
+    const activateWaiting = () => {
+        waitingWorker.value?.postMessage('SKIP_WAITING');
+        waitingWorker.value = null;
+    };
+    const checkUpdate = () => registration.value?.update();
+
+    onScopeDispose(() => {
+        navigator.serviceWorker?.removeEventListener('controllerchange', onControllerChange);
+        window.removeEventListener('online', onOnline);
+        window.removeEventListener('offline', onOffline);
+    });
+
+    return { registration, waitingWorker, isOffline, activateWaiting, checkUpdate };
+}
+```
+
+⚠️ Vue 特有坑：Worker / WebSocket / 大数组这类对象若被 `reactive()` 包成深层 Proxy，`postMessage` 结构化克隆会丢失原型语义并产生可观开销——一律 `shallowRef` / `markRaw`。SharedWorker 单例可放在模块顶层（跨组件复用同一实例）或通过 `provide/inject` 注入。
+
+## 9.5 ServiceWorker 与框架：Workbox / vite-plugin-pwa
+
+手写 SW 适合学习，生产项目推荐 [Workbox](https://developer.chrome.com/docs/workbox)（Google 官方库）或其框架封装：
+
+| 方案 | 适用 | 说明 |
+| ---- | ---- | ---- |
+| `vite-plugin-pwa` | Vite 项目 | 开发零配置生成 manifest + SW，内置 Workbox |
+| Workbox CLI / `workbox-build` | Webpack/Rspack/任意构建 | 注入预缓存清单（带 hash 的产物自动对齐 5.4 策略） |
+| `next-pwa` / 元框架内置 | Next 等 | 注意 App Router 下对动态路由/Server Actions 的缓存排除 |
+
+`vite-plugin-pwa` 两种模式：
+
+- **GenerateSW**：构建时自动生成 SW（预缓存 + 基础路由兜底），简单应用首选；
+- **InjectManifest**：你写 `src/sw.ts`，插件只注入预缓存清单文件列表——需要自定义 fetch 策略、push、后台同步时用它。
+
+```typescript
+// vite.config.ts（InjectManifest 示意）
+import { VitePWA } from 'vite-plugin-pwa';
+export default defineConfig({
+    plugins: [
+        VitePWA({
+            strategies: 'injectManifest',
+            srcDir: 'src',
+            filename: 'sw.ts',
+            registerType: 'prompt', // 对应 5.6 的"提示用户后刷新"流程
+        }),
+    ],
+});
+```
+
+⚠️ 框架集成后的通用红线不变：HTML 导航 Network First、带 hash 资源 Cache First、接口默认不缓存；SW 升级流程与回滚预案仍按 5.6 / 5.9 执行。
+
+## 9.6 测试策略
+
+| 层面 | 做法 |
+| ---- | ---- |
+| 纯逻辑（RPC 协议、消息分发函数） | 把消息处理写成无 Worker 依赖的纯函数，Vitest 直接测 |
+| Worker 通信 | jsdom 无真实 Worker：在测试中注入 mock Worker（`postMessage` 立即/异步回放到 onmessage），或把通信层抽象为接口后替换实现 |
+| 跨 Tab / SW | Playwright 多 `browserContext` / 多 page 做 E2E：A 页发消息断言 B 页 UI；用 context.setOffline(true) 验离线缓存 |
+| AudioWorklet | 无法在无头环境稳定跑音频线程：只测"配置计算/系数生成"等可剥离的纯函数，process 内逻辑保持极薄 |
+
+## 9.7 本文配套可运行示例
+
+下列示例在 [examples/](./examples/README.md) 目录，均为零依赖纯静态文件。⚠️ Worker / SharedWorker 在 `file://` 下会因源为 opaque 而失败，需用任意静态服务器以 HTTP 访问：
+
+```bash
+cd frontend-advanced-guide/examples
+npx serve .                 # 或 python3 -m http.server 5173
+# 浏览器打开 http://localhost:xxxx/18-01-cross-tab/index.html
+```
+
+| 目录 | 演示内容 | 对应模块 |
+| ---- | ---- | ---- |
+| `18-01-cross-tab/` | BroadcastChannel + storage 双通道主题/计数同步，开两个窗口对照 | 模块六 |
+| `18-02-dedicated-worker/` | Worker 计算卸载、进度回报、Transferable 零拷贝、超时销毁 | 模块二 |
+| `18-03-shared-worker/` | SharedWorker 多 Tab 共享计数器 + 在线端口列表 | 模块三 |
+| `18-04-service-worker/` | SW 注册、Cache First/Network First、离线兜底、更新提示 | 模块五 |
+| `18-05-worklet/` | PaintWorklet 程序化底纹 + AudioWorklet 麦克风音量条 | 模块八 |
+
+---
+
+# 模块十：坑点速查、调试与自测
+
+## 10.1 高频坑点速查表
+
+| # | 坑点 | 正确做法 |
+| ---- | ---- | ---- |
+| 1 | Worker 路径相对**文档 URL** 解析，子路径部署后 404 | `new Worker(new URL('./x.worker.ts', import.meta.url))` |
+| 2 | 大对象 postMessage 卡顿 | Transferable 转移 / 分片 / SharedArrayBuffer |
+| 3 | Transfer 后继续读原 ArrayBuffer 报错 | 转移即放弃所有权，单向流动 |
+| 4 | SharedWorker 各 Tab 连了不同实例 | URL（含 query）与 name 必须逐字符一致 |
+| 5 | `addEventListener('message')` 收不到消息 | 手动 `port.start()`，或直接用 `onmessage` |
+| 6 | storage 事件自己收不到 / 相同值不触发 | 本地状态直接更新；消息体加时间戳 |
+| 7 | postMessage 不校验 origin | 收发双方都做白名单校验，禁用 `'*'` 发送敏感数据 |
+| 8 | 弹窗 `window.opener` 为 null | 不要加 `rel="noopener"`；子页面加载后先握手 |
+| 9 | SW 改了代码不生效 | sw.js 字节变化才更新；DevTools 勾 Update on reload |
+| 10 | SW 内全局变量莫名丢失 | SW 会挂起，状态落 IndexedDB，异步包裹 waitUntil |
+| 11 | SW 首次加载不拦截请求 | 正常，第二次加载起受控；需要立即生效用 claim |
+| 12 | 上线有 bug 的 SW 无法收回 | 准备"自毁 SW"回滚预案（skipWaiting + 清缓存） |
+| 13 | 忘记 terminate/destroy Worker | SPA 路由切走时释放，配合 Worker 池统一管理 |
+| 14 | SharedArrayBuffer 不生效 | 检查 COOP/COEP 头与 `crossOriginIsolated` |
+| 15 | Worker 内 reject 静默丢失 | Worker 内监听 unhandledrejection 并上报 |
+| 16 | iOS/Safari 旧版不支持 SharedWorker / BroadcastChannel | 降级到 storage 事件方案 |
+| 17 | Response 被缓存后再 return 报错 | Response 流只能读一次，先 `res.clone()` |
+| 18 | 跨域资源在 SW 内请求失败 | 手工指定 `mode: 'cors'`，跨域图片需 CORS 头 |
+
+## 10.2 调试手段速查
+
+| 对象 | 调试入口 |
+| ---- | ---- |
+| DedicatedWorker | 页面 DevTools → Sources → Threads 面板可断点；Console 左上角切上下文 |
+| SharedWorker | Chrome `chrome://inspect/#workers`；Firefox `about:debugging` |
+| ServiceWorker | DevTools → Application → Service Workers（Update on reload / Offline / Bypass for network） |
+| SW 缓存 | Application → Cache Storage；Application → Clear storage 一键清空 |
+| postMessage 跨源问题 | Network 面板看不到消息体；在两端 message 监听处打日志，先查 origin 拒绝 |
+| storage 事件 | Application → Local Storage 实时观察；多窗口分别开 DevTools |
+| Web Locks | 无官方 UI：代码中用 `navigator.locks.query()` 查看持锁 / 排队情况 |
+
+## 10.3 兼容性兜底策略（渐进增强）
+
+```typescript
+// 跨 Tab 总线能力检测与降级
+function createCrossTabBus(channelName: string) {
+    if ('BroadcastChannel' in self) {
+        return { kind: 'broadcast' as const, api: new BroadcastChannel(channelName) };
+    }
+    // 降级：storage 事件（封装同样的 postMessage/onmessage 接口）
+    const key = `bus:${channelName}`;
+    return {
+        kind: 'storage' as const,
+        api: {
+            postMessage(data: unknown) {
+                localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
+            },
+            set onmessage(handler: (e: MessageEvent) => void) {
+                window.addEventListener('storage', e => {
+                    if (e.key === key && e.newValue) {
+                        handler({ data: JSON.parse(e.newValue).data } as MessageEvent);
+                    }
+                });
+            },
+        },
+    };
+}
+```
+
+检测顺序建议：BroadcastChannel → SharedWorker（需要共享状态时优先）→ storage 事件 → 服务端中转（需跨设备）。
+
+## 10.4 自测题
+
+> 先自己作答，再展开参考答案。
+
+**基础理解**
+
+<details>
+<summary><b>1. 【进阶】为什么说"JS 是单线程的"，但多个 Worker 之间可以真正并行？单线程指的是哪个层面？</b></summary>
+
+**单线程指单个执行上下文（Realm）内只有一份调用栈**。主线程与每个 Worker 各自拥有独立的 V8 Isolate、独立堆和独立事件循环，操作系统把这些线程调度到不同 CPU 核心上，因此多个 Worker 之间、Worker 与主线程之间是真并行。上下文之间不共享堆（SAB 除外），靠消息传递通信。
+</details>
+
+<details>
+<summary><b>2. 【基础】DedicatedWorker、SharedWorker、ServiceWorker 三者的生命周期分别由什么决定？谁可以在所有页面关闭后继续运行？</b></summary>
+
+DedicatedWorker 随创建它的页面生灭（`terminate()` 立即结束）；SharedWorker 在所有连接端口关闭后才可被回收；ServiceWorker 安装后与页面解耦，空闲挂起、被 fetch/message/push/sync 事件唤醒，**只有它能在所有页面关闭后继续运行**。
+</details>
+
+<details>
+<summary><b>3. 【进阶】`postMessage` 传递数据的三种方式（结构化克隆、Transferable、SharedArrayBuffer）各自的开销与适用场景？</b></summary>
+
+结构化克隆是深拷贝：通用但大对象有拷贝开销，不支持函数/DOM/原型链；Transferable 是所有权转移、零拷贝，但发送方立即失去对象（detached），适合单向大数据流；SharedArrayBuffer 共享同一块物理内存、无拷贝无延迟，但需要 COOP/COEP 头并用 `Atomics` 同步。
+</details>
+
+<details>
+<summary><b>4. 【进阶】为什么 Transfer 之后发送方的 ArrayBuffer `byteLength` 变成 0？</b></summary>
+
+Transferable 的语义是**所有权转让**：底层内存的所有权移交接收方的 Isolate，发送方引用被 neuter（分离），故 `byteLength` 变 0；这是零拷贝且不产生双写竞态的前提。
+</details>
+
+**SharedWorker / 跨 Tab**
+
+<details>
+<summary><b>5. 【进阶】两个 Tab 以相同 URL 但不同 query 创建 SharedWorker，会得到同一个实例吗？为什么？</b></summary>
+
+**不是同一个实例**。实例判定规则是同源 + 脚本 URL 完全一致（含 query/hash）+ name 相同，query 不同会启动第二个独立实例。
+</details>
+
+<details>
+<summary><b>6. 【基础】使用 `addEventListener('message', handler)` 监听 MessagePort 时漏掉哪一步会导致永远收不到消息？</b></summary>
+
+漏掉 `port.start()`。用 `onmessage =` 赋值会隐式启动消息队列；`addEventListener('message')` 不会，消息会一直排队不派发。
+</details>
+
+<details>
+<summary><b>7. 【进阶】为什么 SharedWorker 里需要心跳？`beforeunload` 通知为什么不够？</b></summary>
+
+Tab 崩溃 / 被系统杀死时 `beforeunload` 不执行，浏览器也不保证可靠通知 Worker，Set 里会残留僵尸端口，继续向其 postMessage 可能报错或造成"在线列表"虚高。心跳（定期 PING + 超时扫描剔除）不依赖页面正常退出路径，所以必要。
+</details>
+
+<details>
+<summary><b>8. 【进阶】storage 事件有哪些"反直觉"特性？（至少说出 3 点）</b></summary>
+
+至少三点：①写入的 Tab 自己不触发，只通知其他 Tab；②新旧值相同通常不触发，需在消息体加时间戳/自增 id；③只能存字符串，对象需序列化；④事件中可拿到 key/oldValue/newValue/url；⑤它依赖 localStorage 同源共享且持久，容量约 5MB。
+</details>
+
+<details>
+<summary><b>9. 【进阶】BroadcastChannel 能否补发消息给刚打开、还没创建频道的新 Tab？生产中如何解决"新 Tab 状态初始化"问题？</b></summary>
+
+**不能**。BroadcastChannel 无持久化、无补发，后加入者收不到加入前的消息。解决：新 Tab 启动时先从持久层（localStorage / IndexedDB）读一次当前全量状态（快照），之后靠广播接收增量；或通过 SharedWorker 连接时由 Worker 主动 `postMessage` 同步一次当前状态。
+</details>
+
+<details>
+<summary><b>10. 【进阶】用 Web Locks 做 Leader 选举，Leader Tab 崩溃后会发生什么？为什么不需要心跳检测？</b></summary>
+
+Leader 持有的 `navigator.locks` 独占锁在 Tab 关闭/崩溃时由浏览器**自动释放**，等待队列中的下一个 Tab 的 `locks.request` 回调立即被调用而当选。锁的归属由浏览器进程托管，不依赖应用层心跳，因此没有误判与脑裂窗口。
+</details>
+
+**ServiceWorker**
+
+<details>
+<summary><b>11. 【基础】画出 SW 生命周期，并说明 install / waiting / activate 各阶段适合做什么。</b></summary>
+
+`parsed → installing → installed(waiting) → activating → activated → redundant`。install 用 `waitUntil` 预缓存 App Shell；waiting 阶段等待旧 SW 释放控制（或 skipWaiting）；activate 清理上一版本旧缓存、可 `clients.claim()` 立即接管。
+</details>
+
+<details>
+<summary><b>12. 【进阶】为什么 SW 内的异步操作必须放进 `event.waitUntil()`？不放会怎样？</b></summary>
+
+SW 空闲即被浏览器挂起，事件处理函数同步返回后浏览器可能立刻终止线程，其中发起的异步操作（打开缓存、写 IDB、fetch）会被中途掐断。`event.waitUntil(promise)` 向浏览器承诺"该事件在 promise 完成前不算结束"，从而为 SW 续期。不放会出现缓存只写了一半、消息丢失等问题。
+</details>
+
+<details>
+<summary><b>13. 【进阶】Cache First、Network First、Stale While Revalidate 分别适合什么资源？为什么 HTML 通常不用 Cache First？</b></summary>
+
+带 hash 静态资源：内容不变 → Cache First；HTML：要保证用户总能拿到最新入口 → Network First，离线才回退缓存；可容忍短暂过期的资源：Stale While Revalidate，先秒开再后台更新。HTML 不用 Cache First 是因为 HTML 是加载其他所有资源的"版本入口"，一旦被强缓存，新版部署后用户可能持续运行整套旧资源，且 SW 更新流程自身也依赖拿到新页面。
+</details>
+
+<details>
+<summary><b>14. 【挑战】新版本 SW 为什么会停在 waiting？让用户立即用上新版本的完整流程是什么？</b></summary>
+
+为保证不打断正在运行的旧页面，新 SW 默认停在 waiting，直到旧 SW 无受控客户端（所有 Tab 关闭，或超过约 24h 强制升级）。完整流程：检测到 `updatefound` + 新 SW 进入 installed → 提示用户 → 用户确认后向 waiting SW `postMessage('SKIP_WAITING')`（SW 内调用 `self.skipWaiting()`）→ 页面监听 `controllerchange` → `location.reload()` 一次，保证页面与新缓存版本一致。
+</details>
+
+<details>
+<summary><b>15. 【挑战】为什么说"上线 ServiceWorker 必须有回滚预案"？预案大致长什么样？</b></summary>
+
+因为 SW 一旦在用户浏览器注册成功就具有**粘性**：之后每次导航都会先运行它，普通发版无法保证把有 bug 的 SW 从用户侧移除（它甚至可能缓存住坏掉的 HTML）。预案：准备一个"自毁 SW"——新版本只做 `self.skipWaiting()` + activate 中删除全部缓存 + 不再拦截请求，发布到原 sw.js 路径，让所有用户自动升级到这个空壳后恢复正常网络行为。
+</details>
+
+<details>
+<summary><b>16. 【基础】SW 为什么不能把业务状态存在全局变量里？应该存在哪？</b></summary>
+
+因为 SW 会被浏览器随时挂起终止、事件唤醒后是全新内存状态，全局变量不保证存活（且多事件间不保证同一实例）。持久状态应写入 **IndexedDB**（结构化数据、失败请求队列）与 **Cache API**（请求/响应），它们独立于 SW 线程生命周期。
+</details>
+
+**安全与工程**
+
+<details>
+<summary><b>17. 【挑战】接收 `postMessage` 时不校验 `event.origin` 会导致什么攻击？给出安全收发的最小模板。</b></summary>
+
+不校验 origin 时，任意其他源页面（被嵌入的恶意 iframe、被导航到的弹窗）都可向本页 post 伪造消息，若消息被用于执行动作（登录态回传、DOM 注入、路由跳转）即构成数据泄露或 XSS / CSRF 式攻击。最小模板：发送方 `target.postMessage(data, 'https://精确白名单源')`；接收方先 `if (event.origin !== ALLOWED) return;`（弹窗再比 `event.source`），数据按结构化协议校验后再使用，绝不 `innerHTML`。
+</details>
+
+<details>
+<summary><b>18. 【进阶】`window.open` 弹出的子窗口回连父窗口失败，可能的原因有哪些？</b></summary>
+
+常见原因：①打开链接带了 `rel="noopener"`（或浏览器默认 noopener），`window.opener` 为 null；②父子不同源，子页面直接读 opener 属性受限（应改用 postMessage 且校验双方 origin）；③子页面脚本尚未加载/未绑定监听，父方发得太早（需子页面 load 后先回发 READY 握手）；④弹窗被拦截 `window.open` 返回 null；⑤父页面发生过跨文档导航，opener 关系已断开。
+</details>
+
+<details>
+<summary><b>19. 【进阶】SharedArrayBuffer 需要哪两个响应头？`Atomics.wait` 为什么不能在主线程调用？</b></summary>
+
+`Cross-Origin-Opener-Policy: same-origin` 与 `Cross-Origin-Embedder-Policy: require-corp`（此时 `self.crossOriginIsolated === true`）。`Atomics.wait` 会**阻塞当前线程**直到被唤醒或超时，在主线程调用会冻结整个页面的事件循环与渲染，所以规范禁止，只允许在 Worker 等后台线程阻塞等待。
+</details>
+
+<details>
+<summary><b>20. 【挑战】设计一个"同一浏览器只保留一条 WebSocket、断线自动由其他 Tab 接管"的方案，画出组件与消息流向。</b></summary>
+
+参考 7.3 的 Leader-Follower 方案：①各 Tab 启动时 `navigator.locks.request('ws-leader')` 竞选，持锁者为 Leader，回调不返回以长期持锁；②Leader 建立唯一 WebSocket，负责鉴权、full-jitter 指数退避重连、心跳与看门狗；③服务端消息到达 Leader 后经 `BroadcastChannel('room')` 扇出给所有 Follower Tab 渲染；④Follower 的上行消息也经同一频道发给 Leader 代发；⑤Leader Tab 崩溃 → 锁自动释放 → 排队的某个 Follower 立刻获选、重建 WebSocket 成为新 Leader；⑥持久化（未发送队列）落 IndexedDB，防止丢消息。消息流向：`Server ⇄ Leader(Tab) ⇄ BroadcastChannel ⇄ Follower Tabs`。
+</details>
+
+## 10.5 延伸阅读
+
+- MDN：Web Workers / SharedWorker / Service Worker API / Broadcast Channel API / Web Locks API
+- Google web.dev：*The Service Worker Lifecycle*、*Offline Cookbook*（缓存策略经典文章）
+- HTML 规范：Event loops、StructuredClone、MessageChannel 章节（遇到行为争议时以规范为准）
+
+---
+
+> **学习建议**：这些 API 的坑 90% 在"生命周期"和"时序"上。建议每读完一个模块就开两个浏览器窗口 + DevTools 亲手验证：断网、杀 Tab、刷新、改一行 SW 代码观察 waiting——把状态机跑顺，比背 API 签名重要得多。

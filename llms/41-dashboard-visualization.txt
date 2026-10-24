@@ -1,0 +1,286 @@
+# 第四十一部分 · 数据可视化大屏（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/41-dashboard-visualization
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第四十一部分 · 数据可视化大屏
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第十部分 · 浏览器渲染](./10-browser-rendering.md) · [第十七部分 · Web 平台与可视化](./17-web-platform.md) · [第三十九部分 · IM 实时通信系统](./39-im-messaging.md)
+
+> 💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。大屏是可视化的「极限工况」——分辨率千奇百怪、数据十万点、7×24 小时轮巡不崩溃。本章用 5 个可运行示例拆掉大屏的三座大山：适配（等比缩放）、性能（降采样 + 渲染选型）、实时（竞态防护 + 数值插值）。
+
+## 本部分内容
+
+- [41.1 大屏适配：等比缩放方案](#_41-1-大屏适配-等比缩放方案)
+- [41.2 比例尺：数据域到像素域的映射](#_41-2-比例尺-数据域到像素域的映射)
+- [41.3 大数据量优化：LTTB 降采样](#_41-3-大数据量优化-lttb-降采样)
+- [41.4 渲染选型：SVG vs Canvas 的决策模型](#_41-4-渲染选型-svg-vs-canvas-的决策模型)
+- [41.5 实时数据管道：竞态防护与数值插值](#_41-5-实时数据管道-竞态防护与数值插值)
+- [41.6 大屏工程实践](#_41-6-大屏工程实践)
+- [41.7 自测题](#_41-7-自测题)
+- [41.8 本章避坑清单](#_41-8-本章避坑清单)
+
+```mermaid
+flowchart LR
+    A[数据源<br/>WS / 轮询] --> B[版本守卫<br/>旧包拒收]
+    B --> C[归一化 + LTTB 降采样<br/>10 万点 → 500 点]
+    C --> D[比例尺映射<br/>domain → range]
+    D --> E{渲染选型}
+    E -->|少量元素| F[SVG]
+    E -->|大量元素| G[Canvas]
+    E -->|大元素 + 交互| H[分层：Canvas 主体 + SVG 热区]
+    F --> I[数值 tween 插值渲染]
+    G --> I
+    H --> I
+    J[等比缩放容器<br/>1920×1080 设计稿] --> I
+```
+
+---
+
+> 大屏项目的技术含量集中在三个「不做就会翻车」的点上：**适配**（投屏设备分辨率不可控，写死像素必炸）、**性能**（实时数据动辄十万点，DOM 与像素双上限）、**实时**（乱序数据覆盖 + 数字硬跳变的观感灾难）。图表库把「画」封装好了，这三点才是前端真正的战场。
+
+---
+
+## 41.1 大屏适配：等比缩放方案
+
+### 41.1.1 概念解析
+
+设计稿按 1920×1080 排版，实际投屏可能是 2K、带工具栏的 1919×950、或超宽拼接屏。主流方案是 **transform: scale 整体缩放**：
+
+- **contain**（取 `min(scaleX, scaleY)`）：完整显示，两侧留黑边——汇报场景默认；
+- **cover**（取 `max`）：铺满裁切——超宽拼接屏可选；
+- **stretch**（分轴缩放）：铺满不裁，但圆变椭圆——慎用。
+
+实现要点只有两个：`transform-origin: left top`（否则偏移全错），以及 **translate 在 scale 之前**（先平移居中再缩放）。窗口 resize 时防抖重算。
+
+### 41.1.2 核心代码
+
+```ts
+// 文件: examples/41-01-screen-fit.ts
+export function computeFit(screen, design: DesignSize, mode: FitMode = "contain"): FitResult;
+/** transform: translate(offsetX, offsetY) scale(sx, sy); transform-origin: left top; */
+export function toTransformStyle(fit: FitResult): string;
+/** ResizeObserver + 防抖重算 */
+export function createAutoFit(design: DesignSize, apply: (fit: FitResult) => void, mode?): { resize(w, h): void };
+```
+
+> 运行方式：`npx tsx examples/41-01-screen-fit.ts`。
+
+### 41.1.3 应用实践
+
+- **全屏 API 进大屏**：浏览器工具栏吃掉 70px 高度，`requestFullscreen` 后按屏幕真实分辨率缩放；
+- **字体也一起缩**：scale 方案下字体随容器整体缩放，这是它优于 rem 方案的原因——不用换算任何字号；
+- **scale 大于 1 时模糊**：位图按设计稿 1:1 导出，2K 屏放大 1.33 倍轻微模糊，设计稿按目标分辨率出图可解。
+
+---
+
+## 41.2 比例尺：数据域到像素域的映射
+
+### 41.2.1 概念解析
+
+所有图表库的底层都是比例尺（D3 的核心抽象）：把数据值域（domain）映射到像素值域（range）。
+
+- **scaleLinear**：连续数值 → 像素（柱高、折线 y）。`invert` 是交互的灵魂——鼠标 y 像素反推出数据值，tooltip 全靠它；
+- **scaleBand**：离散类别 → 均分位置（柱状图 x 轴），`bandwidth` 决定柱宽；
+- **scaleColor**：数值 → 颜色插值（热力图），越界值 clamp 到端点色。
+
+**nice 刻度**是轴的颜值担当：数据范围 [12, 87] 直接刻轴会出现 12/31/50/69/87 这种难看的刻度，先扩展到 [0, 100] 再取整步长，得到 0/25/50/75/100。
+
+### 41.2.2 核心代码
+
+```ts
+// 文件: examples/41-02-scales.ts
+export function scaleLinear(domain: [number, number], range: [number, number]): LinearScale; // 含 invert
+export function scaleBand(categories: readonly string[], range: [number, number]): BandScale;
+export function scaleColor(low: RGB, high: RGB): (t: number) => string;
+export function niceTicks(min: number, max: number, count?: number): number[];
+```
+
+> 运行方式：`npx tsx examples/41-02-scales.ts`。
+
+### 41.2.3 应用实践
+
+- **y 轴 range 反转**：屏幕 y 向下增长，`range: [height, 0]` 让大数据在上方——初学者最常见的「图是倒的」就出在这里。
+- **domain 零宽防御**：所有数据相同时 `d1 - d0 === 0`，除零产生 Infinity——按 1 处理。
+- **自绘图形（地球/飞线）也是比例尺**：经纬度 → 墨卡托投影 → 像素，本质同构。
+
+---
+
+## 41.3 大数据量优化：LTTB 降采样
+
+### 41.3.1 概念解析
+
+传感器/日志数据动辄十万点。渲染上限的两条硬约束：
+
+- SVG：DOM 节点上限约 1 万，10 万 `<circle>` 直接假死；
+- Canvas：画得动，但用户看不清——屏幕就几千像素宽，10 万点挤在一起全是噪点。
+
+所以**无论怎么渲染，先降采样**。关键是怎么降：**均匀抽样会恰好丢掉峰值**（异常尖峰只占 3/100000 的概率被抽中）——而大屏上最该被看见的就是异常。
+
+LTTB（Largest-Triangle-Three-Buckets）按视觉重要性保留：分桶后每桶选「与前一个保留点、下一桶平均点构成三角形面积最大」的点。峰值点因为显著偏离基线，三角形面积天然最大，必然被保留。
+
+### 41.3.2 核心代码
+
+```ts
+// 文件: examples/41-03-downsample.ts
+export interface Point { x: number; y: number }
+
+/** LTTB 降采样：threshold 为目标点数，首尾必保留 */
+export function lttb(data: readonly Point[], threshold: number): Point[];
+export function uniformSample(data: readonly Point[], threshold: number): Point[]; // 对照组
+```
+
+> 运行方式：`npx tsx examples/41-03-downsample.ts`（示例验证 10 万点中 x=50000 的尖峰：LTTB 保留、均匀抽样大概率丢失）。
+
+### 41.3.3 应用实践
+
+- **降采样在数据管道做，不在渲染层做**：管道输出可直接渲染的点数，渲染层永远只拿「屏幕像素密度」量级的数据。
+- **阈值按像素密度定**：`容器宽度 px × 2` 左右——比像素密的数据本来就画不出来。
+- **柱状图聚合代替抽稀**：离散事件（日志条数）按时间桶聚合（每分钟计数），比抽稀更符合业务语义。
+
+---
+
+## 41.4 渲染选型：SVG vs Canvas 的决策模型
+
+### 41.4.1 概念解析
+
+| | SVG | Canvas |
+| --- | --- | --- |
+| 结构 | DOM 节点即图形 | 像素，无节点 |
+| 交互 | 事件系统免费 | 命中检测自己做 |
+| 动画 | 每帧改 DOM，元素多会抖 | 全量重绘，稳 |
+| 上限 | ~1 万元素舒适区 | 十万点无压力 |
+| 导出 | 矢量天然支持 | 位图 |
+
+决策不是二选一，四档：**svg**（少量 + 重交互）/ **canvas**（大量）/ **layered**（Canvas 画主体 + SVG/DOM 叠交互层——大屏最常用）/ **webgl**（20 万+ 元素，ECharts GL/deck.gl）。
+
+量化依据是**帧成本估算**：SVG 每元素更新约 0.01ms（layout 参与），Canvas 全量重绘约 `元素数 × 0.0005ms`。60fps 预算 16.7ms，留 30% 给业务逻辑——超过即换方案。
+
+### 41.4.2 核心代码
+
+```ts
+// 文件: examples/41-04-render-budget.ts
+export function decideRenderer(req: ChartRequirement): Decision;  // 四档选型 + 理由
+export function estimateFrameCost(req, updatedElements): { svgMs: number; canvasMs: number };
+export function meetsFps(costMs: number, fpsTarget: 30 | 60): boolean; // 预算 70% 红线
+```
+
+> 运行方式：`npx tsx examples/41-04-render-budget.ts`。
+
+### 41.4.3 应用实践
+
+- **生产直接用 ECharts**：它内部就是这套决策（`renderer: 'canvas' | 'svg'`），理解决策模型是为了选对参数、而不是为了手搓图表。
+- **分层渲染的落点**：ECharts 的 `tooltip.renderMode: 'html'` 就是 Canvas 图 + DOM tooltip 的分层；地图飞线用 Canvas，点击热区用透明 SVG 覆盖。
+- **帧预算进监控**：用 `PerformanceObserver` 采样 long task，大屏 7×24 运行时的卡顿要被看见。
+
+---
+
+## 41.5 实时数据管道：竞态防护与数值插值
+
+### 41.5.1 概念解析
+
+大屏实时刷新两个经典坑：
+
+1. **竞态**：轮询响应乱序到达，慢的旧响应覆盖新数据（第 41.5 示例里 v98 晚于 v100 到达）。解法是**版本守卫**——数据带单调递增 version，低于当前版本直接丢弃。这与 IM 的 seq（第 39 册）是同一个思想：**乱序通道上用序号重建顺序**。
+2. **数字硬跳变**：指标从 327 跳到 891，观感突兀且看不出趋势。解法是 **tween 插值**——显示值在 10~20 帧内从 327 平滑滚动到 891（easeOutCubic 先快后慢）。新数据到达时从「当前显示值」出发插值，而不是从 0 或旧目标出发。
+
+完整管道：`数据到达 → 版本校验 → 归一化 → 降采样 → 比例尺映射 → tween 插值 → 渲染`。
+
+### 41.5.2 核心代码
+
+```ts
+// 文件: examples/41-05-realtime-pipeline.ts
+/** 版本守卫：只接受更新的数据 */
+export class VersionGuard {
+    accept(p: MetricPayload): boolean;
+}
+
+/** 插值帧：elapsedRatio ∈ [0,1] → 当帧值（easeOutCubic） */
+export function tweenFrame(from: number, to: number, elapsedRatio: number): number;
+
+/** 管道：到达 → 版本校验 → 产出插值帧序列 */
+export function pipeline(guard: VersionGuard, payload: MetricPayload, displayed: number): { accepted: boolean; frames: number[] };
+```
+
+> 运行方式：`npx tsx examples/41-05-realtime-pipeline.ts`。
+
+### 41.5.3 应用实践
+
+- **轮询配合可见性**：`document.hidden` 时暂停轮询（大屏切走后白烧接口），`visibilitychange` 恢复。
+- **失败退避**：接口连续失败时拉长间隔（2s → 5s → 10s），别让挂掉的接口被打爆。
+- **插值有上限**：目标值与显示值差太远（如 0 → 100万）时插值会「假滚动」很久——差距超阈值直接跳变，插值只用于「小步更新」。
+
+---
+
+## 41.6 大屏工程实践
+
+### 41.6.1 布局与主题
+
+- **栅格布局**：12 栏栅格 + 画布分区（头部 KPI / 中部主图 / 底部列表），组件按区域占格，不做绝对定位堆砌；
+- **主题 token 化**：颜色（底色/主色/告警色）、字号、发光效果全部 CSS 变量，换主题 = 换一组变量——深色大屏的配色纪律：**深底、高饱和点缀、正文灰白**；
+- **图表主题统一**：ECharts `registerTheme` 注入同一套 token，所有图表吃同一份配置，杜绝「每个图一个色系」。
+
+### 41.6.2 7×24 稳定性
+
+1. **内存泄漏是头号杀手**：定时器、WebSocket、ResizeObserver、ECharts 实例在路由切换/轮巡时必须 dispose——大屏不刷新页面，泄漏只会累积；
+2. **轮巡模式**：多页面自动轮播（`setInterval` + 页面切换动画），每页数据独立轮询；
+3. **崩溃自愈**：全局 error 上报 + `window.location.reload()` 兜底（localStorage 记录 reload 次数防死循环）；
+4. **降级与断网态**：数据源断连时显示「最后更新时间 + 灰态」，而不是空白或 NaN。
+
+---
+
+## 41.7 自测题
+
+1. contain 模式下，1920×1080 设计稿投到 3840×1080 超宽屏，scale 是多少？两侧各留多宽黑边？
+
+<details><summary>查看答案</summary>
+
+scaleX = 3840/1920 = 2，scaleY = 1080/1080 = 1，contain 取 min = 1。缩放后内容 1920×1080，水平居中偏移 (3840-1920)/2 = 960px，两侧各 960px 黑边。这正是超宽屏需要 cover 或分区布局的原因——contain 会让内容只占中间一半。
+</details>
+
+2. 为什么 LTTB 比均匀抽样好？均匀抽样的最大风险是什么？
+
+<details><summary>查看答案</summary>
+
+LTTB 按「视觉重要性」（三角形面积）选点，偏离基线的峰值点面积大必然保留；均匀抽样等概率选点，孤立尖峰（如 3/100000 的异常脉冲）大概率落在采样间隙被丢掉——大屏上最该被看见的告警峰值反而消失，监控价值归零。
+</details>
+
+3. 5 万个点、需要鼠标悬停 tooltip、需要 60fps 动画，选什么方案？
+
+<details><summary>查看答案</summary>
+
+layered（分层）：Canvas 画数据主体（5 万点 SVG 必死），SVG 或 DOM 叠交互热区层。或者用 ECharts：`renderer: 'canvas'` + tooltip.renderMode: 'html'，框架内部已完成分层。纯 SVG 会在 DOM 更新上爆帧预算（5 万 × 0.01ms = 500ms/帧）。
+</details>
+
+4. 轮询接口响应乱序覆盖新数据，除了版本号还有什么解法？各自的适用场景？
+
+<details><summary>查看答案</summary>
+
+① 请求序列号比对（同版本号思想）：适用轮询；② AbortController 取消上一请求：适用搜索联想等「每次新请求作废旧请求」场景；③ WebSocket 单通道推送天然有序（第 39 册 seq 兜底补拉）：适用高频实时。版本号是通用性最强的——不依赖传输方式，晚到的旧包无论怎么来都会被拒。
+</details>
+
+5. 大屏 7×24 运行三天后越来越卡，最可能的原因是什么？怎么系统性排查？
+
+<details><summary>查看答案</summary>
+
+内存泄漏累积：未 dispose 的 ECharts 实例/定时器/事件监听随轮巡持续堆积。排查：Performance 面板录制内存曲线看阶梯式上涨；Heap snapshot 对比两次采样找增量对象；代码审计路由切换/组件卸载钩子是否 dispose 与 clearInterval。兜底策略：reload 次数受控的定时自愈 + error 上报。
+</details>
+
+---
+
+## 41.8 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 适配写死 1920×1080 | 换投屏设备直接布局爆炸 | transform scale 等比缩放 + 防抖重算 |
+| transform-origin 忘设 left top | scale 后内容飞出屏幕 | origin left top + translate 先行 |
+| 大屏用 stretch 分轴缩放 | 圆变椭圆，图形失真 | contain（留边）或重新设计布局 |
+| 10 万点直接进 SVG | DOM 爆炸页面假死 | 先 LTTB 降采样到像素密度量级 |
+| 均匀抽样降采样 | 异常峰值恰好被丢，告警失明 | LTTB 按视觉重要性保留 |
+| y 轴忘反转 range | 图是倒的 | scaleLinear range 传 [height, 0] |
+| domain 零宽除零 | 坐标全 NaN | 零宽按 1 处理 |
+| 交互层和数据层同画布 | Canvas 命中检测自己写全套 | 分层：Canvas 主体 + SVG/DOM 交互层 |
+| 实时数据无版本守卫 | 慢响应覆盖新数据，指标回跳 | 单调 version 拒收旧包 |
+| 指标数字硬跳变 | 观感突兀，用户怀疑数据错误 | tween 插值滚动（差距过大直接跳） |
+| 大屏切后台仍轮询 | 白烧接口与电量 | document.hidden 暂停 + visibilitychange 恢复 |
+| 路由切换不 dispose 图表 | 内存泄漏，7×24 运行越跑越卡 | 卸载钩子统一 dispose + 内存监控 |
+| 断网时显示 NaN/空白 | 领导看到报错现场 | 断连态展示最后更新时间 + 灰态降级 |

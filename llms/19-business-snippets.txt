@@ -1,0 +1,1584 @@
+# 第十九部分：常用业务功能代码片段（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/19-business-snippets
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第十九部分：常用业务功能代码片段
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[Worker 家族与跨标签页通信](./18-worker-messaging.md)｜下一篇：[附录](./20-appendix.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-19" target="_blank" rel="noopener">EP.19《业务片段百宝箱》</a>
+
+## 本部分内容
+
+> 前十八部分按**技术机制**组织（闭包怎么形成、Fiber 怎么调度），本部分换一个视角：按**业务场景**组织——把中后台与 C 端业务里反复出现的功能沉淀成"复制即可用"的片段。
+>
+> **收录原则**：
+> - 每个片段都带**边界处理与坑点注释**，不是只能跑通 happy path 的面试答案；
+> - 核心逻辑全部写成**框架无关的纯函数/纯类**，React、Vue、小程序都能接，也可以直接进 `src/utils` 配单测；
+> - DOM 相关函数（下载、剪贴板、IntersectionObserver）与纯逻辑分离，保证示例能 `npx tsx` 直跑验证。
+>
+> **阅读约定**：`⚠️` 常见坑、`✅` 推荐写法、`❌` 反例；示例文件在 [`examples/`](./examples/README.md) 下。
+
+## 目录
+
+- [19.1 表单校验与声明式规则](#_19-1-表单校验与声明式规则)
+- [19.2 输入格式化、提交锁与倒计时](#_19-2-输入格式化、提交锁与倒计时)
+- [19.3 列表查询状态与 URL 同步](#_19-3-列表查询状态与-url-同步)
+- [19.4 类型安全的本地存储封装](#_19-4-类型安全的本地存储封装)
+- [19.5 树结构数据处理](#_19-5-树结构数据处理)
+- [19.6 文件校验、下载与剪贴板](#_19-6-文件校验、下载与剪贴板)
+- [19.7 前端埋点与曝光监听](#_19-7-前端埋点与曝光监听)
+- [19.8 按钮级权限与路由守卫](#_19-8-按钮级权限与路由守卫)
+- [19.9 IndexedDB 结构化仓储](#_19-9-indexeddb-结构化仓储)
+- [19.10 自测题](#_19-10-自测题)
+- [19.11 本章避坑清单](#_19-11-本章避坑清单)
+
+---
+
+## 19.1 表单校验与声明式规则
+
+#### 概念解析
+
+业务表单的复杂度不在 UI，而在**校验规则的组织方式**。散落在各个事件回调里的 `if (phone.length !== 11) toast(...)` 有三个问题：错误文案各写各的、同样的规则在多个页面重复实现、动态表单（规则后端下发）无从下手。
+
+声明式校验把规则抽象成数据：**每个字段挂一组规则，每条规则 = 断言函数 + 错误文案**。规则可组合、可复用、可序列化，校验引擎只有一份。
+
+#### 典型应用场景
+
+- 注册/登录/找回密码（手机号、验证码、确认密码、协议勾选）；
+- 下单与发票信息（金额范围、必填、与另一字段联动）；
+- 低代码/动态表单：schema 由后端配置下发，前端只负责解释执行。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/19-01-form-validation.ts
+// ============ 声明式表单校验:规则工厂 + 全量校验 + 单字段校验 ============
+// 设计要点:
+// 1) 规则是数据不是 if-else —— 表单长什么样,schema 就长什么样,可后端下发/跨端复用;
+// 2) 每条规则独立返回错误信息,单字段只报第一个错误(避免一屏红字),整表收集全部字段错误;
+// 3) 纯函数、零 DOM 依赖,React/Vue/小程序任意框架都能接。
+
+export type FormData = Record<string, unknown>;
+
+/** 一条校验规则:validate 返回 true 表示通过 */
+export interface FieldRule {
+    message: string;
+    validate: (value: unknown, form: FormData) => boolean;
+}
+
+/** 字段名 -> 规则数组(按数组顺序短路,第一条失败即其错误信息) */
+export type FormSchema = Record<string, FieldRule[]>;
+
+export type FormErrors = Record<string, string>;
+
+// ---------------- 规则工厂(覆盖 90% 业务表单) ----------------
+
+/** 必填:null/undefined/空串/空数组视为空,但 0 与 false 是合法值 */
+export function required(message = '该项必填'): FieldRule {
+    return {
+        message,
+        validate: (v) => {
+            if (Array.isArray(v)) return v.length > 0;
+            return v !== undefined && v !== null && v !== '';
+        },
+    };
+}
+
+/** 字符串长度闭区间(自动 trim,中文按字符数而非字节数) */
+export function length(min: number, max: number, message?: string): FieldRule {
+    return {
+        message: message ?? `长度需在 ${min}~${max} 个字符之间`,
+        validate: (v) => {
+            const len = String(v ?? '').trim().length;
+            return len >= min && len <= max;
+        },
+    };
+}
+
+/** 正则规则(手机号/邮箱/统一社会信用代码等都走它) */
+export function pattern(re: RegExp, message: string): FieldRule {
+    return { message, validate: (v) => re.test(String(v ?? '')) };
+}
+
+/** 数值范围 */
+export function range(min: number, max: number, message?: string): FieldRule {
+    return {
+        message: message ?? `数值需在 ${min}~${max} 之间`,
+        validate: (v) => {
+            const n = Number(v);
+            return Number.isFinite(n) && n >= min && n <= max;
+        },
+    };
+}
+
+/** 与另一字段相等(确认密码/确认邮箱场景) */
+export function equalTo(otherKey: string, label: string, message?: string): FieldRule {
+    return {
+        message: message ?? `两次输入的${label}不一致`,
+        validate: (v, form) => v === form[otherKey],
+    };
+}
+
+/** 必须勾选(协议同意场景) */
+export function mustBeTrue(message = '请先勾选同意'): FieldRule {
+    return { message, validate: (v) => v === true };
+}
+
+/** 自定义规则逃生舱 */
+export function custom(
+    predicate: (value: unknown, form: FormData) => boolean,
+    message: string,
+): FieldRule {
+    return { message, validate: predicate };
+}
+
+// ---------------- 校验引擎 ----------------
+
+/** 校验单个字段:返回第一条失败规则的错误信息,全部通过返回空串 */
+export function validateField(key: string, form: FormData, schema: FormSchema): string {
+    const rules = schema[key] ?? [];
+    for (const rule of rules) {
+        if (!rule.validate(form[key], form)) return rule.message;
+    }
+    return '';
+}
+
+/**
+ * 校验整张表单(提交时用):
+ * 每个字段都会被校验(不短路),返回 { valid, errors },方便一次性渲染所有字段的红字。
+ */
+export function validateForm(form: FormData, schema: FormSchema): { valid: boolean; errors: FormErrors } {
+    const errors: FormErrors = {};
+    for (const key of Object.keys(schema)) {
+        const msg = validateField(key, form, schema);
+        if (msg) errors[key] = msg;
+    }
+    return { valid: Object.keys(errors).length === 0, errors };
+}
+
+// ---------------- 示例:注册表单 schema ----------------
+
+const phoneRE = /^1[3-9]\d{9}$/;
+
+const registerSchema: FormSchema = {
+    phone: [required('请输入手机号'), pattern(phoneRE, '手机号格式不正确')],
+    code: [required('请输入验证码'), length(6, 6, '验证码为 6 位数字')],
+    password: [
+        required('请输入密码'),
+        length(8, 20, '密码长度需在 8~20 位之间'),
+        pattern(/(?=.*[a-zA-Z])(?=.*\d)/, '密码需同时包含字母与数字'),
+    ],
+    confirmPassword: [required('请再次输入密码'), equalTo('password', '密码')],
+    age: [required('请输入年龄'), range(18, 99, '仅接受 18~99 岁用户注册')],
+    agreement: [mustBeTrue('请阅读并同意用户协议')],
+};
+
+// ---- 验证 1:一份"全错"的表单,每个字段都应给出对应错误 ----
+const badForm: FormData = {
+    phone: '12345',
+    code: '12',
+    password: 'short',
+    confirmPassword: 'different',
+    age: 15,
+    agreement: false,
+};
+const badResult = validateForm(badForm, registerSchema);
+console.log('valid =', badResult.valid); // false
+console.log(badResult.errors);
+// {
+//   phone: '手机号格式不正确',
+//   code: '验证码为 6 位数字',
+//   password: '密码长度需在 8~20 位之间',
+//   confirmPassword: '两次输入的密码不一致',
+//   age: '仅接受 18~99 岁用户注册',
+//   agreement: '请阅读并同意用户协议'
+// }
+
+// ---- 验证 2:合法表单应通过;注意 0/false 不被 required 误杀 ----
+const goodForm: FormData = {
+    phone: '13800138000',
+    code: '654321',
+    password: 'abc12345',
+    confirmPassword: 'abc12345',
+    age: 26,
+    agreement: true,
+};
+console.log(validateForm(goodForm, registerSchema)); // { valid: true, errors: {} }
+
+// ---- 验证 3:单字段校验(配合 blur 事件,只校验当前字段) ----
+console.log(validateField('phone', { phone: '13800138000' }, registerSchema)); // ''
+console.log(validateField('phone', { phone: '' }, registerSchema)); // '请输入手机号'
+```
+
+> 运行方式：`npx tsx examples/19-01-form-validation.ts`（纯 TS，无外部依赖）
+
+#### 最佳实践
+
+- ✅ **blur 单字段、submit 全表**：失焦时只校验当前字段（`validateField`，避免用户还没输完就满屏红字）；点提交时全量校验（`validateForm`），一次性标红所有错误字段并把焦点移到第一个错误项（焦点管理见 15.2）。
+- ⚠️ **`required` 不能只判断 falsy**：`0`（数量）、`false`（开关关闭）、`''` 在业务语义里可能是合法值。本例只有 `null/undefined/''/空数组` 算空。
+- ⚠️ **前端校验是体验，不是安全**：任何人都能绕过 JS 直接发请求，同一套规则必须在服务端重放一遍。
+- **异步校验单独建模**：用户名查重、验证码核验等服务端校验返回 Promise，不要塞进同步 `validate`；建议规则增加可选的 `validateAsync`，提交时先跑同步规则再跑异步。
+- 错误文案直接由规则返回而不是在视图层拼，产品改文案只动一处；动态表单场景下 schema 天然可 JSON 化下发。
+
+---
+
+## 19.2 输入格式化、提交锁与倒计时
+
+#### 概念解析
+
+三个出现频率极高的"交互手感"需求：输入内容要按格式实时清洗（手机号分段、金额只允许两位小数）、提交按钮不能因为用户连点产生重复单据、验证码按钮要有 60 秒倒计时。它们的共同点是：**逻辑小但边界多，写成纯函数后与框架无关**。
+
+#### 典型应用场景
+
+- 手机号/银行卡号输入分段显示、金额输入框实时过滤非法字符；
+- 下单、支付、保存、点赞等一切"在途请求期间按钮应禁用"的动作；
+- 短信/语音验证码发送后的冷却倒计时。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/19-02-input-and-submit.ts
+// ============ 输入格式化 + 提交防重锁 + 验证码倒计时 ============
+// 三类最高频的"交互手感"片段,全部是纯逻辑,在 input/click 事件里包一层即可。
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// ---------------- 输入格式化:只在"值"层面处理,不碰光标 ----------------
+
+/** 只保留数字 */
+export function digitsOnly(raw: string): string {
+    return raw.replace(/\D/g, '');
+}
+
+/** 手机号 3-4-4 分组:138 0013 8000(最多 11 位) */
+export function formatPhone(raw: string): string {
+    const d = digitsOnly(raw).slice(0, 11);
+    return [d.slice(0, 3), d.slice(3, 7), d.slice(7, 11)].filter(Boolean).join(' ');
+}
+
+/** 银行卡号每 4 位一组(卡号最长 19 位) */
+export function formatBankCard(raw: string): string {
+    return digitsOnly(raw).slice(0, 19).replace(/(\d{4})(?=\d)/g, '$1 ');
+}
+
+/**
+ * 金额输入框实时清洗:
+ * - 只允许数字与一个小数点; - 小数最多 2 位; - 不允许多余前导零; - "."开头补 "0."
+ * 提交时再 Number(value),展示与存储分离。
+ */
+export function formatAmountInput(raw: string): string {
+    let v = raw.replace(/[^\d.]/g, '');
+    const firstDot = v.indexOf('.');
+    if (firstDot !== -1) {
+        // 只保留第一个小数点,其后的点全部剔除
+        v = v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, '');
+    }
+    v = v.replace(/^(\d*\.\d{2}).*$/, '$1'); // 截断两位小数之后的内容
+    if (v.startsWith('.')) v = '0' + v;
+    if (v.length > 1 && v.startsWith('0') && v[1] !== '.') v = v.replace(/^0+/, '');
+    return v;
+}
+
+// ---------------- 提交防重锁(下单/支付/保存按钮通用) ----------------
+
+/**
+ * 把一个异步任务包成"同一时刻只允许一个在途"的函数。
+ * 锁在 finally 里释放:业务抛错也不会把按钮永久锁死。
+ * 返回 undefined 表示本次调用被忽略(可用于埋点重复点击)。
+ */
+export function withSubmitLock<T>(task: () => Promise<T>): () => Promise<T | undefined> {
+    let locked = false;
+    return async () => {
+        if (locked) {
+            console.warn('[lock] 正在提交中,重复点击已忽略');
+            return undefined;
+        }
+        locked = true;
+        try {
+            return await task();
+        } finally {
+            locked = false;
+        }
+    };
+}
+
+// ---------------- 验证码倒计时 ----------------
+
+/**
+ * 秒级倒计时,onTick 每秒回调剩余秒数,onDone 结束时回调。
+ * 返回 cancel():组件卸载 / 重新发送时必须调用,否则定时器泄漏(见 1.6 内存泄漏)。
+ */
+export function countdown(
+    seconds: number,
+    onTick: (left: number) => void,
+    onDone?: () => void,
+): () => void {
+    let left = seconds;
+    onTick(left);
+    const timer = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+            clearInterval(timer);
+            onTick(0);
+            onDone?.();
+        } else {
+            onTick(left);
+        }
+    }, 1000);
+    return () => clearInterval(timer);
+}
+
+// ---------------- 验证 ----------------
+
+// ---- 格式化 ----
+console.log(formatPhone('abc1380013800099')); // '138 0013 8000'
+console.log(formatBankCard('6222021234567890123')); // '6222 0212 3456 7890 123'
+console.log(formatAmountInput('0012.345abc')); // '12.34'
+console.log(formatAmountInput('.5')); // '0.5'
+console.log(formatAmountInput('100')); // '100'
+
+// ---- 防重锁:连续点击 3 次,任务只执行 1 次 ----
+let runs = 0;
+const submitOrder = withSubmitLock(async () => {
+    runs += 1;
+    await sleep(50); // 模拟接口耗时
+    return '下单成功';
+});
+const results = await Promise.all([submitOrder(), submitOrder(), submitOrder()]);
+console.log('任务执行次数 =', runs); // 1
+console.log('返回值 =', results); // ['下单成功', undefined, undefined]
+
+// ---- 倒计时:3 秒,观察每秒回调与结束回调(真实使用一般是 60 秒) ----
+await new Promise<void>((resolve) => {
+    const ticks: number[] = [];
+    countdown(3, (left) => ticks.push(left), () => {
+        console.log('倒计时序列 =', ticks); // [3, 2, 1, 0]
+        resolve();
+    });
+});
+```
+
+> 运行方式：`npx tsx examples/19-02-input-and-submit.ts`
+
+#### 最佳实践
+
+- ⚠️ **中途输入的光标跳动问题**：受控组件里 `onChange` 直接 `value = formatPhone(value)` 会让光标在插入分隔符后跳到末尾。只在末尾追加输入时无感知；若要支持从中间改，需在格式化前后保存/恢复 `selectionStart`（按"数字个数"而不是字符位置计算，因为空格会移位）。
+- ✅ **防重锁在 `finally` 里释放**：接口失败、组件抛错都必须解锁，否则按钮永久禁用。示例中连续点击返回 `undefined`，业务上还可以叠加埋点统计"用户等急了点了几下"。
+- ⚠️ **前端锁不等于幂等**：双击被挡住了，但用户开两个标签页、弱网重试、消息队列重放仍可能产生重复单。支付/下单类接口服务端必须按业务幂等键（订单号/客户端生成的 requestId）去重。
+- ⚠️ **倒计时必须返回取消函数**：切路由/组件卸载时清理定时器；倒计时结束的标志以**服务端响应**为准（发送成功才开始倒计时），不要点击即开始。
+
+---
+
+## 19.3 列表查询状态与 URL 同步
+
+#### 概念解析
+
+列表页的查询状态（页码、每页条数、关键字、筛选、排序）最稳妥的存放位置不是组件 state，而是 **URL query string**：刷新不丢、链接可分享、浏览器前进后退天然可用。核心是三个纯函数：**合法化合并**（默认值 + 脏参数兜底）、**对象与 URL 双向转换**、**分页信息推导**（含越界夹回）。
+
+#### 典型应用场景
+
+- 中后台表格列表（筛选后翻页、复制链接给同事定位同一视图）；
+- 商品/搜索结果页（SEO 与 SSR 也能直接从 URL 取参）；
+- 删光最后一页数据、用户手改 URL 参数等异常输入的兜底。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/19-03-table-query.ts
+// ============ 列表查询状态:默认值合并 + URL query 双向同步 + 分页推导 ============
+// 中后台列表页 90% 的 bug 来自三处:刷新丢筛选、分享链接打不开同一页、page 越界。
+// 这里用"单一查询对象 + URL 为唯一外部来源"一次性解决。
+
+/** 列表查询参数(各业务页用 interface 扩展 Filters) */
+export interface ListQuery {
+    page: number;
+    pageSize: number;
+    keyword?: string;
+    status?: string;
+    sort?: string; // 形如 '-createdAt'(负号=倒序)
+    [key: string]: string | number | undefined;
+}
+
+export type QueryDefaults = Pick<ListQuery, 'page' | 'pageSize'> & Partial<ListQuery>;
+
+/** 白名单:只允许这些 key 进出 URL,防止链接里被塞脏参数 */
+const ALLOWED_KEYS = ['page', 'pageSize', 'keyword', 'status', 'sort'] as const;
+
+// ---------------- 默认值合并 + 合法化 ----------------
+
+/**
+ * 把任意来源(URL/组件初始值)的原始参数与默认值合并并合法化:
+ * page/pageSize 强制为正整数,空串/undefined 一律回退默认值。
+ */
+export function normalizeQuery(raw: Record<string, unknown>, defaults: QueryDefaults): ListQuery {
+    const toPositiveInt = (v: unknown, fallback: number): number => {
+        const n = Number(v);
+        return Number.isInteger(n) && n > 0 ? n : fallback;
+    };
+    const clean = (v: unknown): string | undefined => {
+        const s = String(v ?? '').trim();
+        return s === '' ? undefined : s;
+    };
+
+    const query: ListQuery = {
+        ...defaults,
+        page: toPositiveInt(raw.page, defaults.page),
+        pageSize: toPositiveInt(raw.pageSize, defaults.pageSize),
+    };
+    for (const key of ['keyword', 'status', 'sort']) {
+        const v = clean(raw[key]);
+        if (v !== undefined) query[key] = v;
+    }
+    return query;
+}
+
+// ---------------- 与 URL 查询串双向同步 ----------------
+
+/** 查询对象 -> URLSearchParams(值为 undefined 的字段不出现在 URL 里,链接干净) */
+export function toSearchParams(query: ListQuery): URLSearchParams {
+    const params = new URLSearchParams();
+    for (const key of ALLOWED_KEYS) {
+        const v = query[key];
+        if (v !== undefined && v !== '') params.set(key, String(v));
+    }
+    return params;
+}
+
+/** URL 查询串 -> 查询对象(刷新、分享链接、浏览器前进后退都走这个入口) */
+export function fromSearchParams(
+    search: string | URLSearchParams,
+    defaults: QueryDefaults,
+): ListQuery {
+    const params = search instanceof URLSearchParams ? search : new URLSearchParams(search);
+    const raw: Record<string, unknown> = {};
+    for (const key of ALLOWED_KEYS) {
+        if (params.has(key)) raw[key] = params.get(key);
+    }
+    return normalizeQuery(raw, defaults);
+}
+
+// ---------------- 分页推导 ----------------
+
+export interface PageInfo {
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    /** SQL/ORM 常用的偏移量:offset = (page-1)*pageSize */
+    offset: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+}
+
+/** 由总数与当前页推导分页条所需的全部信息 */
+export function resolvePageInfo(total: number, query: ListQuery): PageInfo {
+    const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
+    // ⚠️ 关键兜底:删光最后一页的数据后当前页会越界,夹回合法区间
+    const page = Math.min(Math.max(1, query.page), totalPages);
+    return {
+        total,
+        page,
+        pageSize: query.pageSize,
+        totalPages,
+        offset: (page - 1) * query.pageSize,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+    };
+}
+
+// ---------------- 验证 ----------------
+
+const defaults: QueryDefaults = { page: 1, pageSize: 20, status: 'all' };
+
+// ---- 脏参数合法化:负页数、空 keyword、非数字 pageSize 全部回退 ----
+console.log(normalizeQuery({ page: '-3', pageSize: 'abc', keyword: '  ', status: 'paid' }, defaults));
+// { page: 1, pageSize: 20, status: 'paid' }
+
+// ---- URL 往返:对象 -> 链接 -> 对象,结果一致 ----
+const query = normalizeQuery({ page: 3, pageSize: 50, keyword: '发票', status: 'paid' }, defaults);
+const search = '?' + toSearchParams(query).toString();
+console.log(search); // ?page=3&pageSize=50&keyword=%E5%8F%91%E7%A5%A8&status=paid
+console.log(fromSearchParams(search, defaults)); // 与 query 相同
+
+// ---- 分页推导:total=55,pageSize=20 -> 共 3 页,第 3 页 offset=40 ----
+console.log(resolvePageInfo(55, { page: 3, pageSize: 20 }));
+// { total: 55, page: 3, pageSize: 20, totalPages: 3, offset: 40, hasPrev: true, hasNext: false }
+
+// ---- 越界兜底:数据只剩 5 条却停在第 9 页,自动夹回第 1 页 ----
+console.log(resolvePageInfo(5, { page: 9, pageSize: 20 }).page); // 1
+```
+
+> 运行方式：`npx tsx examples/19-03-table-query.ts`
+
+#### 最佳实践
+
+- ✅ **白名单进出 URL**：只序列化业务认识的 key，防止别人在链接里注入 `isAdmin=true` 之类的脏参数被带进请求。
+- ✅ **改任意筛选条件都把 `page` 重置为 1**；`keyword` 输入要套防抖（见 1.8 的 `debounce`）再同步 URL，否则每敲一个字都产生一条历史记录。
+- ⚠️ **总数变化后当前页可能越界**：删除数据、筛选条件变化都可能让 `page > totalPages`，`resolvePageInfo` 统一夹回，分页组件用返回的 `page` 而不是原始输入。
+- 框架接线极薄：React Router/Vue Router 里 `useSearchParams()` 得到的对象经 `fromSearchParams` 进请求层，请求回来后用 `resolvePageInfo` 渲染分页条；排序编码推荐 `-field`/`field`（负号倒序）这种一维格式。
+
+---
+
+## 19.4 类型安全的本地存储封装
+
+#### 概念解析
+
+裸用 `localStorage` 有三个痛点：取值到处 `JSON.parse` 且不处理损坏数据；没有过期机制，接口缓存和用户长期配置混在一起；同域多个项目/旧版本的 key 互相污染。封装目标是一个**带泛型、带 TTL、带前缀、损坏自愈**的存储门面。
+
+#### 典型应用场景
+
+- 登录令牌、主题、语言等长期偏好；
+- 接口响应、字典数据等带有效期的本地缓存；
+- SSR 同构项目（用适配器注入，不在模块顶层直接碰 `localStorage`）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/19-04-storage.ts
+// ============ 类型安全 + 过期时间 + 统一前缀的存储封装 ============
+// 裸用 localStorage 的三个痛点:到处 JSON.parse 且不处理损坏数据、
+// 没有过期机制(缓存与长期配置混在一起)、多项目同域 key 互相污染。
+
+/** 存储适配器:localStorage / sessionStorage / 内存 mock 都满足这个形状 */
+export interface StorageLike {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+}
+
+/** 序列化结构:e 为过期时间戳(ms),不存在表示永不过期 */
+interface Envelope<T> {
+    v: T;
+    e?: number;
+}
+
+/** 测试/SSR 用的内存适配器(浏览器里直接传 localStorage 即可) */
+export class MemoryStorage implements StorageLike {
+    private map = new Map<string, string>();
+
+    get length(): number {
+        return this.map.size;
+    }
+
+    key(index: number): string | null {
+        return Array.from(this.map.keys())[index] ?? null;
+    }
+
+    getItem(key: string): string | null {
+        return this.map.has(key) ? (this.map.get(key) as string) : null;
+    }
+
+    setItem(key: string, value: string): void {
+        this.map.set(key, value);
+    }
+
+    removeItem(key: string): void {
+        this.map.delete(key);
+    }
+}
+
+export interface StorageOptions {
+    /** 适配器,默认内存实现;浏览器环境传 localStorage */
+    adapter?: StorageLike;
+    /** key 前缀,多项目同域部署时隔离命名空间 */
+    prefix?: string;
+}
+
+export class TypedStorage {
+    private readonly adapter: StorageLike;
+    private readonly prefix: string;
+
+    constructor(options: StorageOptions = {}) {
+        this.adapter = options.adapter ?? new MemoryStorage();
+        this.prefix = options.prefix ?? 'app:';
+    }
+
+    private fullKey(key: string): string {
+        return this.prefix + key;
+    }
+
+    /**
+     * 写入。ttlMs 不传=永不过期;传了=到期后 get 返回 null 并自动清理。
+     * value 为 undefined 时等价于删除(方便 reset 场景)。
+     */
+    set<T>(key: string, value: T, ttlMs?: number): void {
+        if (value === undefined) {
+            this.remove(key);
+            return;
+        }
+        const envelope: Envelope<T> = { v: value, ...(ttlMs ? { e: Date.now() + ttlMs } : {}) };
+        this.adapter.setItem(this.fullKey(key), JSON.stringify(envelope));
+    }
+
+    /** 读取。不存在、已过期、数据损坏一律返回 null(损坏数据顺手清掉) */
+    get<T>(key: string): T | null {
+        const raw = this.adapter.getItem(this.fullKey(key));
+        if (raw === null) return null;
+        try {
+            const envelope = JSON.parse(raw) as Envelope<T>;
+            if (envelope.e !== undefined && envelope.e < Date.now()) {
+                this.remove(key); // 惰性过期:第一次访问才清理
+                return null;
+            }
+            return envelope.v;
+        } catch {
+            // ⚠️ 历史版本写入过非 JSON 或数据被截断时,不能让整个应用白屏
+            this.remove(key);
+            return null;
+        }
+    }
+
+    remove(key: string): void {
+        this.adapter.removeItem(this.fullKey(key));
+    }
+
+    /** 只清空本前缀命名空间,绝不能用 localStorage.clear() 误伤第三方脚本 */
+    clear(): void {
+        const keys = this.allRawKeys().filter((k) => k.startsWith(this.prefix));
+        for (const k of keys) this.adapter.removeItem(k);
+    }
+
+    /** 适配器没有 keys() 标准方法,localStorage 只能按下标遍历 */
+    private allRawKeys(): string[] {
+        const adapter = this.adapter as StorageLike & { length: number; key(i: number): string | null };
+        return Array.from({ length: adapter.length }, (_, i) => adapter.key(i)).filter(
+            (k): k is string => k !== null,
+        );
+    }
+}
+
+// ---------------- 验证(用内存适配器,浏览器中换成 localStorage 行为一致) ----------------
+
+const store = new TypedStorage({ prefix: 'demo:' });
+
+// ---- 永久配置:刷新后仍在 ----
+store.set('theme', 'dark');
+console.log(store.get<string>('theme')); // 'dark'
+
+// ---- 带 TTL 的缓存:100ms 后过期 ----
+store.set('user:profile', { id: 1, name: '阿强' }, 100);
+console.log(store.get<{ id: number; name: string }>('user:profile')?.name); // '阿强'
+await new Promise((r) => setTimeout(r, 120));
+console.log(store.get('user:profile')); // null(已过期并被自动删除)
+
+// ---- 损坏数据兜底 + 命名空间隔离:模拟老版本/手工写坏的内容 ----
+const memoryAdapter = new MemoryStorage();
+const robustStore = new TypedStorage({ adapter: memoryAdapter, prefix: 'demo:' });
+const otherStore = new TypedStorage({ adapter: memoryAdapter, prefix: 'other:' });
+memoryAdapter.setItem('demo:broken', '{not-json');
+console.log(robustStore.get('broken')); // null,不抛异常
+otherStore.set('keep', 1);
+robustStore.set('a', 1);
+robustStore.clear();
+console.log(robustStore.get('a')); // null(本命名空间已清空)
+console.log(otherStore.get('keep')); // 1(其他命名空间不受影响)
+
+// ---- undefined 即删除 ----
+store.set('temp', 1);
+store.set('temp', undefined);
+console.log(store.get('temp')); // null
+```
+
+> 运行方式：`npx tsx examples/19-04-storage.ts`
+
+#### 最佳实践
+
+- ⚠️ **`setItem` 会抛异常**：Safari 隐私模式、存储配额超限（5MB 左右）都可能 throw，生产环境可在封装内 try/catch 并降级为内存存储（降级策略见 10.6 的缓存分层思想）。
+- ⚠️ **SSR 下不要在模块顶层访问 `localStorage`**：通过适配器/工厂延迟获取（`typeof window === 'undefined' ? new MemoryStorage() : localStorage`）。
+- **惰性过期而非主动清扫**：没有后台定时器，数据到期后在第一次 `get` 时清理；对时效要求高的场景仍应以接口返回为准，本地缓存只做加速。
+- **敏感信息不入 `localStorage`**：它可被同源任意脚本读取（XSS 即失守，见 7.1），令牌存储策略（httpOnly cookie vs 内存）见 7.5。
+- 跨标签页同步状态可以监听 `storage` 事件，但复杂协同应参考第十八部分的 BroadcastChannel/Leader 选主方案。
+
+---
+
+## 19.5 树结构数据处理
+
+#### 概念解析
+
+部门树、菜单树、级联选择、评论楼层——后端通常返回**扁平数组**（带 `parentId`），而组件需要**嵌套树**；搜索时又要求"节点命中或其子孙命中都保留"。四个无副作用纯函数覆盖全部方向：扁平化、数组转树、查找/求路径、按关键字剪枝。
+
+#### 典型应用场景
+
+- 组织架构/菜单权限的渲染与搜索；
+- 级联选择器的值回显（由叶子 id 反显整条路径）；
+- 评论区、文件夹目录的增删改查。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/19-05-tree-utils.ts
+// ============ 树结构四件套:扁平化 / 数组转树 / 查找节点 / 关键字过滤(保留祖先) ============
+// 部门树、菜单树、级联选择、评论楼中楼——后端常给扁平数组,组件常要树形,
+// 搜索时又要"自己命中或子孙命中都保留"。四个纯函数覆盖全部场景。
+
+export interface TreeNode {
+    id: number | string;
+    parentId: number | string | null;
+    name: string;
+    children?: TreeNode[];
+}
+
+/** 树 -> 扁平数组(前序 DFS:父节点一定排在子孙前面) */
+export function flattenTree(nodes: readonly TreeNode[]): TreeNode[] {
+    const result: TreeNode[] = [];
+    const walk = (list: readonly TreeNode[]): void => {
+        for (const node of list) {
+            result.push(node);
+            if (node.children?.length) walk(node.children);
+        }
+    };
+    walk(nodes);
+    return result;
+}
+
+/**
+ * 扁平数组 -> 树(两遍法,数据乱序也能正确挂载):
+ * 第一遍全部入 Map;第二遍各自找父节点,找不到父(或父被过滤掉)的就是根。
+ */
+export function listToTree(list: readonly TreeNode[]): TreeNode[] {
+    // ⚠️ 必须给每个节点新建 children 数组并克隆,直接改原数据会污染外部缓存
+    const map = new Map<TreeNode['id'], TreeNode>();
+    for (const item of list) map.set(item.id, { ...item, children: [] });
+
+    const roots: TreeNode[] = [];
+    for (const item of list) {
+        const node = map.get(item.id) as TreeNode;
+        if (item.parentId !== null && map.has(item.parentId)) {
+            (map.get(item.parentId) as TreeNode).children?.push(node);
+        } else {
+            roots.push(node);
+        }
+    }
+    // 叶子节点的空 children 删掉,避免组件把叶子渲染成展开箭头
+    const stripEmpty = (nodes: TreeNode[]): void => {
+        for (const n of nodes) {
+            if (n.children?.length === 0) delete n.children;
+            else if (n.children) stripEmpty(n.children);
+        }
+    };
+    stripEmpty(roots);
+    return roots;
+}
+
+/** 在树中按 id 查找单个节点(DFS) */
+export function findNode(nodes: readonly TreeNode[], id: TreeNode['id']): TreeNode | null {
+    for (const node of nodes) {
+        if (node.id === id) return node;
+        if (node.children?.length) {
+            const hit = findNode(node.children, id);
+            if (hit) return hit;
+        }
+    }
+    return null;
+}
+
+/**
+ * 求从根到目标节点的路径(含两端),用于级联选择器回显、面包屑。
+ * 找不到返回 null。
+ */
+export function findPath(nodes: readonly TreeNode[], id: TreeNode['id']): TreeNode[] | null {
+    const dfs = (list: readonly TreeNode[], trail: TreeNode[]): TreeNode[] | null => {
+        for (const node of list) {
+            const next = [...trail, node];
+            if (node.id === id) return next;
+            if (node.children?.length) {
+                const hit = dfs(node.children, next);
+                if (hit) return hit;
+            }
+        }
+        return null;
+    };
+    return dfs(nodes, []);
+}
+
+/**
+ * 树关键字过滤:
+ * 节点自身命中,或其任意子孙命中,都保留(且保留中间路径),
+ * 否则整枝剪掉。菜单搜索、组织架构搜索都用这个语义。
+ */
+export function filterTree(nodes: readonly TreeNode[], predicate: (node: TreeNode) => boolean): TreeNode[] {
+    const walk = (list: readonly TreeNode[]): TreeNode[] => {
+        const kept: TreeNode[] = [];
+        for (const node of list) {
+            const children = node.children ? walk(node.children) : undefined;
+            if (predicate(node) || (children && children.length > 0)) {
+                kept.push({ ...node, ...(children?.length ? { children } : {}) });
+            }
+        }
+        return kept;
+    };
+    return walk(nodes);
+}
+
+// ---------------- 验证 ----------------
+
+// 后端返回的扁平部门列表(注意顺序是乱的)
+const flatDepts: TreeNode[] = [
+    { id: 3, parentId: 2, name: '前端组' },
+    { id: 1, parentId: null, name: '总部' },
+    { id: 4, parentId: 2, name: '后端组' },
+    { id: 2, parentId: 1, name: '技术中心' },
+    { id: 5, parentId: 2, name: '测试组' },
+    { id: 6, parentId: null, name: '分公司' },
+];
+
+const tree = listToTree(flatDepts);
+console.log(JSON.stringify(tree, null, 2));
+// 总部
+//  ├─ 技术中心
+//  │   ├─ 前端组
+//  │   ├─ 后端组
+//  │   └─ 测试组
+// 分公司
+
+// ---- 扁平化后父节点必在子孙之前 ----
+console.log(flattenTree(tree).map((n) => n.name));
+// ['总部', '技术中心', '前端组', '后端组', '测试组', '分公司']
+
+// ---- 查找 ----
+console.log(findNode(tree, 5)?.name); // '测试组'
+console.log(findNode(tree, 999)); // null
+
+// ---- 路径回显:前端组的面包屑 ----
+console.log((findPath(tree, 3) ?? []).map((n) => n.name)); // ['总部', '技术中心', '前端组']
+
+// ---- 关键字过滤:搜"组",命中子孙时祖先路径一并保留;分公司整枝被剪掉 ----
+console.log(flattenTree(filterTree(tree, (n) => n.name.includes('组'))).map((n) => n.name));
+// ['总部', '技术中心', '前端组', '后端组', '测试组']
+
+// ---- 原数据不被污染 ----
+console.log(flatDepts[0].children); // undefined
+```
+
+> 运行方式：`npx tsx examples/19-05-tree-utils.ts`
+
+#### 最佳实践
+
+- ✅ **两遍法转树，不要递归找父**：先全部进 `Map`，第二遍挂载，时间复杂度 O(n)，且数据乱序、子节点排在父节点前面都不受影响。
+- ⚠️ **不要原地修改入参**：扁平数组可能来自接口缓存/SWR，被多个组件共享。示例中每个节点都浅克隆，过滤时同样返回新树。
+- **空 `children` 要清理**：`children: []` 会让很多 UI 组件把叶子渲染成可展开的空文件夹。
+- **过滤的语义是"保留命中祖先链"**：只保留命中节点会让用户看不到层级上下文；子孙命中也要把整条祖先路径留下。
+- 超大树（上万节点的全量菜单/文件系统）不要一次性渲染，配合 10.4 的虚拟列表；`id/parentId` 用字符串还是数字要在协议层统一，`''`、`0`、`null` 三种"根"的写法历史上都出现过。
+
+---
+
+## 19.6 文件校验、下载与剪贴板
+
+#### 概念解析
+
+文件相关的需求集中在三个动作：上传前**校验**（大小与类型，提前拦截省流量）、导出/附件**下载**（Blob 转对象 URL 触发）、订单号/邀请链接**复制**（Clipboard API 加老方案兜底）。纯逻辑部分（格式化、校验）与 DOM 部分分开写，前者可直接单测。
+
+#### 典型应用场景
+
+- 头像/附件上传前的格式与大小提示；
+- 报表导出、图片/PDF 下载并指定文件名；
+- 一键复制订单号、付款地址、分享口令。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/19-06-file-utils.ts
+// ============ 文件三件套:大小/类型校验、浏览器下载、复制到剪贴板 ============
+
+/** File 的最小结构形状(不依赖 DOM 也能在校验函数里复用与单测) */
+export interface FileLike {
+    name: string;
+    size: number;
+    type: string;
+}
+
+/** 人类可读的文件大小:1536 -> '1.50 KB',5*1024*1024 -> '5 MB' */
+export function formatBytes(bytes: number): string {
+    if (bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
+    const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / 1024 ** exponent;
+    // B 与整数不带小数;非整数保留 2 位,避免 1.5 KB 显示成 1.5000...
+    const digits = exponent === 0 || Number.isInteger(value) ? 0 : 2;
+    return `${value.toFixed(digits)} ${units[exponent]}`;
+}
+
+export interface FileRule {
+    /**
+     * 允许的类型,同时支持:
+     * - 扩展名:'.png,.jpg'
+     * - MIME 精确值:'application/pdf'
+     * - MIME 通配:'image/*'
+     */
+    accept?: string[];
+    /** 最大字节数 */
+    maxSize?: number;
+}
+
+/**
+ * 校验文件,通过返回 null,不通过返回面向用户的错误信息。
+ * ⚠️ 扩展名与 type 都不可信(用户可改后缀),真正的安全校验必须在服务端做,
+ * 前端这层只是体验优化与流量拦截。
+ */
+export function validateFile(file: FileLike, rule: FileRule): string | null {
+    if (rule.maxSize !== undefined && file.size > rule.maxSize) {
+        return `文件大小不能超过 ${formatBytes(rule.maxSize)}`;
+    }
+    const accept = rule.accept?.map((s) => s.trim().toLowerCase()).filter(Boolean);
+    if (accept && accept.length > 0) {
+        const ext = '.' + file.name.split('.').pop()!.toLowerCase();
+        const mime = file.type.toLowerCase();
+        const matched = accept.some((item) => {
+            if (item.startsWith('.')) return ext === item; // 扩展名匹配
+            if (item.endsWith('/*')) return mime.startsWith(item.slice(0, -1)); // image/* 类前缀匹配
+            return mime === item; // 精确 MIME 匹配
+        });
+        if (!matched) return `仅支持 ${accept.join('、')} 格式`;
+    }
+    return null;
+}
+
+/**
+ * 浏览器下载:Blob/File 走对象 URL,字符串直接当 URL 用。
+ * ⚠️ revokeObjectURL 必须延迟一轮事件循环:同步撤销会导致刚触发的下载拿到空内容。
+ */
+export function download(source: Blob | string, filename: string): void {
+    const url = typeof source === 'string' ? source : URL.createObjectURL(source);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor); // Firefox 要求挂载后才可点击
+    anchor.click();
+    anchor.remove();
+    if (typeof source !== 'string') {
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+}
+
+/**
+ * 复制文本到剪贴板:优先 Clipboard API(需要 HTTPS 或 localhost),
+ * 失败/非安全上下文降级到 textarea + execCommand(已废弃但仍是最可靠的兜底)。
+ */
+export async function copyText(text: string): Promise<boolean> {
+    if (navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch {
+            // 权限被拒或非安全上下文,走降级方案
+        }
+    }
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        textarea.remove();
+        return ok;
+    } catch {
+        return false;
+    }
+}
+
+// ---------------- 验证(只跑纯逻辑部分,DOM 函数在页面里调用) ----------------
+
+// ---- 大小格式化 ----
+console.log(formatBytes(0)); // '0 B'
+console.log(formatBytes(1536)); // '1.50 KB'
+console.log(formatBytes(5 * 1024 * 1024)); // '5 MB'
+console.log(formatBytes(2_500_000_000)); // '2.33 GB'
+
+// ---- 类型与大小校验 ----
+const rule: FileRule = { accept: ['.png', '.jpg', 'image/*', 'application/pdf'], maxSize: 5 * 1024 * 1024 };
+console.log(validateFile({ name: '头像.PNG', size: 1024, type: 'image/png' }, rule)); // null(扩展名大小写不敏感)
+console.log(validateFile({ name: '照片.jpg', size: 1024, type: 'image/jpeg' }, rule)); // null(MIME 走 image/*)
+console.log(validateFile({ name: '合同.pdf', size: 1024, type: 'application/pdf' }, rule)); // null
+console.log(validateFile({ name: '病毒.exe', size: 1024, type: 'application/x-msdownload' }, rule));
+// '仅支持 .png、.jpg、image/*、application/pdf 格式'
+console.log(validateFile({ name: '超大.zip', size: 99 * 1024 * 1024, type: 'application/zip' }, rule));
+// '文件大小不能超过 5 MB'
+
+// 浏览器里这样用:
+// const err = validateFile(input.files[0], rule);
+// if (err) toast(err); else await upload(input.files[0]);
+// const blob = await (await fetch('/api/export')).blob();
+// download(blob, `报表_${Date.now()}.xlsx`);
+// await copyText('INV-20261001-001'); // 复制订单号
+```
+
+> 运行方式：`npx tsx examples/19-06-file-utils.ts`（仅运行纯逻辑验证；`download`/`copyText` 需在浏览器页面中调用）
+
+#### 最佳实践
+
+- ⚠️ **前端类型校验不是安全边界**：扩展名和 `file.type` 都可伪造（`type` 甚至由浏览器按扩展名猜测）。服务端必须做 MIME 嗅探（magic number）与病毒扫描，前端校验只为省流量、给即时反馈。
+- ⚠️ **对象 URL 要延迟回收**：`click()` 后同步 `revokeObjectURL` 在部分浏览器会下载到空文件；延迟 1 秒或在 `setTimeout` 中回收。
+- ⚠️ **跨源 URL 的 `download` 属性可能被忽略**：浏览器对跨源资源会直接导航而非下载，服务端跨源下载应返回 `Content-Disposition: attachment` 或先 `fetch` 成 Blob 再走对象 URL。
+- **剪贴板 API 要求安全上下文**（HTTPS/localhost）且用户手势内调用，务必保留 `execCommand` 兜底并根据返回布尔值给"复制失败请手动长按"提示。
+- 大文件上传（分片、秒传、断点续传）不在本节，见 6.7 的完整方案。
+
+---
+
+## 19.7 前端埋点与曝光监听
+
+#### 概念解析
+
+埋点工程的核心矛盾是**实时性 vs 请求量**：每条事件一次请求会打爆连接，只靠定时攒批又会在关闭页面时丢最后一批。生产级上报器需要三层触发——攒够条数立即发、定时器兜底发、页面隐藏时用 `sendBeacon` 强发；并保证发送失败的事件回退队列重试。曝光与点击则分别用 IntersectionObserver 和事件委托实现。
+
+#### 典型应用场景
+
+- 点击、页面浏览、下单漏斗等行为埋点；
+- 广告/推荐卡片的曝光统计；
+- 列表内成百上千个元素的点击事件统一采集。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/19-07-tracking.ts
+// ============ 埋点上报:批量队列 + 定时/阈值 flush + 页面关闭兜底 + 曝光监听 ============
+// 每条事件一次请求会把连接数打爆;只靠定时 flush 又会在关页面时丢最后一批。
+// 这里三件套齐发:攒够 N 条立即发、每隔 T 秒兜底发、pagehide 用 sendBeacon 强发。
+
+export interface TrackEvent {
+    name: string;
+    data?: Record<string, unknown>;
+    ts: number;
+}
+
+/** 发送器由业务注入(浏览器里接 fetch/sendBeacon,单测里接数组收集) */
+export type TrackSender = (events: TrackEvent[]) => Promise<void> | void;
+
+export interface ReporterOptions {
+    /** 攒够多少条立即上报 */
+    flushSize?: number;
+    /** 定时上报间隔(ms) */
+    flushInterval?: number;
+    send: TrackSender;
+}
+
+export class Reporter {
+    private queue: TrackEvent[] = [];
+    private readonly flushSize: number;
+    private readonly flushInterval: number;
+    private readonly send: TrackSender;
+    private timer: ReturnType<typeof setInterval> | null = null;
+    private flushing = false;
+
+    constructor(options: ReporterOptions) {
+        this.flushSize = options.flushSize ?? 10;
+        this.flushInterval = options.flushInterval ?? 5000;
+        this.send = options.send;
+    }
+
+    /** 开启定时上报(SPA 整个生命周期一个实例即可) */
+    start(): void {
+        if (this.timer) return;
+        this.timer = setInterval(() => void this.flush(), this.flushInterval);
+    }
+
+    /** 埋一条事件 */
+    track(name: string, data?: Record<string, unknown>): void {
+        this.queue.push({ name, data, ts: Date.now() });
+        if (this.queue.length >= this.flushSize) void this.flush();
+    }
+
+    /** 把当前队列一次性发出去;发送中不重入,失败的事件重新塞回队首下次重试 */
+    async flush(): Promise<void> {
+        if (this.flushing || this.queue.length === 0) return;
+        const batch = this.queue;
+        this.queue = [];
+        this.flushing = true;
+        try {
+            await this.send(batch);
+        } catch (err) {
+            // ⚠️ 不能丢:失败事件回插队首,下一轮优先重发
+            this.queue = [...batch, ...this.queue];
+            console.warn('[reporter] 上报失败,已回退到队列:', err instanceof Error ? err.message : err);
+        } finally {
+            this.flushing = false;
+        }
+    }
+
+    /** 页面隐藏/关闭时调用:sendBeacon 异步不阻塞卸载,保证最后一批不丢 */
+    flushOnHide(): void {
+        if (this.queue.length === 0) return;
+        const payload = JSON.stringify(this.queue);
+        // sendBeacon 不可用或被拒时,退回带 keepalive 的 fetch(卸载阶段仍可能完成)
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+            const queued = navigator.sendBeacon('/api/track', payload);
+            if (queued) this.queue = [];
+        }
+    }
+
+    stop(): void {
+        if (this.timer) clearInterval(this.timer);
+        this.timer = null;
+    }
+}
+
+/**
+ * 浏览器接线:监听 pagehide(iOS Safari 上 unload/beforeunload 不可靠,见 10.3)。
+ * 单独导出而不是构造函数里自动绑定:Node/SSR 环境没有 document,且便于单测。
+ */
+export function bindPageHide(reporter: Reporter): () => void {
+    const handler = (): void => reporter.flushOnHide();
+    document.addEventListener('pagehide', handler);
+    return () => document.removeEventListener('pagehide', handler);
+}
+
+/**
+ * 元素曝光监听(广告/卡片/推荐位):
+ * 进入视口即回调,once=true 时每个元素只报一次;阈值用 intersectionRatio 兜底,
+ * 避免 IntersectionObserver 阈值在某些浏览器对 0 的实现差异。
+ */
+export function observeExposure(
+    elements: Element[],
+    onExpose: (el: Element) => void,
+    options: { threshold?: number; once?: boolean } = {},
+): IntersectionObserver {
+    const { threshold = 0.5, once = true } = options;
+    const observer = new IntersectionObserver(
+        (entries) => {
+            for (const entry of entries) {
+                if (entry.isIntersecting && entry.intersectionRatio >= threshold) {
+                    onExpose(entry.target);
+                    if (once) observer.unobserve(entry.target);
+                }
+            }
+        },
+        { threshold },
+    );
+    for (const el of elements) observer.observe(el);
+    return observer;
+}
+
+/**
+ * 点击事件委托:容器内带 data-track 的元素被点即上报,
+ * data-track-* 其余属性自动作为事件参数。列表里成百上千个卡片只绑一个监听。
+ */
+export function delegateClickTrack(container: Element, eventName = 'click'): () => void {
+    const handler = (event: Event): void => {
+        const target = (event.target as Element | null)?.closest('[data-track]');
+        if (!target || !container.contains(target)) return;
+        const name = target.getAttribute('data-track') as string;
+        const data: Record<string, string> = {};
+        for (const attr of Array.from(target.attributes)) {
+            if (attr.name.startsWith('data-track-')) {
+                data[attr.name.slice('data-track-'.length)] = attr.value;
+            }
+        }
+        // 实际项目里从外面注入 reporter;此处直接派发自定义事件解耦
+        container.dispatchEvent(new CustomEvent('track', { detail: { name, data } }));
+    };
+    container.addEventListener(eventName, handler);
+    return () => container.removeEventListener(eventName, handler);
+}
+
+// ---------------- 验证(注入假发送器,不依赖浏览器) ----------------
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// ---- 阈值触发:连埋 3 条(flushSize=3)立即收到一批 ----
+let receivedBatches: number = 0;
+const reporter = new Reporter({
+    flushSize: 3,
+    flushInterval: 60_000, // 调大,排除定时干扰
+    send: async (events) => {
+        receivedBatches += 1;
+        console.log(`第 ${receivedBatches} 批,${events.length} 条:`, events.map((e) => e.name));
+    },
+});
+reporter.start();
+reporter.track('page_view', { from: 'home' });
+reporter.track('banner_click');
+reporter.track('add_cart', { sku: 'SKU-1' });
+await sleep(10); // 等 flush 的微任务链完成
+console.log('批次数 =', receivedBatches); // 1
+
+// ---- 失败重试:发送器第一次抛错,事件回队首,下一轮重发成功 ----
+let attempt = 0;
+const retryReporter = new Reporter({
+    flushSize: 1,
+    send: async () => {
+        attempt += 1;
+        if (attempt === 1) throw new Error('网络断了');
+    },
+});
+retryReporter.track('pay_click');
+await retryReporter.flush(); // 第 1 次失败,事件退回队列
+console.log('第 1 次后队列长度 =', (retryReporter as unknown as { queue: unknown[] }).queue.length); // 1
+await retryReporter.flush(); // 第 2 次成功
+console.log('第 2 次后队列长度 =', (retryReporter as unknown as { queue: unknown[] }).queue.length); // 0
+
+reporter.stop();
+retryReporter.stop();
+```
+
+> 运行方式：`npx tsx examples/19-07-tracking.ts`（注入假发送器验证批量与重试；曝光/委托函数需在浏览器调用）
+
+#### 最佳实践
+
+- ✅ **三层 flush 缺一不可**：条数阈值保证实时性，定时器保证低频事件也能上报，`pagehide` 保证关页面不丢。监听 `pagehide` 而非 `unload/beforeunload`——后者在 iOS Safari 与 BFCache 场景下不可靠（见 10.3）。
+- ⚠️ **`sendBeacon` 有体积上限**（Chrome 约 64KB）且只保证"尽力而为"，超限或队列太大时退回 `fetch(url, { keepalive: true })`。
+- ⚠️ **失败事件要回退队列，但要防止无限堆积**：网络长时间断开时建议加上队列上限（如 200 条，超出丢最旧的非关键事件），并区分关键事件（支付）与普通点击。
+- **曝光判定加 `intersectionRatio` 双保险**，默认 `once` 只报一次；长列表滚动场景配合虚拟列表时，曝光的是渲染窗口内的元素，统计口径要和数据团队对齐。
+- **事件命名与参数做成声明式约定**：`data-track="add_cart" data-track-sku="SKU-1"`，配合事件委托，业务模板里不再写任何 `onClick` 埋点代码。SPA 的 `page_view` 在路由切换时手动埋（没有整页加载）。
+
+---
+
+## 19.8 按钮级权限与路由守卫
+
+#### 概念解析
+
+业务系统的权限模型最常见的是 RBAC：用户持有一组权限码，码采用 **`资源:动作`** 格式（`user:edit`），`*` 表示超管，`user:*` 表示该资源全权。判定逻辑（通配匹配）必须只有一份，按钮显隐、路由拦截、操作前防误调三处复用，且全部写成纯函数，框架只负责把判定结果翻译成 UI 行为。
+
+#### 典型应用场景
+
+- 工具栏按钮按权限显隐/禁用；
+- 路由跳转前的登录态与权限校验（未登录带 `redirect` 跳登录页）；
+- 同一个前端应用服务不同角色（运营、财务、超管）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/19-08-permission.ts
+// ============ 权限模型:资源:动作 通配匹配 + 按钮级判定 + 路由守卫 ============
+// 权限码统一用 '资源:动作' 格式('user:edit'),'*' 为超管,'资源:*' 为该资源全权。
+// 判定逻辑只写一份,按钮显隐、路由拦截、接口防误调三处复用。
+
+/** 判断单条需求权限是否被某条持有权限满足 */
+export function matchRule(required: string, owned: string): boolean {
+    if (owned === '*') return true; // 超管
+    if (required === owned) return true; // 精确相等:user:edit === user:edit
+    if (owned.endsWith(':*')) {
+        // 资源级通配:user:* 满足 user:edit / user:delete
+        return required.startsWith(owned.slice(0, -1)); // 截掉 '*',保留 'user:'
+    }
+    return false;
+}
+
+/** 当前用户是否拥有某条权限(持有列表中任意一条满足即可) */
+export function hasPermission(required: string, owned: readonly string[]): boolean {
+    return owned.some((rule) => matchRule(required, rule));
+}
+
+/** 批量过滤:把"动作 -> 是否可见"一次算完,给工具栏按钮组用 */
+export function resolveActions<T extends string>(
+    actions: readonly T[],
+    owned: readonly string[],
+): Record<T, boolean> {
+    return actions.reduce(
+        (acc, action) => {
+            acc[action] = hasPermission(action, owned);
+            return acc;
+        },
+        {} as Record<T, boolean>,
+    );
+}
+
+// ---------------- 路由守卫(框架无关的核心) ----------------
+
+export interface GuardRoute {
+    path: string;
+    /** 访问该路由所需权限;不写表示登录即可访问 */
+    permission?: string;
+}
+
+export type GuardResult =
+    | { type: 'allow' }
+    | { type: 'deny'; reason: 'not-authenticated' | 'forbidden' }
+    | { type: 'redirect'; to: string };
+
+export interface GuardOptions {
+    isAuthenticated: boolean;
+    permissions: readonly string[];
+    /** 未登录统一跳登录页,并携带来源地址,登录后跳回 */
+    loginPath: string;
+    currentPath: string;
+}
+
+/**
+ * 纯函数守卫:React/Vue/小程序各自的路由钩子里调它,
+ * 只根据返回 type 决定下一步,不在里面写任何框架 API。
+ */
+export function resolveRoute(route: GuardRoute, options: GuardOptions): GuardResult {
+    if (!options.isAuthenticated) {
+        const from = encodeURIComponent(options.currentPath);
+        return { type: 'redirect', to: `${options.loginPath}?redirect=${from}` };
+    }
+    if (route.permission && !hasPermission(route.permission, options.permissions)) {
+        return { type: 'deny', reason: 'forbidden' };
+    }
+    return { type: 'allow' };
+}
+
+// ---------------- 验证 ----------------
+
+// ---- 通配匹配矩阵 ----
+console.log(matchRule('user:edit', '*')); // true(超管)
+console.log(matchRule('user:edit', 'user:edit')); // true(精确)
+console.log(matchRule('user:edit', 'user:*')); // true(资源通配)
+console.log(matchRule('user:edit', 'order:*')); // false(资源不同)
+console.log(matchRule('user:edit', 'user:view')); // false(动作不同)
+// ⚠️ 防越权细节:startsWith 的前缀必须带冒号,避免 'user2:x' 误匹配 'user:*'
+console.log(matchRule('user2:edit', 'user:*')); // false
+
+// ---- 运营同学的权限:只读用户 + 订单全权 ----
+const opsPermissions = ['user:view', 'order:*'];
+console.log(hasPermission('user:view', opsPermissions)); // true
+console.log(hasPermission('user:delete', opsPermissions)); // false
+console.log(hasPermission('order:refund', opsPermissions)); // true
+
+// ---- 工具栏按钮一次性算完 ----
+const actions = ['user:view', 'user:create', 'user:edit', 'user:delete'] as const;
+console.log(resolveActions(actions, opsPermissions));
+// { 'user:view': true, 'user:create': false, 'user:edit': false, 'user:delete': false }
+
+// ---- 路由守卫三态 ----
+const guest = { isAuthenticated: false, permissions: [], loginPath: '/login', currentPath: '/users' };
+console.log(resolveRoute({ path: '/users', permission: 'user:view' }, guest));
+// { type: 'redirect', to: '/login?redirect=%2Fusers' }
+
+const editor = { isAuthenticated: true, permissions: ['user:view'], loginPath: '/login', currentPath: '/users' };
+console.log(resolveRoute({ path: '/home' }, editor)); // { type: 'allow' }(登录即可)
+console.log(resolveRoute({ path: '/users', permission: 'user:view' }, editor)); // { type: 'allow' }
+console.log(resolveRoute({ path: '/users', permission: 'user:delete' }, editor)); // { type: 'deny', reason: 'forbidden' }
+```
+
+> 运行方式：`npx tsx examples/19-08-permission.ts`
+
+核心纯函数之外，框架胶水层每个项目只写一次（示意，无需脚手架即可理解）：
+
+```typescript
+// Vue 3 自定义指令 v-permission:无权限直接把元素移出 DOM
+// 用法:<button v-permission="'user:delete'">删除</button>
+import type { Directive } from 'vue';
+// import { hasPermission } from '@/utils/permission';
+const vPermission: Directive<HTMLElement, string> = {
+    mounted(el, binding) {
+        // const perms = useUserStore().permissions;
+        const perms: string[] = [];
+        if (!hasPermission(binding.value, perms)) el.remove();
+    },
+};
+```
+
+```tsx
+// React:权限边界组件,声明式包裹任意按钮/菜单
+// 用法:<Can permission="user:delete" perms={perms}><button>删除</button></Can>
+function Can({
+    permission,
+    perms,
+    children,
+}: {
+    permission: string;
+    perms: string[];
+    children: React.ReactNode;
+}) {
+    return hasPermission(permission, perms) ? <>{children}</> : null;
+}
+```
+
+```typescript
+// 路由守卫里只做"结果翻译",判定全在 resolveRoute(vue-router 示意)
+router.beforeEach((to) => {
+    const result = resolveRoute(
+        { path: to.path, permission: to.meta.permission as string | undefined },
+        authStore.guardOptions,
+    );
+    if (result.type === 'redirect') return result.to; // /login?redirect=...
+    if (result.type === 'deny') return '/403';
+    return true;
+});
+```
+
+#### 最佳实践
+
+- ⚠️ **隐藏按钮只是 UX，不是安全**：用户能看到接口就能直接调，所有权限判定必须在服务端对每个请求重做一遍（前端隐藏是"防误触"，服务端拒绝才是"防越权"，见 7.3）。
+- ⚠️ **通配匹配的前缀必须保留冒号**：`user:*` 截成 `user:` 再 `startsWith`，否则 `user2:edit` 会被误判为有 `user:*` 权限——这是真实发生过的水平越权事故。
+- ✅ **未登录与无权限分开**：未登录 → 带 `redirect` 跳登录页（登录后跳回原页）；已登录但权限不足 → 留页/403，不要又踢去登录页。
+- **权限是动态数据**：登录后拉取、切换角色/退出后清空；权限刷新后路由表与菜单要重新计算。按钮级显隐之外，关键操作在点击时也应再判一次（防止长时间挂起的页面拿着旧权限操作）。
+- 数据级权限（同是"订单查看"，只能看自己部门的单）无法用权限码表达，必须由服务端按数据范围过滤。
+
+---
+
+## 19.9 IndexedDB 结构化仓储
+
+#### 概念解析
+
+`localStorage` 是同步的字符串 KV（容量约 5MB），存不下也查不快结构化数据。**IndexedDB 是浏览器内置的事务型 NoSQL 数据库**：容量按磁盘配额（通常几百 MB 起）、存结构化克隆对象、支持索引和游标、异步不阻塞渲染。它的心智模型有五条：
+
+1. **开库即升级**：`indexedDB.open(name, version)`，只有在 `onupgradeneeded` 回调里才能 `createObjectStore` / `createIndex`；版本号递增才会触发升级，老标签页持有旧连接会触发 `onblocked`；
+2. **仓储与主键**：objectStore 类似表，`keyPath` 指定内联主键（记录必须含该字段），主键唯一性由引擎保证；`add` 撞主键抛 `ConstraintError`，`put` 存在则覆盖；
+3. **索引**：`createIndex(name, keyPath, {unique})` 建二级索引，配合 `IDBKeyRange.only/bound/upperBound/lowerBound` 按区间查询，避免全表扫；
+4. **事务是原子的**：同一事务内任意请求失败 → 整个事务 abort、已写入全部回滚；事务在**事件循环空转后自动提交**，所以事务内的请求必须同步连续发出，中间不能插 `await`——这是第一大坑；
+5. 原生 API 全是 `IDBRequest` 事件回调，工程上统一封成 Promise 并以 **Repository 模式**收口，业务代码不碰事务细节。
+
+#### 典型应用场景
+
+- 离线优先应用：PWA 缓存商品/文档列表，断网可读、联网后同步；
+- 大数据量本地分析：数万条日志/埋点队列、富文本草稿历史，localStorage 放不下也写不动；
+- 需要**范围查询**（时间区间、分类）与**批量原子写入**（要么全成功要么全回滚）的场景；
+- 对 Promise 化 API 有更高要求时可直接用 [`idb`](https://github.com/jakearchibald/idb) 库，本节展示的是它底层的手写等价物。
+
+#### 完整代码示例
+
+```javascript
+// 文件: examples/19-09-indexeddb.html（纯静态页面,浏览器直接打开,6 个按钮逐项演示）
+
+// ① 开库:onupgradeneeded 是唯一能建仓储/索引的地方
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open('demo-bookshop', 1); // 版本号 +1 才触发升级
+        request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains('books')) {
+                const store = db.createObjectStore('books', { keyPath: 'isbn' }); // 内联主键
+                store.createIndex('by-category', 'category', { unique: false }); // 普通索引
+                store.createIndex('by-title', 'title', { unique: true }); // 唯一索引
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onblocked = () => console.warn('旧标签页占用连接,升级被阻塞');
+        request.onerror = () => reject(request.error);
+    });
+}
+
+// ② IDBRequest → Promise 的通用转换
+const whenDone = (request) =>
+    new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+
+// ③ Repository:业务侧只见方法,不见事务
+class BookRepository {
+    constructor(db) {
+        this.db = db;
+    }
+    store(mode) {
+        return this.db.transaction('books', mode).objectStore('books');
+    } // readonly | readwrite
+    add(book) {
+        return whenDone(this.store('readwrite').add(book));
+    } // 撞主键 → ConstraintError
+    put(book) {
+        return whenDone(this.store('readwrite').put(book));
+    } // upsert
+    byCategory(category) {
+        return whenDone(this.store('readonly').index('by-category').getAll(IDBKeyRange.only(category)));
+    }
+    raisePrices(rate) {
+        // ④ 批量写入必须同事务:任一失败整体回滚;请求要在同一同步执行段连续发出
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction('books', 'readwrite');
+            const store = tx.objectStore('books');
+            const req = store.getAll();
+            req.onsuccess = () =>
+                req.result.forEach((b) => store.put({ ...b, price: Math.round(b.price * rate) }));
+            tx.oncomplete = () => resolve('全部提交');
+            tx.onabort = () => reject(tx.error || new Error('事务中止,已回滚'));
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+}
+
+// ⑤ 游标逐条遍历:官方事件范式,onsuccess 内 continue 推进(不要把游标包进永不 resolve 的 Promise)
+const cursorReq = repo.store('readonly').openCursor();
+cursorReq.onsuccess = () => {
+    const cursor = cursorReq.result;
+    if (cursor) {
+        console.log(cursor.value);
+        cursor.continue();
+    } // result 为 null 表示遍历结束
+};
+```
+
+> 运行方式：浏览器直接打开 `examples/19-09-indexeddb.html`，按 ① → ⑥ 顺序点击；DevTools → Application → IndexedDB 可查看落库数据。按钮 ⑥ 故意撞唯一索引 `by-title`，可验证同事务中先写入的 B-001 一并回滚。
+
+#### 最佳实践
+
+- ⚠️ **事务里不要夹 `await`**：事务在没有待处理请求且事件循环空转时自动提交，`await fetch()` 之后再 `store.put` 会拿到 `TransactionInactiveError`；需要先取远程数据，就在事务外取好；
+- ⚠️ 升级回调里的 DDL 必须**按 oldVersion 分段迁移**（`if (event.oldVersion < 2)`），且发版前在多标签页场景测试 `onblocked`——旧页面不关，新版本会一直等；
+- ✅ 多写操作放进**同一个事务**获得原子性（示例按钮 ⑤⑥）；只读查询用 `readonly` 事务，允许并发、性能更好；
+- ✅ 入库数据实现版本字段（`schemaVersion`），结构演进靠升级回调迁移，不要假设库里的数据永远是最新形状；
+- ✅ 生产环境用 `idb` 库或自研 Repository 收口 Promise 化、错误转换与索引维护，业务代码不要散落 `transaction(...)` 样板。
+
+---
+
+## 19.10 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【进阶】表单校验为什么推荐"blur 单字段、submit 全表"两种策略分开?单字段多条规则为什么只报第一个错误?</b></summary>
+
+用户输入过程中过早报错（如刚聚焦就红字）干扰填写，所以失焦只校验当前字段；提交时需要一次性暴露所有问题，避免用户改一个再点一次。单字段只报第一个错误是为了避免同一输入框挂一串红字（如密码同时提示"太短/无数字/无大写"），按规则顺序引导用户逐条修复；而不同字段互不影响，所以全表收集全部字段错误。
+</details>
+
+<details>
+<summary><b>2. 【进阶】金额输入框为什么要在 input 事件实时清洗,只在提交时校验有什么问题?这个做法有什么光标坑?</b></summary>
+
+实时清洗能即时阻止非法字符进入，避免用户输入完一长串才报错，体验更好；只在提交时校验还会让脏数据（字母、多个小数点）临时进入表单状态。光标坑：受控组件重写 value 后浏览器默认把光标放到末尾，用户从字符串中间增删字符时体验异常。需要在格式化前记录 `selectionStart`，按"数字个数不变、分隔符重排"的规则在格式化后恢复光标位置。
+</details>
+
+<details>
+<summary><b>3. 【进阶】为什么推荐把列表查询状态放进 URL 而不是组件 state?用户停在第 9 页时数据被删到只剩 5 条,怎么处理?</b></summary>
+
+URL 即状态可以免费获得三个能力：刷新/分享链接恢复同一视图、浏览器前进后退、SSR 直接从 URL 取参首屏渲染。组件 state 刷新即丢。越界处理：拿到 total 后用 `Math.min(Math.max(1, page), totalPages)` 把页码夹回合法区间（示例 `resolvePageInfo`），并用夹回后的 page 重新请求与渲染分页条。
+</details>
+
+<details>
+<summary><b>4. 【基础】TypedStorage 封装需要处理哪三类异常情况?为什么用"惰性过期"而不主动清理?</b></summary>
+
+三类：① 数据不存在；② 数据已过期；③ JSON 损坏（老版本写过非 JSON、写入被截断、隐私模式异常），全部返回 null 且顺手删除坏数据，绝不让 parse 抛错白屏。惰性过期是因为浏览器没有可靠的后台定时器去扫描所有 key，在第一次 `get` 时比对时间戳清理即可，简单且零额外开销；另外 setItem 本身可能因配额/隐私模式抛错，需要 try/catch 降级。
+</details>
+
+<details>
+<summary><b>5. 【挑战】扁平数组转树为什么用两遍 Map 法?原地修改入参数组有什么风险?树搜索"保留命中祖先"解决了什么问题?</b></summary>
+
+递归 find 找父节点是 O(n²) 且要求父节点先出现；两遍法第一遍全部入 Map、第二遍挂载，O(n) 且与数据顺序无关。原地修改会污染可能被 SWR/接口缓存/其他组件共享的原始数据，造成重复挂 children 等隐蔽 bug，必须浅克隆。只保留命中节点会让用户在菜单/部门树里看不到上下文层级（搜到"前端组"却不知道它挂在哪个中心下），保留祖先链保证路径完整、可展开定位。
+</details>
+
+<details>
+<summary><b>6. 【挑战】前端按扩展名/accept 校验文件能挡住恶意文件吗?下载时为什么要延迟 revokeObjectURL?跨源资源的 download 属性会怎样?</b></summary>
+
+不能。扩展名可改、`file.type` 由浏览器按扩展名猜测，前端校验只是省流量和即时反馈，服务端必须做 magic number 嗅探与病毒扫描。同步 `revokeObjectURL` 可能让刚 `click()` 触发的下载读到空 Blob，需延迟一轮（setTimeout）回收。跨源资源设置 `download` 可能被浏览器忽略而变成直接导航打开，正确做法是让服务端给 `Content-Disposition: attachment`，或先 fetch 成同源 Blob 再下载。
+</details>
+
+<details>
+<summary><b>7. 【挑战】埋点为什么要"阈值 + 定时器 + pagehide"三层 flush?sendBeacon 相比 fetch 好在哪、又有什么限制?</b></summary>
+
+阈值保证活跃时实时、定时器保证低频事件不一直滞留、pagehide 保证关页面/切后台时最后一批不丢——只靠任何一层都有漏洞（只靠阈值：长时间不够条数就丢；只靠定时器：关闭瞬间丢）。sendBeacon 在页面卸载阶段异步发出且不阻塞卸载、不影响跳转到下一页的性能；限制是有体积上限（Chrome 约 64KB）、只保证尽力而为、无法自定义 header/处理响应，失败或超限时应退回 `fetch(..., { keepalive: true })`，失败批次要回退队列重试。
+</details>
+
+<details>
+<summary><b>8. 【挑战】前端把无权限按钮隐藏掉就算做了权限控制吗?'user:*' 用 startsWith('user') 匹配有什么越权风险?未登录和已登录无权限在路由守卫里应如何区别处理?</b></summary>
+
+不算。隐藏只是防误触的体验层，请求仍可被绕过浏览器直接发出，服务端必须对每个接口重做鉴权。前缀匹配若截成 `'user'`，则 `'user2:edit'`、`'user-backup:x'` 都会 startsWith 命中，形成水平越权；必须保留冒号截成 `'user:'` 再匹配。守卫中两者分开：未登录返回 redirect 到 `/login?redirect=当前路径`，登录后跳回；已登录但权限不足返回 deny，展示 403/无权限提示，不应再踢去登录页。
+</details>
+
+<details>
+<summary><b>9. 【挑战】IndexedDB 事务里为什么不能在两次写请求之间 await 一个网络请求?add 与 put 有何区别?唯一索引冲突会怎样?</b></summary>
+
+IndexedDB 事务在"没有待处理请求且事件循环空转"时会自动提交,await 网络期间事务已提交,之后再发 put 会抛 TransactionInactiveError——要先在事务外取好数据,再在同一个同步执行段连续发请求。add 仅插入,主键已存在时抛 ConstraintError(适合首次写入以暴露重复数据);put 是 upsert,存在覆盖、不存在插入。唯一索引冲突会让请求报错并导致整个事务 abort,同事务内此前已完成的写入一并回滚(示例按钮 ⑥ 可验证 B-001 不落库),这正是多条批量写要放进同一事务的原因。
+</details>
+
+---
+
+> 本部分所有片段均为框架无关的纯逻辑，建议直接沉淀进项目 `src/utils` 并配单测；真正的业务复杂度往往在边界（并发、过期、越界、失败重试），happy path 之外的分支才是这些片段的价值所在。
+
+---
+
+## 19.11 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 受控输入 | 受控组件与浏览器自动填充、输入法合成事件打架，值被覆盖或丢字 | 合成输入期间监听 `compositionstart`/`compositionend` 不打断，自动填充用非受控初始值，避免每次渲染重置 `value` |
+| 光标跳动 | 实时格式化受控 `input` 后，浏览器把光标弹到末尾，中途改字体验极差 | 格式化前记录 `selectionStart`，按数字个数不变、分隔符重排的规则在格式化后恢复光标（呼应 19.2） |
+| 富文本 XSS | 直接 `dangerouslySetInnerHTML` 渲染用户 Markdown 或 HTML 原文 | 先消毒（如 DOMPurify）再注入，拦掉 `script`、`on*` 事件与危险 URL 协议，消毒后不得再拼未过滤内容 |
+| IndexedDB 事务 | 两次写请求之间 `await` 一个网络请求，事务已自动提交后抛 TransactionInactiveError | 事务外先取好数据，事务内同一同步执行段连续发请求；批量写放进同一事务保证原子（呼应 19.9） |
+| 库版本升级 | 直接调大版本号却没在 `onupgradeneeded` 里建索引，老库打不开或新库缺结构 | 版本升级与字段迁移都写进 `onupgradeneeded` 同步建 objectStore/索引，并处理 `blocked`（旧连接未关闭） |
+| 权限不同步 | 只隐藏按钮不做服务端鉴权，或路由守卫与按钮权限各写一套码 | 服务端对每个接口重新鉴权；按钮与守卫共用同一套权限码（如 `user:edit`），守卫区分未登录跳登录与无权限显 403（呼应 19.8） |
+| 虚拟滚动高度 | 高度估算不准，滚动条乱跳、列表项定位错位 | 定高场景用精确 `itemSize` 计算，不定高用实测+缓存并配 `overscan`；分页够用就别硬上虚拟列表 |
+| 查询状态丢失 | 条件与页码只放组件 state，刷新、分享、返回全丢视图 | 条件、页码、排序进 URL 并双向同步，越界页码夹回合法区间（呼应 19.3） |

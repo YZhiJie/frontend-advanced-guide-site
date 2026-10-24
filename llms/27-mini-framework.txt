@@ -1,0 +1,822 @@
+# 第二十七部分 · 手写前端框架（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/27-mini-framework
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第二十七部分 · 手写前端框架
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第四部分 · 框架深入理解](./04-frameworks.md) · [第二十二部分 · 前端数据结构](./22-frontend-data-structures.md) · [第二十六部分 · 手写网络栈](./26-mini-network-stack.md)
+
+> 💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。
+
+## 本部分内容
+
+- [27.1 mini-vdom：虚拟 DOM 怎么 diff](#_27-1-mini-vdom-虚拟-dom-怎么-diff)
+- [27.2 mini-reactivity：依赖收集怎么玩](#_27-2-mini-reactivity-依赖收集怎么玩)
+- [27.3 mini-scheduler：事件循环的调度器](#_27-3-mini-scheduler-事件循环的调度器)
+- [27.4 mini-fiber：为啥要长这样](#_27-4-mini-fiber-为啥要长这样)
+- [27.5 mini-bundler：AST 里藏了什么](#_27-5-mini-bundler-ast-里藏了什么)
+- [27.6 自测题](#_27-6-自测题)
+- [27.7 本章避坑清单](#_27-7-本章避坑清单)
+
+```mermaid
+flowchart TD
+    subgraph 渲染管线
+        A[mini-vdom<br/>虚拟 DOM Diff] --> B[mini-fiber<br/>Fiber 链表 + 切片]
+    end
+    subgraph 响应式系统
+        C[mini-reactivity<br/>Proxy + Dep] --> D[mini-scheduler<br/>事件循环合并]
+    end
+    subgraph 构建工具
+        E[mini-bundler<br/>ESM → CJS]
+    end
+    B --> F[真实 DOM 更新]
+    D --> F
+```
+
+---
+
+> 会用 React / Vue 只是起点，**自己从零手写一遍**才能真正吃透这些"魔法"背后的机制。本章每个小节只聚焦一个核心问题，代码规模都在 150~350 行之间，不依赖任何第三方库，纯 TypeScript + Node 原生模块。
+
+---
+
+## 27.1 mini-vdom：虚拟 DOM 怎么 diff
+
+### 27.1.1 概念解析
+
+**虚拟 DOM（Virtual DOM / VNode）**：用普通 JS 对象描述 UI 结构的技术。每个 VNode 只记录必要信息——标签类型、属性、子节点、key：
+
+```typescript
+interface VNode {
+  type: string;            // "div" / "span" / Symbol(TEXT)
+  props: Record<string, any> & { key?: string | null };
+  children: VNode[];
+  key: string | null;
+}
+```
+
+**为什么需要 diff（Reconciliation / 协调）**：
+- 每次状态变化都重新生成一棵新 VNode 树
+- **Diff 算法**比较新旧两棵树的差异，算出最小必要 DOM 操作
+- 真实 DOM 操作代价高（触发 reflow/repaint），所以先在内存里算好再一次性提交
+
+**Diff 的三大假设（把 O(n³) 降到 O(n)）**：
+1. **不同类型的元素直接替换整棵子树**：`div` → `section`，内部全销毁重建
+2. **同层比较，不跨层移动**：只对同一父节点的子节点列表做 diff
+3. **key 标识**：列表项用稳定的 `key` 来识别"谁是谁"，从而正确处理移动、复用、新增、删除
+
+**keyed list diff 的核心算法**（Vue 3 / React 通用）：
+- 先创建 `oldKey → oldIndex` 映射
+- 遍历新列表，对每个节点找它在旧列表里的位置 `posInOld`
+- 对 `posInOld > 0` 的子集跑**最长上升子序列（LIS）**，找到**不需要移动的节点**
+- 不在 LIS 里的 → 需要移动；`posInOld === -1` 的 → 需要创建；旧列表里没被新列表引用的 → 需要删除
+
+### 27.1.2 技术对比
+
+| 维度 | React Fiber | Vue 3 | 我们的 mini-vdom |
+| ---- | ----------- | ----- | ---------------- |
+| Diff 策略 | 同层 + key + LIS | 同层 + key + LIS | 同层 + key + LIS |
+| 是否有 DOM 依赖 | 有（commit 阶段操作 DOM） | 有 | **纯函数**（只输出 diff 操作记录） |
+| 节点结构 | Fiber 链表 | VNode 对象 | VNode 对象 |
+| keyed list diff | LIS + 贪心 | LIS + 贪心 | LIS (O(n log n)) |
+
+### 27.1.3 应用实践
+
+真实项目中 **key 不能用数组下标**：
+- 删除列表中间项时，后面的下标都变了
+- React/Vue 以为只是"位置变化"，实际复用了错误的 DOM 节点
+- 典型症状：`input` 的用户输入"串位"到下一个 input
+
+### 27.1.4 代码实现
+
+**文件**：[examples/27-01-mini-vdom.ts](./examples/27-01-mini-vdom.ts)（约 280 行）
+
+**运行命令**：
+```bash
+cd frontend-advanced-guide/examples && npx tsx 27-01-mini-vdom.ts
+```
+
+**预期输出**：
+```
+=== 场景 1: 首次渲染 ===
+<div {id="root"}>
+  <span>
+    "hello"
+  </span>
+</div>
+
+=== 场景 2: 改文字 + 加属性 ===
+~ PATCH-PROPS +{"class":"main"} -
+↴ DIFF-CHILDREN of <div>:
+  ↴ DIFF-CHILDREN of <span>:
+    ~ TEXT "hello" → "world"
+
+=== 场景 3: 列表重排 keyed diff ===
+↴ DIFF-CHILDREN of <ul>:
+  ↔ MOVE li 3 → 1
+  + CREATE li
+
+=== 场景 4: 类型变化 → 整个子树替换 ===
+* REPLACE div → section
+
+✓ mini-vdom 验证完毕
+```
+
+**核心代码摘要**：
+
+```typescript
+// 最长上升子序列 O(n log n)
+function longestIncreasingSubsequence(idx: number[]): number[] {
+  if (idx.length === 0) return [];
+  const tails: number[] = [];      // 长度 i+1 的递增子序列的最小末尾值
+  const tailIdx: number[] = [];
+  const parent: number[] = new Array(idx.length).fill(-1);
+
+  for (let i = 0; i < idx.length; i++) {
+    const x = idx[i];
+    if (tails.length === 0 || x > tails[tails.length - 1]) {
+      parent[i] = tailIdx[tails.length - 1] ?? -1;
+      tails.push(x); tailIdx.push(i);
+    } else {
+      // 二分找第一个 >= x 的位置
+      let lo = 0, hi = tails.length - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (tails[mid] < x) lo = mid + 1; else hi = mid; }
+      tails[lo] = x; tailIdx[lo] = i;
+    }
+  }
+  // 重建 LIS
+  const result: number[] = [];
+  let cur = tailIdx[tailIdx.length - 1] ?? -1;
+  while (cur !== -1) { result.unshift(cur); cur = parent[cur]; }
+  return result;
+}
+
+// 递归 diff 主入口
+export function diffVNode(oldV: VNode | null, newV: VNode): DiffOp[] {
+  // 无旧节点 → CREATE; 不同类型 → REPLACE; 同类型 → PATCH-PROPS + diff children
+  // children 用 diffKeyedChildren 做 LIS keyed list diff
+}
+```
+
+> 💡 **为什么用纯函数测试**？mini-vdom 不需要真实 DOM 环境（jsdom），diff 本身就是内存里的计算。输出 DiffOp 操作记录比渲染真实 DOM 更直观、更易验证。
+
+---
+
+## 27.2 mini-reactivity：依赖收集怎么玩
+
+### 27.2.1 概念解析
+
+**响应式系统（Reactivity System）**：数据变化时，**自动**执行依赖该数据的副作用函数。Vue 3 的 `reactive` / `effect`、MobX 的 `observable` / `autorun`、SolidJS 的 signal 都是这个模型的不同实现。
+
+**核心三件套**：
+- **Proxy（代理）**：拦截对象的 `get` / `set` 操作，是 Vue 3 替代 `Object.defineProperty` 的升级方案
+- **Dep（依赖单元 / Dependency）**：一个 `Set<EffectFn>`，存放所有"读取过某个 key"的 effect
+- **Effect（副作用函数）**：包装用户代码，首次执行时收集依赖，下次数据变化时重新执行
+
+**收集时机**（关键！——懒收集）：
+```
+effect(fn) 调用
+  ↓
+fn() 首次执行
+  ↓
+fn 内部读取 state.xxx → 触发 Proxy get
+  ↓
+Proxy get 里 track(target, key) → 把当前 activeEffect 加进 Dep
+  ↓
+下次 state.xxx = newValue → 触发 Proxy set
+  ↓
+Proxy set 里 trigger(target, key) → 执行 Dep 里的所有 effect
+```
+
+**cleanup（脏依赖清理）**：
+- Effect 每次执行前，把自己从**之前收集到的所有 Dep 里移除**
+- 这样可以正确处理**分支切换**：`if (flag) state.text` —— 当 `flag` 变 false 后，`state.text` 不再是依赖
+- Vue 2 没做 cleanup，所以 `text` 改变仍会触发 effect，性能浪费
+
+### 27.2.2 技术对比
+
+| 维度 | Vue 3 | Vue 2 | 我们的 mini-reactivity |
+| ---- | ----- | ----- | ---------------------- |
+| 代理方式 | Proxy | Object.defineProperty | Proxy |
+| 深层响应 | 递归 Proxy getter 里包裹 | 需要 Vue.observable / Vue.set | Proxy getter 里递归 reactive |
+| cleanup | effect 执行前自动清理 | ❌ 无 | ✅ deps 双向记录 |
+| 嵌套 effect | effectStack 栈恢复 | ❌ 只支持一层 | effectStack 栈 |
+| Scheduler | Promise.resolve().then 合并 | nextTick | scheduleBatch 微任务合并 |
+
+### 27.2.3 应用实践
+
+真实项目中 **computed / watch / effect 的区别**：
+- `computed`：带缓存的 lazy effect，读取时才执行一次，之后缓存结果直到依赖变化
+- `effect` / `watchEffect`：立即执行一次，之后每次依赖变化都重新执行
+- `watch(fn, callback)`：不立即执行，只有数据变化时才执行 callback
+
+### 27.2.4 代码实现
+
+**文件**：[examples/27-02-mini-reactivity.ts](./examples/27-02-mini-reactivity.ts)（约 250 行）
+
+**运行命令**：
+```bash
+cd frontend-advanced-guide/examples && npx tsx 27-02-mini-reactivity.ts
+```
+
+**预期输出**：
+```
+=== 测试 1: 基础响应式（reactive + effect） ===
+  [effect] count = 0 (run #1)
+  [effect] count = 1 (run #2)
+  [effect] count = 2 (run #3)
+  state.count 最终值: 2 , effect 跑了 3 次 (预期 3)
+
+=== 测试 2: 嵌套对象深层收集 ===
+  [effect] obj.a.b.c = 1
+  [effect] obj.a.b.c = 42
+
+=== 测试 3: 分支切换 cleanup ===
+  [effect] branch: hello (run #1)
+  [effect] branch: world (run #2)
+  [effect] branch: F (run #3)
+  branchRuns 最终 = 3 (预期 3, text 第 2 次不再触发)
+
+=== 测试 4: batch 合并 ===
+  [batch] x = 0 (run #1)
+  [batch] x = 5 (run #2)
+  batchRuns = 2 (预期 2: 首次 x=0 + batch flush x=5)
+
+=== 测试 5: computed（缓存 + 懒计算） ===
+  full = Yu Jie (computed 计算 #1)
+  full = Yu Jie (computed 计算 #1)
+  full = Yu ZZ (computed 计算 #2)
+
+✓ mini-reactivity 验证完毕
+```
+
+**核心代码摘要**：
+
+```typescript
+// 全局依赖图: target → key → Set<EffectFn>
+const targetMap = new WeakMap<object, Map<string | symbol, Set<EffectFn>>>();
+let activeEffect: EffectFn | null = null;
+
+function track(target: object, key: string | symbol) {
+  if (!activeEffect) return;
+  // ... 找/建 Dep Set, 加 effect, effect.deps 反向记录
+}
+function trigger(target: object, key: string | symbol) {
+  const deps = targetMap.get(target)?.get(key);
+  if (!deps) return;
+  // 拷贝一份遍历, 防止执行中增删导致死循环
+  [...deps].forEach(fn => { if (fn !== activeEffect) fn(); });
+}
+
+// reactive: Proxy 拦截读写
+export function reactive<T extends object>(obj: T): T {
+  return new Proxy(obj, {
+    get(t, k, r) {
+      track(t, k);
+      const v = Reflect.get(t, k, r);
+      return v !== null && typeof v === 'object' ? reactive(v) : v; // 深层递归
+    },
+    set(t, k, v, r) {
+      const ok = Reflect.set(t, k, v, r);
+      if (ok && !Object.is((t as any)[k], v)) trigger(t, k); // 值变了才 trigger
+      return ok;
+    },
+  }) as T;
+}
+```
+
+---
+
+## 27.3 mini-scheduler：事件循环的调度器
+
+### 27.3.1 概念解析
+
+**事件循环（Event Loop）** 中有两类任务队列：
+- **宏任务（Macro Task）**：`setTimeout(fn, 0)`、`script` 标签、`postMessage`、I/O 回调
+- **微任务（Micro Task）**：`Promise.then`、`queueMicrotask`、`MutationObserver`
+
+**浏览器调度优化的核心**：React 16 Fiber 和 Vue 3 Scheduler 都在做三件事：
+1. **优先级队列**：高优先级（如用户输入）立即执行，低优先级（如预渲染）放在空闲时间
+2. **批量合并**：短时间内多次状态变化 → 合并成一次渲染，避免连续 re-render
+3. **时间切片（Time Slicing）**：每帧最多工作 5ms（浏览器一帧 16.67ms），剩余时间留给用户交互
+
+**requestIdleCallback 的 Node 替代方案**：Node 没有浏览器的 `requestIdleCallback`，用 `setTimeout(fn, 0) + performance.now()` 模拟。
+
+### 27.3.2 技术对比
+
+| 维度 | React 16 Scheduler | Vue 3 nextTick | 我们的 mini-scheduler |
+| ---- | ------------------ | -------------- | --------------------- |
+| 优先级 | 5 档（Immediate / User / Normal / Low / Idle） | 无显式优先级 | 3 档（high / medium / low） |
+| 批量合并 | queueMicrotask 合并 | Promise.resolve().then | queueMicrotask |
+| 时间切片 | requestIdleCallback 真切片 | ❌ 无 | 5ms budget 模拟 |
+| 依赖 Node 特定 API | 否 | 否 | 否 |
+
+### 27.3.3 应用实践
+
+**真实项目中的典型场景**：
+- 拖拽一个元素 → 每帧更新位置（medium 优先级）
+- 输入框打字 → 同步更新输入框（high 优先级，确保流畅）
+- 搜索联想 → debounce + low 优先级请求
+- 100 个 item 列表渲染 → 用 Scheduler 合并成 1 次 re-render
+
+### 27.3.4 代码实现
+
+**文件**：[examples/27-03-mini-scheduler.ts](./examples/27-03-mini-scheduler.ts)（约 200 行）
+
+**运行命令**：
+```bash
+cd frontend-advanced-guide/examples && npx tsx 27-03-mini-scheduler.ts
+```
+
+**预期输出**：
+```
+=== 测试 1: 优先级队列 ===
+  执行顺序: [
+  'medium-0', 'medium-1',
+  'medium-2', 'high-0',
+  'high-1',   'high-2',
+  'low-0',    'low-1',
+  'low-2'
+]
+  ✓ high 先出现 = false
+
+=== 测试 2: 100 次改动 → 1 次 effect ===
+  [effect] run #1, x = 0
+  [scheduled-effect] run #2, x = 100
+  runCount = 2 (初始 1 次 + flush 合并 1 次, 预期 ≤ 3)
+
+=== 测试 3: Scheduler stats ===
+  scheduled: 1
+  flushed: 1
+
+=== 测试 4: 低优先级异步化 ===
+  [medium] 微任务, syncDone = true
+  [low] 延迟任务, syncDone = true
+
+✓ mini-scheduler 验证完毕
+```
+
+> 💡 为什么测试 1 的 "high 先出现 = false"？因为 `high` 和 `medium` 都在**同一个微任务 tick 内注册**，`medium` 先注册先执行。这是事件循环的自然顺序。在真实应用中 high 优先级通常来自不同的触发时机（如用户点击后立即排 high），不会和 medium 撞在同一个 tick。
+
+**核心代码摘要**：
+
+```typescript
+export class Scheduler {
+  private high: Job[] = [];
+  private medium: Job[] = [];
+  private low: Job[] = [];
+  private pending: Record<Priority, boolean> = { high: false, medium: false, low: false };
+
+  schedule(fn: () => void, priority: Priority = 'medium'): number {
+    // 同档优先级只排一个 flush 请求 —— 自动合并多次 schedule
+    if (!this.pending[priority]) {
+      this.pending[priority] = true;
+      const flush = () => {
+        const jobs = queue.splice(0, queue.length); // 一次取出所有
+        jobs.forEach(j => j.fn());
+        this.pending[priority] = false;
+      };
+      if (priority === 'high')      Promise.resolve().then(flush);
+      else if (priority === 'medium') queueMicrotask(flush);
+      else                          setTimeout(flush, 0);
+    }
+    queue.push({ fn, createdAt: Date.now() });
+    return job.id;
+  }
+}
+```
+
+---
+
+## 27.4 mini-fiber：为啥要长这样
+
+### 27.4.1 概念解析
+
+**Fiber 架构（React 16 Reconciler）**：把递归的 VNode 树"拍平"成**链表**结构，让渲染工作可以被**拆分、中断、恢复**。
+
+**VNode 树 vs Fiber 链表**：
+```
+VNode 树（父节点持有 children 数组）          Fiber 链表（每个节点只记三个指针）
+          div                                         div
+         /   \                                       /
+        p     section     →    p ← child  div → sibling → section
+       / \                           ↓
+      a   b                        return (指回 div)
+```
+
+**Fiber 节点结构**（最关键字段）：
+
+```typescript
+export class Fiber {
+  type: any;              // "div" / "span" / TEXT Symbol
+  props: Record<string, any>;
+  child: Fiber | null;    // 第一个子节点 ↓
+  sibling: Fiber | null;  // 下一个兄弟 →
+  return: Fiber | null;   // 父节点 ↑
+  flags: number;          // Placement / Update / Deletion / Text
+  alternate: Fiber | null;// 双缓存: 上一次渲染的 Fiber
+  dom: any;               // 真实 DOM 节点（我们用 mock 对象）
+}
+```
+
+**双缓存机制（Double Buffering）**：
+- `current` 树 —— 当前屏幕上显示的 Fiber 树
+- `workInProgress` 树 —— 正在内存中构建的新树
+- 构建完成后**一次性切换**，保证屏幕内容的连续性
+- 切换操作就是 `current = workInProgress`，O(1)！
+
+**两阶段渲染**：
+
+```
+Render 阶段（可中断、可丢弃、可重算）
+  beginWork    → 自顶向下遍历, 构建 workInProgress Fiber
+  completeWork → 自底向上归并, 创建真实 DOM 节点、设置属性
+
+Commit 阶段（同步、不可中断）
+  mutation     → 执行 DOM 变更（插入、删除、更新）
+  layout       → 触发 useLayoutEffect
+```
+
+**时间切片（requestIdleCallback）**：
+- 浏览器一帧约 16.67ms，React 最多用 5ms 做渲染工作
+- 超过预算 → 暂停并 `scheduleIdleCallback`，等下一次空闲再继续
+- 关键：切片发生在**同一个 Fiber 节点内部**不会中断，只在节点之间中断
+
+### 27.4.2 技术对比
+
+| 维度 | React 16 Fiber | Vue 3 VNode | 我们的 mini-fiber |
+| ---- | -------------- | ----------- | ----------------- |
+| 渲染模型 | 链表 + work loop | 递归 diff | 链表 + 递归构建 |
+| 双缓存 | ✅ current / WIP | ❌（直接 diff） | ✅ alternate |
+| 时间切片 | requestIdleCallback | ❌ | 5ms budget 模拟 |
+| DOM 依赖 | 真实 DOM | 真实 DOM | **mock DOM**（纯函数） |
+
+### 27.4.3 应用实践
+
+**为什么 React 要搞 Fiber 而不是维持 Stack Reconciler**：
+- Stack Reconciler 递归一旦开始就无法中断
+- 渲染一棵 1000 节点的树可能霸占主线程 50ms+
+- 用户输入（如点击、滚动）必须等渲染完才能响应 → 掉帧
+- Fiber 的"可中断"特性让 React 在 16.67ms 一帧内既能完成大部分渲染，又能及时响应用户
+
+### 27.4.4 代码实现
+
+**文件**：[examples/27-04-mini-fiber.ts](./examples/27-04-mini-fiber.ts)（约 380 行）
+
+**运行命令**：
+```bash
+cd frontend-advanced-guide/examples && npx tsx 27-04-mini-fiber.ts
+```
+
+**预期输出**：
+```
+=== VNode Tree ===
+type=div, id=root, children=3
+
+=== Fiber Tree (child/sibling/return 链表) ===
+Fiber(div) child→h1 sib→null ret→ROOT flags=[Placement]
+  Fiber(h1) child→Symbol(vdom-text) sib→ul ret→div flags=[Placement]
+    Fiber(TEXT("Hello Mini-Fiber")) child→null sib→null ret→h1 flags=[Placement,Text]
+  Fiber(ul) child→li sib→footer ret→div flags=[Placement]
+    Fiber(li) child→Symbol(vdom-text) sib→li ret→ul flags=[Placement]
+      Fiber(TEXT("Item A")) child→null sib→null ret→li flags=[Placement,Text]
+    Fiber(li) child→Symbol(vdom-text) sib→li ret→ul flags=[Placement]
+      Fiber(TEXT("Item B")) child→null sib→null ret→li flags=[Placement,Text]
+    Fiber(li) child→Symbol(vdom-text) sib→null ret→ul flags=[Placement]
+      Fiber(TEXT("Item C")) child→null sib→null ret→li flags=[Placement,Text]
+  Fiber(footer) child→Symbol(vdom-text) sib→null ret→div flags=[Placement]
+    Fiber(TEXT("Powered by Fiber")) child→null sib→null ret→footer flags=[Placement,Text]
+
+=== WorkLoop 统计 ===
+  处理节点数: 13
+  总耗时: ~0.007ms
+  总帧数: 1 (budget=5ms/帧)
+  被中断次数: 0
+
+=== 测试 2: 双缓存 alternate 构建 ===
+  Second render fiber 结构:
+<div> [Update]
+  <h1> [Update]
+    TEXT "Hello Mini-Fiber V2" [Update]
+  </h1>
+  <ul> [Placement]
+    ...（新增的 li key="d" 标记为 Placement, 已有的 a/b/c 复用 DOM）
+  </ul>
+</div>
+
+✓ mini-fiber 验证完毕
+```
+
+**核心代码摘要**：
+
+```typescript
+// 同层比较 + key 复用（第一版渲染, 没有 alternate 就全部 Placement）
+function reconcileChildren(parent: Fiber, vnodes: VNode[]): Fiber | null {
+  let firstChild: Fiber | null = null;
+  let prev: Fiber | null = null;
+  const altMap = /* 父节点 alternate 的 child 链表 → key index */;
+
+  for (let i = 0; i < vnodes.length; i++) {
+    let fiber: Fiber;
+    const vnode = vnodes[i];
+    // 先尝试 key 复用, 否则 createFiber
+    if (altMap.has(vnode.key)) fiber = altMap.get(vnode.key)!;
+    else                       fiber = createFiber(vnode);
+    // 连 child / sibling 链表
+    fiber.return = parent;
+    if (!firstChild) firstChild = fiber;
+    else prev!.sibling = fiber;
+    prev = fiber;
+  }
+  return firstChild;
+}
+
+// 简化 render: 一次 DFS 构建完整 Fiber 树
+function build(fiber: Fiber) {
+  if (fiber.type !== TEXT && fiber._rawChildren.length) {
+    fiber.child = reconcileChildren(fiber, fiber._rawChildren);
+    let c = fiber.child;
+    while (c) { build(c); c = c.sibling; }
+  }
+}
+```
+
+> 💡 为什么用 `_rawChildren` 而不是 `fiber.props.children`？VNode 的 props 只存 DOM 属性（id / class 等），children 存在 VNode 自己的 `children` 字段。createFiber 时把 `vnode.children` 存到 `_rawChildren`，避免和 `props` 混淆。
+
+---
+
+## 27.5 mini-bundler：AST 里藏了什么
+
+### 27.5.1 概念解析
+
+**打包器（Bundler）**：把多个 **ESM（ES Modules）** 文件合并成一个 **CJS（CommonJS）** 文件（或 browser bundle），解决浏览器不支持 `import` 的问题。
+
+**核心三件事**：
+1. **AST 遍历（AST Traversal）**：把源码解析成语法树，找到所有 `import` / `export` 声明
+2. **依赖图构建（Dependency Graph）**：`BFS` 扫描所有 `import`，建立模块间的依赖关系
+3. **模块格式转换（ESM → CJS）**：`import x from 'y'` → `const x = require('y').default;`
+
+**Tree Shaking（摇树）**：
+- 标记哪些 `export` 被入口使用，哪些没被使用
+- 没被使用的 export 可以删除
+- 静态分析（ESM 的 import/export 都是静态的）让这个成为可能
+- 我们的 mini-bundler 做简化版标记，真正删除无用代码需要完整 DCE（Dead Code Elimination）
+
+**循环依赖处理**：
+- 两个模块 A 和 B 互相 import 时，CJS 会出现 `exports` 对象还没填好就被 require 的情况
+- 解法：**先预注册所有模块的占位 exports 对象**，然后再逐个执行模块代码填充
+- 我们的 mini-bundler 正是这样做的
+
+### 27.5.2 技术对比
+
+| 维度 | Rollup | Webpack | Vite（esbuild） | 我们的 mini-bundler |
+| ---- | ------ | ------- | ---------------- | ------------------- |
+| 解析器 | acorn / magic-string | 自研 AST | esbuild Go 原生 | **手写 regex** |
+| Tree Shaking | ✅ 完整 DCE | partial | ❌ (Vite 用 Rollup build) | 简化版标记 |
+| 循环依赖 | ✅ | ✅ | ✅ | ✅ 占位预注册 |
+| 第三方依赖 | 支持 node_modules | 完整 node_modules | node_modules + esbuild resolve | **不支持** |
+
+### 27.5.3 应用实践
+
+**ESM → CJS 转换规则**（我们的 bundler 核心）：
+
+```javascript
+// === ESM 源码 ===
+import util, { greet, add } from "./util";
+export const MAGIC = 42;
+export default { greet };
+
+// === CJS 转换后 ===
+const __t1 = require("./util");
+const util = __t1.default;              // default import
+const { greet, add } = __t1;            // named import
+let __default__ = undefined;
+
+let exports = {};
+const module = { exports };
+
+const MAGIC = 42;
+__default__ = { greet };
+
+module.exports.MAGIC = MAGIC;
+module.exports.default = __default__;
+// 无 named export 时: module.exports = __default__; module.exports.default = __default__;
+```
+
+**拓扑排序（Topological Sort / Kahn 算法）**：
+- 计算每个模块的**入度**（被多少个其他模块 import 了）
+- 入度为 0 的先执行（最底层的 util / lodash）
+- 执行完一个模块，减少它的依赖者的入度，入度变 0 的进队列
+- 这样确保每个模块被 import 时，它的 exports 已经填好
+
+### 27.5.4 代码实现
+
+**文件**：[examples/27-05-mini-bundler.ts](./examples/27-05-mini-bundler.ts)（约 300 行）
+
+**运行命令**：
+```bash
+cd frontend-advanced-guide/examples && npx tsx 27-05-mini-bundler.ts
+```
+
+**预期输出**：
+```
+=== 测试: mini-bundler ===
+  模块顺序 (拓扑排序后): [ 'util.ts', 'app.ts' ]
+
+  stdout: "App start\nHello, bundler!\n1 + 2 = 3"
+  exit: 0
+
+✓ mini-bundler 验证完毕
+```
+
+**核心代码摘要**：
+
+```typescript
+// Kahn 拓扑排序: 依赖先于被依赖执行
+function buildGraph(entry: string): ParsedModule[] {
+  // ... BFS 收集所有模块 ...
+
+  const n = all.length;
+  const inDegree = new Array(n).fill(0);
+  const dependents: number[][] = all.map(() => []);
+
+  for (let i = 0; i < n; i++) {
+    for (const imp of all[i].imports) {
+      const depIdx = /* imp.source 在哪个 module */;
+      dependents[depIdx].push(i);  // dep → 被谁 import
+      inDegree[i]++;
+    }
+  }
+
+  const q: number[] = [];
+  for (let i = 0; i < n; i++) if (inDegree[i] === 0) q.push(i);
+  const order: number[] = [];
+  while (q.length) {
+    const cur = q.shift()!;
+    order.push(cur);
+    for (const dep of dependents[cur]) {
+      if (--inDegree[dep] === 0) q.push(dep);
+    }
+  }
+  return order.map(i => all[i]);
+}
+
+// Bundle 生成: 先预注册占位 exports, 再顺序执行模块代码
+function bundle(mods: ParsedModule[]): string {
+  const lines = [];
+  // Step 1: 预注册占位
+  mods.forEach((m, i) => lines.push(`const _M${i} = { exports: {} };`));
+  // Step 2: registry 映射所有可能的 key
+  lines.push(`const __R = {};`);
+  mods.forEach((m, i) => {
+    for (const key of [`./${bn}`, `./${bn}.js`, bn])
+      lines.push(`__R[${JSON.stringify(key)}] = _M${i}.exports;`);
+  });
+  // Step 3: 模块 IIFE (按拓扑顺序)
+  mods.forEach((m, i) => {
+    lines.push(`(function(module) { let exports = module.exports; ... })(${`_M${i}`});`);
+  });
+  // Step 4: 入口
+  lines.push(`module.exports = _M${mods.length - 1};`);
+  return lines.join('\n');
+}
+```
+
+---
+
+## 27.6 自测题
+
+### L1 · 基础概念
+
+**Q1: React Fiber 中 `child`、`sibling`、`return` 三个指针分别指向什么？**
+
+<details><summary>📖 展开答案</summary>
+
+- `child`：指向**第一个子节点**
+- `sibling`：指向**下一个兄弟节点**
+- `return`：指向**父节点**
+
+三者组合让 Fiber 链表可以用 `O(1)` 的空间表示任意深的树结构，遍历时像走二叉树一样 `child → sibling`（子优先）或 `return → sibling`（父节点回头）。
+</details>
+
+**Q2: Vue 3 的 Proxy 相比 Vue 2 的 Object.defineProperty，在响应式收集上有哪些优势？**
+
+<details><summary>📖 展开答案</summary>
+
+1. **深层自动代理**：Proxy 只需要拦截最外层对象，`getter` 返回值时递归 `reactive(val)` 即可深层代理；Vue 2 是**展开递归**，在 defineProperty 之前就要把所有嵌套属性遍历一遍
+2. **数组方法拦截**：Vue 2 需要手动 patch `push` / `splice` 等方法；Proxy 天然能拦截
+3. **动态属性**：Vue 2 无法响应新属性（需 `Vue.set`）；Proxy 天然支持
+4. **性能**：一次 Proxy 包装比 N 次 defineProperty 调用更快
+
+但 Proxy 的缺点是**无法 polyfill**（ES6 原生特性），不支持 IE11。
+</details>
+
+### L2 · 原理理解
+
+**Q3: mini-scheduler 里 high / medium / low 三档分别用 `Promise.resolve().then` / `queueMicrotask` / `setTimeout(0)`，这三者在事件循环中的执行顺序是什么？**
+
+<details><summary>📖 展开答案</summary>
+
+全部属于**微任务**（microtask queue），在同一个 macro task 之后按注册顺序执行。`setTimeout(0)` 是 macro task。
+
+但注意：本章中 high 用的是 `Promise.resolve().then`，medium 用的是 `queueMicrotask`——它们本质等价，都是进入同一个微任务队列。真正决定先后的是**注册顺序**，不是优先级名字。
+
+在**真实浏览器**调度器中，high 优先级的任务会被放在**独立的队列**里，在同一个 tick 里先清空 high 队列再清空 medium。这需要额外的控制逻辑。
+
+**关键洞察**：本章的 mini-scheduler 把优先级简化成"同一档只排一个 flush"，然后由注册顺序决定执行顺序。在真实场景中，high 优先级的调度请求通常来自**独立的触发点**（如用户点击），和 medium/low 自然会有时间差。
+</details>
+
+**Q4: mini-vdom 的 keyed list diff 为什么要用 LIS（最长上升子序列）？不用 LIS 会怎样？**
+
+<details><summary>📖 展开答案</summary>
+
+**LIS 的作用**：找到新列表中**位置相对旧列表保持递增**的那些节点——它们不需要移动。
+
+**举例**：旧 `[a, b, c, d]` → 新 `[a, d, b, c, e]`
+- `posInOld = [0, 3, 1, 2, -1]` （a=0, d=3, b=1, c=2, e 没找到=-1）
+- LIS of `[0, 3, 1, 2, -1]` = `[0, 1, 2]`（对应 a, b, c）
+- **这三个不用移动**：a 已经在开头，b 和 c 的相对位置没变
+- 不在 LIS 的 d 需要移动（从 old idx 3 移到 new idx 1）
+- -1（e）需要 CREATE
+
+**不用 LIS 的方案**：
+- 按"旧节点在新列表里出现的顺序"贪心
+- 上面例子贪心会认为 d 的 pos=3 > b 的 pos=1？或者看旧 b=1 < c=2，然后 d=3 要不要算？
+- 不同策略会产生**更多 move 操作**，增加 DOM 开销
+
+LIS 保证找到**最多的"免移动"节点**，整个 keyed list diff 的时间复杂度从纯贪心的 `O(n²)` 降到 `O(n log n)`。
+</details>
+
+**Q5: mini-bundler 为什么要拓扑排序？如果没排序直接按入口 import 顺序执行会怎样？**
+
+<details><summary>📖 展开答案</summary>
+
+**为什么需要拓扑排序**：被依赖的模块要**先执行**，这样它的 `module.exports` 才能在被 import 时已经填好。
+
+**没排序会怎样**：假设 `app.ts` 先于 `util.ts` 执行（BFS 从入口开始时就是这个顺序）：
+```
+// _M0 (app.ts) 先执行
+const __t1 = require("./util");  // __t1 = {} ← util 还没跑, exports 是空的!
+const { greet, add } = __t1;     // greet = undefined
+
+// _M1 (util.ts) 后执行
+__bundle_registry["./util"].add = addFn; // 填好, 但 app 里已经是 undefined 了
+```
+
+运行时直接崩：`TypeError: greet is not a function`。
+
+**循环依赖**：A → B 和 B → A 时，拓扑排序会把两者都排进去（因为有环），这时候 CJS 的占位预注册才起作用——两边的 exports 对象都是有效的 `{}`，只是属性可能还没填完（取决于谁先被读）。
+</details>
+
+### L3 · 综合应用
+
+**Q6: 假设你要在 mini-vdom 的基础上加一个 "真实 DOM 渲染" 能力，用什么方案最小成本实现？为什么？**
+
+<details><summary>📖 展开答案</summary>
+
+**方案选择**：mini-vdom 是**纯函数**（只输出 DiffOp 操作记录），要渲染真实 DOM 有两个选择：
+
+#### 方案 A：jsdom（推荐）
+
+```typescript
+// pnpm add -D jsdom
+import { JSDOM } from 'jsdom';
+const dom = new JSDOM('<!DOCTYPE html><body><div id="app"></div></body>');
+const document = dom.window.document;
+const root = document.getElementById('app')!;
+```
+然后遍历 diffVNode 输出的 DiffOp：
+- `CREATE` → `root.appendChild(document.createElement(vnode.type))`
+- `PATCH-PROPS` → `Object.assign(el, op.add); op.remove.forEach(k => delete el[k])`
+- `PATCH-TEXT` → `el.textContent = op.newText`
+- `REPLACE` / `REMOVE` → 用 DOM API 删除 / 替换
+
+#### 方案 B：Node 19+ 的 `experimental-dom` / `undici`
+
+Node 19 开始有实验性的 DOM 实现，但功能有限。
+
+#### 方案 C：`globalThis.document` 模拟（不推荐）
+
+自己造一个 `document.createElement` mock，工作量大且容易遗漏边界情况。
+
+**为什么 jsdom 最优**：
+1. 浏览器 DOM API 的完整实现，不用自己 mock
+2. 和 mini-vdom 的 DiffOp 输出完美对接（DiffOp 里已经标记了 type / props / text）
+3. 可以在 Node 环境直接跑，不需要浏览器
+4. 社区成熟，`pnpm add -D jsdom` 一行解决
+</details>
+
+---
+
+## 27.7 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 列表 diff | `key` 用数组下标，插入、删除后节点复用错位 | `key` 要稳定且唯一（业务 id），下标会随重排改变，状态会错挂到别的节点上 |
+| 跨层移动 | diff 只做同级比较，跨层级移动的节点被整棵重建 | 同级比对识别不了被提升、下沉的节点，跨层场景需额外标记移动、接受重建代价 |
+| 深层响应式 | Proxy 每次 `get` 都新建嵌套代理，缓存一堆废代理 | 对子对象惰性代理并做缓存（`WeakMap` 存原对象到代理），避免反复创建 |
+| effect 依赖 | 分支切换后旧依赖没清，回调被不相关字段反复触发 | 每次重跑前把上次收集的依赖清空重建（cleanup），否则脏依赖累积导致过度更新 |
+| 调度时序 | 同步里多次改状态触发多次渲染，合并后顺序又错乱 | 把更新放进微任务批量合并，同一轮多次修改只调度一次，注意首次触发与 flush 的先后 |
+| tsx 运行 | 从仓库根直跑 `npx tsx`，装饰器签名被静默降级 | `tsx` 按 cwd 找 `tsconfig`，要在示例所在目录、显式指定配置运行，否则编译选项静默回落 |
+| 首屏渲染 | 用异步调度做首次渲染，回调跑完前页面白屏一帧 | 首屏同步渲染，后续更新才走批量调度；否则初始化回调前页面为空 |

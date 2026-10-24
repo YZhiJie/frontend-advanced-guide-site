@@ -1,0 +1,697 @@
+# 第三十五部分 · 后台管理系统权限方案（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/35-admin-system-auth
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第三十五部分 · 后台管理系统权限方案
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第七部分 · 前端安全](./07-security.md) · [第十九部分 · 业务功能代码片段（19.8 按钮级权限）](./19-business-snippets.md#_19-8-按钮级权限与路由守卫) · [第十六部分 · Node 服务端](./16-node-server.md)
+>
+> 🎬 配套漫画剧场：[EP.55 角色不是权限](./comics/EP.55-rbac-model.md) · [EP.56 路由那道门卫](./comics/EP.56-dynamic-route.md) · [EP.57 销毁还是隐藏](./comics/EP.57-permission-directive.md)
+
+> 💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。本章回答「后台系统如何按角色做鉴权」——从 RBAC 数据模型、动态菜单、动态路由、按钮级指令，到超级管理员与数据权限范围，覆盖一条完整的权限闭环。
+
+## 本部分内容
+
+- [35.1 RBAC 权限模型：用户 → 角色 → 权限码](#_35-1-rbac-权限模型-用户-→-角色-→-权限码)
+- [35.2 动态菜单：按权限码过滤菜单树](#_35-2-动态菜单-按权限码过滤菜单树)
+- [35.3 动态路由与路由守卫](#_35-3-动态路由与路由守卫)
+- [35.4 按钮级权限指令（v-permission）](#_35-4-按钮级权限指令-v-permission)
+- [35.5 超级管理员与数据权限范围](#_35-5-超级管理员与数据权限范围)
+- [35.6 前后端权限约定与防越权](#_35-6-前后端权限约定与防越权)
+- [35.7 自测题](#_35-7-自测题)
+- [35.8 本章避坑清单](#_35-8-本章避坑清单)
+
+```mermaid
+flowchart LR
+    A[登录] --> B[获取用户信息<br/>roles + permissionCodes]
+    B --> C[collectPermissions<br/>合并角色权限码]
+    C --> D[filterMenu<br/>过滤菜单树]
+    C --> E[filterRoutes<br/>过滤可访问路由]
+    C --> F[v-permission<br/>按钮级显隐]
+    B --> G[resolveDataScope<br/>数据范围]
+    G --> H[列表查询 where 条件]
+    E --> I[路由守卫 guardRoute]
+```
+
+---
+
+> 后台管理系统的权限体系本质上回答三个问题：**能不能进系统**（登录态）、**能不能看这个页面**（菜单 + 路由）、**能不能点这个按钮**（按钮级）、**能操作哪些数据**（数据范围）。前三样是「功能权限」，最后一样是「数据权限」。本章把它们串成一条闭环，核心原则只有一条：**前端只识别权限码，不识别角色名**——这样后端新增角色时，前端一行代码都不用改。
+
+---
+
+## 35.1 RBAC 权限模型：用户 → 角色 → 权限码
+
+### 35.1.1 概念解析
+
+RBAC（Role-Based Access Control）的核心是**角色作为权限的容器**：用户不直接持有权限，而是通过「用户-角色」和「角色-权限」两张关系表间接获得权限。这个间接层带来的最大价值是**可维护性**——给 100 个运营加一个权限，只需要改「运营角色」的一条记录，而不是改 100 个用户。
+
+权限码用 **`资源:动作`** 格式（`user:edit`），`*` 表示超管，`资源:*` 表示该资源全权。判定逻辑必须只有一份，按钮显隐、路由拦截、接口防误调三处复用。
+
+**两个新手最容易踩的设计陷阱**：
+
+| 陷阱 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 前端直接判断 `role === 'admin'` | 后端新增角色（如 `auditor`）必须前端同步改判断 | 前端只消费 `permissionCodes`，不出现角色名字符串 |
+| 把"超管"当成一个 `*` 权限码发给前端 | 后端误回收 `*` 权限后超管变普通用户，且前端无法区分 | 超管用独立字段 `isSuperAdmin` 标记，前端判定时绕过权限码匹配 |
+
+### 35.1.2 核心代码
+
+```ts
+// 文件: examples/35-01-rbac-model.ts
+// ============ RBAC 核心模型：用户 → 角色 → 权限码 → 菜单 ============
+// 设计原则：
+// 1) 角色只作为"权限的集合容器"，前端不直接判断角色名，只识别权限码（permissionCode）；
+// 2) 权限码用 "资源:动作" 格式（user:edit），"*" 为超管，"资源:*" 为该资源全权；
+// 3) 新增角色只改后端的 角色-权限 关系，前端无需改动；
+// 4) 超管（isSuperAdmin）绕过所有判定，避免 "*" 权限码被误回收。
+
+/** 权限码匹配：判断单条需求权限是否被某条持有权限满足 */
+export function matchRule(required: string, owned: string): boolean {
+    if (owned === "*") return true;
+    if (required === owned) return true;
+    if (owned.endsWith(":*")) {
+        return required.startsWith(owned.slice(0, -1)); // 截掉 "*"，保留 "user:"
+    }
+    return false;
+}
+
+/** 当前用户是否拥有某条权限 */
+export function hasPermission(required: string, owned: readonly string[]): boolean {
+    return owned.some((rule) => matchRule(required, rule));
+}
+
+// ---------------- 数据模型 ----------------
+
+export interface Permission {
+    code: string;        // 权限码，如 user:edit
+    name: string;        // 可读名称
+}
+
+export interface Role {
+    id: string;
+    name: string;
+    permissionCodes: string[]; // 该角色持有的权限码
+}
+
+export interface User {
+    id: string;
+    name: string;
+    roleIds: string[];
+    isSuperAdmin?: boolean;
+}
+
+export interface MenuItem {
+    id: string;
+    title: string;
+    path?: string;
+    permissionCode?: string; // 访问该菜单所需权限；不写表示登录即可见
+    children?: MenuItem[];
+}
+
+// ---------------- 角色 → 权限码合并 ----------------
+
+/** 把用户的多个角色合并成一份去重的权限码列表；超管直接返回 ["*"] */
+export function collectPermissions(user: User, roles: readonly Role[]): string[] {
+    if (user.isSuperAdmin) return ["*"];
+    const set = new Set<string>();
+    for (const roleId of user.roleIds) {
+        const role = roles.find((r) => r.id === roleId);
+        if (!role) continue;
+        for (const code of role.permissionCodes) set.add(code);
+    }
+    return [...set];
+}
+
+// ---------------- 验证 ----------------
+
+const roles: Role[] = [
+    { id: "r_admin", name: "系统管理员", permissionCodes: ["user:*", "role:*", "menu:*"] },
+    { id: "r_ops", name: "运营", permissionCodes: ["user:view", "order:*", "order:refund"] },
+    { id: "r_finance", name: "财务", permissionCodes: ["order:view", "order:export", "finance:*"] },
+];
+
+const admin: User = { id: "u1", name: "Alice", roleIds: ["r_admin"] };
+const ops: User = { id: "u2", name: "Bob", roleIds: ["r_ops"] };
+const opsFinance: User = { id: "u3", name: "Carol", roleIds: ["r_ops", "r_finance"] };
+const superAdmin: User = { id: "u0", name: "root", roleIds: [], isSuperAdmin: true };
+
+console.log("=== 角色合并权限码 ===");
+console.log("admin:", collectPermissions(admin, roles));
+console.log("ops+finance:", collectPermissions(opsFinance, roles));
+console.log("superAdmin:", collectPermissions(superAdmin, roles));
+
+console.log("\n=== 权限判定（只认权限码，不认角色名） ===");
+const opsPerms = collectPermissions(ops, roles);
+console.log("ops 能否删除用户?", hasPermission("user:delete", opsPerms));
+console.log("ops 能否退款?", hasPermission("order:refund", opsPerms));
+console.log("ops 能否导出订单?", hasPermission("order:export", opsPerms));
+console.log("ops 能否查看财务报表?", hasPermission("finance:view", opsPerms));
+
+console.log("\n=== 关键设计：新增角色无需改前端 ===");
+const auditor: User = { id: "u4", name: "Dave", roleIds: ["r_auditor"] };
+const rolesWithAuditor = [...roles, { id: "r_auditor", name: "审计", permissionCodes: ["audit:view"] }];
+console.log("auditor 权限:", collectPermissions(auditor, rolesWithAuditor));
+console.log("auditor 能否审计?", hasPermission("audit:view", collectPermissions(auditor, rolesWithAuditor)));
+```
+
+> 运行方式：`npx tsx examples/35-01-rbac-model.ts`。
+
+### 35.1.3 应用实践
+
+- **权限码命名约定**：用 `模块:资源:动作` 三级（`system:user:delete`）而非两级（`user:delete`），避免跨模块重名（订单的 `view` 和用户的 `view` 是两回事）。
+- **超管不要发 `*` 权限码**：用 `isSuperAdmin` 布尔字段。后端在签发 token 时就决定好，前端 `collectPermissions` 直接返回 `["*"]`，判定层 `hasPermission` 天然全通。
+- **权限码缓存**：用户登录后把 `permissionCodes` 存在 Pinia/Vuex + localStorage，刷新不丢；登出时清掉。接口层每次请求带 token，后端重新校验（前端权限不可信）。
+
+---
+
+## 35.2 动态菜单：按权限码过滤菜单树
+
+### 35.2.1 概念解析
+
+菜单渲染有两种主流方案：
+
+**方案 A（推荐）：前端静态定义完整菜单树 + 后端返回权限码，前端过滤。**
+- 前端维护全量菜单（含 `permissionCode` 字段），登录后拿到权限码，递归过滤掉无权限的节点。
+- 优点：组件映射在前端，新增菜单只需前端加一条配置；后端新增角色不触发前端改动。
+- 缺点：前端能看到全量菜单结构（但看不到无权限的内容，安全上可接受）。
+
+**方案 B：后端直接下发可访问菜单树。**
+- 后端根据角色返回「该用户能看到的菜单树」，前端直接渲染。
+- 优点：前端完全不知道无权限菜单的存在。
+- 缺点：后端要维护菜单结构 + 组件映射（`componentKey` → 前端组件），新增菜单前后端都要改，耦合高。
+
+**过滤时的两个细节**：
+1. 父节点如果所有子节点都被过滤掉，父节点自身也应该隐藏（避免出现空菜单组）。
+2. 节点无 `permissionCode` 表示「登录即可见」（如仪表盘），不参与过滤。
+
+### 35.2.2 核心代码
+
+```ts
+// 文件: examples/35-02-dynamic-menu.ts
+// ============ 动态菜单：按权限码过滤菜单树 ============
+// 关键点：
+// 1) 前端维护"完整菜单树"（静态定义），后端只返回当前用户的权限码列表；
+// 2) 用权限码过滤树——节点无 permissionCode 表示登录可见，有则必须命中；
+// 3) 父节点若所有子节点都被过滤掉，则父节点自身也隐藏（避免空菜单）；
+// 4) 超管（权限码含 "*"）直接返回整棵树。
+
+import { matchRule } from "./35-01-rbac-model.js";
+
+export interface MenuNode {
+    id: string;
+    title: string;
+    path?: string;
+    permissionCode?: string;
+    children?: MenuNode[];
+}
+
+/** 判断单条权限码是否被持有 */
+function isAllowed(code: string, owned: readonly string[]): boolean {
+    return owned.some((o) => matchRule(code, o));
+}
+
+/**
+ * 按权限过滤菜单树。
+ * - owned 含 "*" 直接返回原树（超管）；
+ * - 节点无 permissionCode → 登录可见；
+ * - 节点有 permissionCode 但未命中 → 剔除；
+ * - 父节点子节点全被剔除 → 父节点也剔除（避免出现空菜单组）。
+ */
+export function filterMenu(menu: readonly MenuNode[], owned: readonly string[]): MenuNode[] {
+    if (owned.includes("*")) return menu.map((m) => ({ ...m }));
+
+    const result: MenuNode[] = [];
+    for (const node of menu) {
+        const children = node.children ? filterMenu(node.children, owned) : undefined;
+        const hasVisibleChild = children && children.length > 0;
+        const selfAllowed = node.permissionCode ? isAllowed(node.permissionCode, owned) : true;
+
+        if (selfAllowed || hasVisibleChild) {
+            result.push({
+                ...node,
+                ...(children !== undefined ? { children } : {}),
+            });
+        }
+    }
+    return result;
+}
+
+// ---------------- 验证 ----------------
+
+const fullMenu: MenuNode[] = [
+    { id: "dashboard", title: "仪表盘", path: "/dashboard" },
+    {
+        id: "system",
+        title: "系统管理",
+        children: [
+            { id: "user", title: "用户管理", path: "/system/user", permissionCode: "user:view" },
+            { id: "role", title: "角色管理", path: "/system/role", permissionCode: "role:view" },
+            { id: "menu", title: "菜单管理", path: "/system/menu", permissionCode: "menu:view" },
+        ],
+    },
+    {
+        id: "order",
+        title: "订单中心",
+        children: [
+            { id: "order-list", title: "订单列表", path: "/order/list", permissionCode: "order:view" },
+            { id: "order-refund", title: "退款审核", path: "/order/refund", permissionCode: "order:refund" },
+            { id: "order-export", title: "导出订单", path: "/order/export", permissionCode: "order:export" },
+        ],
+    },
+    { id: "finance", title: "财务报表", path: "/finance", permissionCode: "finance:view" },
+];
+
+const opsPerms = ["user:view", "order:*"];
+console.log("=== 运营可见菜单 ===");
+console.log(JSON.stringify(filterMenu(fullMenu, opsPerms), null, 2));
+
+console.log("\n=== 超管可见菜单（全量） ===");
+console.log("菜单总数:", filterMenu(fullMenu, ["*"]).length);
+
+const viewerPerms = ["order:view"];
+console.log("\n=== 只读用户可见菜单 ===");
+console.log(filterMenu(fullMenu, viewerPerms).map((m) => m.title));
+```
+
+> 运行方式：`npx tsx examples/35-02-dynamic-menu.ts`。
+
+### 35.2.3 应用实践
+
+- **菜单与路由解耦**：菜单只管「显示什么」，路由只管「能访问什么」。两者都用 `permissionCode` 过滤，但数据结构独立——避免改菜单影响路由注册。
+- **icon 映射放前端**：不要让后端返回 icon 名称然后前端做 `iconMap[name]`，后端新增图标必须前端补映射。icon 是纯前端关注点，前端按 `menu.id` 或 `path` 映射即可。
+- **菜单刷新策略**：用户角色变更后，需要重新拉取权限码并重新过滤菜单。最简单的做法是强制重新登录（登出 → 登录），体验更好的是 WebSocket 推送「权限变更」事件，前端静默刷新。
+
+---
+
+## 35.3 动态路由与路由守卫
+
+### 35.3.1 概念解析
+
+路由层要解决两件事：**注册哪些路由**（动态路由）和**跳转前是否放行**（路由守卫）。
+
+**动态路由方案 A（推荐）：前端静态路由表 + 按权限过滤。**
+- 前端定义完整路由表（含 `permissionCode`），登录后按权限码过滤，再 `router.addRoute` 注册。
+- 后端只负责返回权限码，不参与路由结构。
+
+**方案 B：后端下发可访问路由 + 前端 `componentMap` 映射。**
+- 后端返回 `{ name, path, componentKey }` 列表，前端用 `componentMap[componentKey]` 找到组件再注册。
+- 缺点：后端新增菜单必须前端补 `componentMap`，耦合高，**不推荐**。
+
+**路由守卫三态**：`allow`（放行）/ `redirect`（未登录跳登录页，携带 `redirect` 参数）/ `forbidden`（已登录但无权限，展示 403 页）。守卫必须是**纯函数**，框架层（Vue Router 的 `beforeEach` / React Router 的 loader）只负责调用并把返回值翻译成行为。
+
+### 35.3.2 核心代码
+
+```ts
+// 文件: examples/35-03-dynamic-route.ts
+// ============ 动态路由：按权限注册可访问路由 ============
+// 两种主流方案：
+// 方案 A（推荐）：前端静态定义完整路由表，后端返回"可访问的路由 name 列表"，
+//                前端按 name 过滤后注册。新增角色/菜单无需改前端组件映射。
+// 方案 B：后端直接下发"可访问菜单树 + componentKey"，前端用 componentMap 映射。
+//         缺点：后端新增菜单必须前端补 componentMap，耦合高，不推荐。
+// 本示例演示方案 A。
+
+import { hasPermission } from "./35-01-rbac-model.js";
+
+export interface AppRoute {
+    name: string;
+    path: string;
+    component: string;
+    permissionCode?: string;
+    meta?: { title: string };
+    children?: AppRoute[];
+}
+
+/** 按权限过滤路由表（方案 A） */
+export function filterRoutes(
+    routes: readonly AppRoute[],
+    permissionCodes: readonly string[],
+): AppRoute[] {
+    const result: AppRoute[] = [];
+    for (const route of routes) {
+        const children = route.children ? filterRoutes(route.children, permissionCodes) : undefined;
+        const selfAllowed = route.permissionCode
+            ? hasPermission(route.permissionCode, permissionCodes)
+            : true;
+        if (selfAllowed) {
+            result.push({ ...route, ...(children !== undefined ? { children } : {}) });
+        }
+    }
+    return result;
+}
+
+/** 路由守卫（框架无关纯函数） */
+export type GuardResult =
+    | { type: "allow" }
+    | { type: "redirect"; to: string }
+    | { type: "forbidden" };
+
+export function guardRoute(
+    route: AppRoute,
+    ctx: { isAuthenticated: boolean; permissionCodes: readonly string[]; loginPath: string; currentPath: string },
+): GuardResult {
+    if (!ctx.isAuthenticated) {
+        const from = encodeURIComponent(ctx.currentPath);
+        return { type: "redirect", to: `${ctx.loginPath}?redirect=${from}` };
+    }
+    if (route.permissionCode && !hasPermission(route.permissionCode, ctx.permissionCodes)) {
+        return { type: "forbidden" };
+    }
+    return { type: "allow" };
+}
+
+// ---------------- 验证 ----------------
+
+const allRoutes: AppRoute[] = [
+    { name: "dashboard", path: "/dashboard", component: "Dashboard", meta: { title: "仪表盘" } },
+    {
+        name: "system", path: "/system", component: "Layout",
+        children: [
+            { name: "system-user", path: "/system/user", component: "UserList", permissionCode: "user:view" },
+            { name: "system-role", path: "/system/role", component: "RoleList", permissionCode: "role:view" },
+            { name: "system-menu", path: "/system/menu", component: "MenuList", permissionCode: "menu:view" },
+        ],
+    },
+    {
+        name: "order", path: "/order", component: "Layout",
+        children: [
+            { name: "order-list", path: "/order/list", component: "OrderList", permissionCode: "order:view" },
+            { name: "order-export", path: "/order/export", component: "OrderExport", permissionCode: "order:export" },
+        ],
+    },
+];
+
+const opsPerms = ["user:view", "order:*"];
+
+console.log("=== 运营可注册路由 ===");
+console.log(JSON.stringify(filterRoutes(allRoutes, opsPerms).map((r) => r.name), null, 2));
+
+console.log("\n=== 路由守卫三态 ===");
+const ctx = { isAuthenticated: true, permissionCodes: opsPerms, loginPath: "/login", currentPath: "/system/role" };
+const roleRoute = allRoutes[1].children![1];
+console.log("访问 /system/role（需 role:view）:", guardRoute(roleRoute, ctx));
+
+const userRoute = allRoutes[1].children![0];
+console.log("访问 /system/user（需 user:view）:", guardRoute(userRoute, ctx));
+
+const guestCtx = { ...ctx, isAuthenticated: false, currentPath: "/dashboard" };
+console.log("未登录访问 /dashboard:", guardRoute(allRoutes[0], guestCtx));
+```
+
+> 运行方式：`npx tsx examples/35-03-dynamic-route.ts`。
+
+### 35.3.3 应用实践
+
+- **路由注册时机**：在 `beforeEach` 里判断「如果还没注册动态路由」→ 拉权限 → `filterRoutes` → `addRoute` → `next({ ...to, replace: true })` 重新跳转。已注册则直接 `next()`。
+- **路由 name 必须唯一且稳定**：后端用 `name` 控制可见性，前端用 `name` 做 `addRoute`/`removeRoute`。不要用 `path` 做 key（path 可能变）。
+- **404 路由放最后**：动态路由全部注册完后，再注册 `{ path: '/:pathMatch(.*)*', redirect: '/404' }`。否则刷新页面时动态路由还没注册，先命中 404。
+
+---
+
+## 35.4 按钮级权限指令（v-permission）
+
+### 35.4.1 概念解析
+
+按钮级权限是「功能权限」的最后一道防线：同一个页面，不同角色看到的按钮不同（运营看不到「删除」，财务看不到「退款」）。
+
+**两种实现方式**：
+
+| 方式 | 做法 | 适用场景 |
+| --- | --- | --- |
+| 指令（`v-permission`） | 元素挂载时判定，无权限直接从 DOM 移除 | 单个按钮、零散使用 |
+| 组件包裹（`<Permission code="...">`） | 插槽式包裹，无权限不渲染子节点 | 需要统一控制的区域、批量按钮 |
+
+**反模式：用 `display: none` 隐藏 + MutationObserver 监听。**
+- 隐藏而非销毁 → 元素仍占布局、仍可被 Tab 聚焦、仍可被 `querySelector` 选中、仍可触发点击事件。
+- 正确做法是**销毁**（`removeChild` / 不渲染），无权限的元素根本不进 DOM。
+
+### 35.4.2 核心代码
+
+```ts
+// 文件: examples/35-04-permission-directive.ts
+// ============ 按钮级权限指令（v-permission）核心逻辑 ============
+// 反模式：用 MutationObserver 强制 display:none 隐藏元素
+//   问题：①隐藏而非销毁 → 元素仍占布局、仍可被 tab 聚焦、仍可被脚本访问；
+//        ②observer 未清理 → 内存泄漏 / 状态错乱。
+// 正确策略：一次性 removeChild（销毁），无权限直接从 DOM 移除。
+
+import { hasPermission } from "./35-01-rbac-model.js";
+
+export type PermissionBinding =
+    | string
+    | string[]
+    | { any: string[] }
+    | { all: string[] };
+
+/** 解析 binding，返回是否有权限 */
+export function checkPermission(binding: PermissionBinding, owned: readonly string[]): boolean {
+    if (typeof binding === "string") {
+        return hasPermission(binding, owned);
+    }
+    if (Array.isArray(binding)) {
+        return binding.some((code) => hasPermission(code, owned));
+    }
+    if ("any" in binding) {
+        return binding.any.some((code) => hasPermission(code, owned));
+    }
+    if ("all" in binding) {
+        return binding.all.every((code) => hasPermission(code, owned));
+    }
+    return false;
+}
+
+/** 销毁无权限元素：用注释节点占位，便于调试定位 */
+export function removeIfNoPermission(el: HTMLElement, binding: PermissionBinding, owned: readonly string[]): void {
+    if (!checkPermission(binding, owned)) {
+        const placeholder = document.createComment(`permission denied: ${JSON.stringify(binding)}`);
+        el.parentNode?.replaceChild(placeholder, el);
+    }
+}
+
+// ---------------- 验证 ----------------
+
+const opsPerms = ["user:view", "order:*"];
+
+console.log("=== 单条权限 ===");
+console.log("user:view →", checkPermission("user:view", opsPerms));
+console.log("user:edit →", checkPermission("user:edit", opsPerms));
+
+console.log("\n=== 数组（满足任一） ===");
+console.log("['user:edit','user:delete'] →", checkPermission(["user:edit", "user:delete"], opsPerms));
+console.log("['user:view','user:delete'] →", checkPermission(["user:view", "user:delete"], opsPerms));
+
+console.log("\n=== 显式 all（全部满足） ===");
+console.log("{all:['user:view','order:view']} →", checkPermission({ all: ["user:view", "order:view"] }, opsPerms));
+```
+
+> 运行方式：`npx tsx examples/35-04-permission-directive.ts`。
+
+### 35.4.3 应用实践
+
+- **Vue 指令注册**：在 `main.ts` 里 `app.directive('permission', { mounted(el, binding) { removeIfNoPermission(el, binding.value, userStore.permissions) } })`。指令只做 DOM 操作，判定逻辑抽到 `checkPermission` 纯函数。
+- **React 用 HOC / Hook**：`usePermission(code)` 返回 boolean，配合 `{canEdit && <button>编辑</button>}`。React 没有指令，用组件条件渲染更自然。
+- **不要只靠前端按钮控制**：接口层必须再校验权限码。前端按钮隐藏只是体验优化，真正的安全边界在后端。
+
+---
+
+## 35.5 超级管理员与数据权限范围
+
+### 35.5.1 概念解析
+
+功能权限解决「能不能操作」，数据权限解决「能操作哪些数据」。最常见的场景：部门主管只能看本部门员工，超管能看全公司，审计只能看指定部门。
+
+**数据范围的五种标准类型**（参考 RBAC 扩展模型）：
+
+| 范围 | 含义 | 典型角色 |
+| --- | --- | --- |
+| `all` | 全部数据 | 超管 |
+| `dept_and_children` | 本部门及子部门 | 部门主管 |
+| `dept` | 仅本部门 | 部门经理 |
+| `custom` | 自定义部门集合 | 审计、跨部门协作 |
+| `self` | 仅本人 | 普通员工 |
+
+**超管的特殊处理**：超管的数据范围恒为 `all`，且绕过所有功能权限判定。超管身份应该用独立字段 `isSuperAdmin` 标记，而不是靠一个 `*` 权限码——否则后端误删 `*` 权限会导致超管降级。
+
+### 35.5.2 核心代码
+
+```ts
+// 文件: examples/35-05-data-scope.ts
+// ============ 超级管理员 + 数据权限范围 ============
+// 功能权限解决"能不能操作"，数据权限解决"能操作哪些数据"。
+// 常见数据范围：全部 / 本部门 / 本部门及以下 / 仅本人 / 自定义部门集合。
+// 超管（isSuperAdmin）绕过所有判定，返回 "all"。
+
+import { type User, type Role } from "./35-01-rbac-model.js";
+
+export type DataScope = "all" | "dept" | "dept_and_children" | "self" | "custom";
+
+export interface DataScopeRole extends Role {
+    dataScope: DataScope;
+    customDeptIds?: string[];
+}
+
+export interface DataScopeUser extends User {
+    deptId: string;
+    deptPath?: string[];
+}
+
+const SCOPE_RANK: Record<DataScope, number> = {
+    all: 4, dept_and_children: 3, dept: 2, custom: 1, self: 0,
+};
+
+export interface ResolvedDataScope {
+    scope: DataScope;
+    deptId: string;
+    deptPath: string[];
+    customDeptIds: string[];
+}
+
+/** 解析用户的数据范围：多角色取最大范围，custom 合并部门集合 */
+export function resolveDataScope(user: DataScopeUser, roles: readonly DataScopeRole[]): ResolvedDataScope {
+    if (user.isSuperAdmin) {
+        return { scope: "all", deptId: user.deptId, deptPath: user.deptPath ?? [], customDeptIds: [] };
+    }
+
+    let maxScope: DataScope = "self";
+    const customDeptIds = new Set<string>();
+
+    for (const roleId of user.roleIds) {
+        const role = roles.find((r) => r.id === roleId);
+        if (!role) continue;
+        if (SCOPE_RANK[role.dataScope] > SCOPE_RANK[maxScope]) maxScope = role.dataScope;
+        if (role.dataScope === "custom" && role.customDeptIds) {
+            role.customDeptIds.forEach((id) => customDeptIds.add(id));
+        }
+    }
+
+    return { scope: maxScope, deptId: user.deptId, deptPath: user.deptPath ?? [], customDeptIds: [...customDeptIds] };
+}
+
+/** 翻译成可访问的部门 ID 集合（供后端 SQL where 条件使用） */
+export function resolveAccessibleDeptIds(resolved: ResolvedDataScope): string[] {
+    switch (resolved.scope) {
+        case "all": return ["*"];
+        case "dept": return [resolved.deptId];
+        case "dept_and_children": return resolved.deptPath;
+        case "custom": return resolved.customDeptIds;
+        case "self":
+        default: return [resolved.deptId];
+    }
+}
+
+// ---------------- 验证 ----------------
+
+const roles: DataScopeRole[] = [
+    { id: "r_admin", name: "系统管理员", permissionCodes: ["user:*"], dataScope: "all" },
+    { id: "r_dept_manager", name: "部门主管", permissionCodes: ["user:view"], dataScope: "dept_and_children" },
+    { id: "r_staff", name: "普通员工", permissionCodes: ["user:view"], dataScope: "self" },
+    { id: "r_auditor", name: "审计", permissionCodes: ["audit:view"], dataScope: "custom", customDeptIds: ["d_finance", "d_ops"] },
+];
+
+const staff: DataScopeUser = { id: "u1", name: "Alice", roleIds: ["r_staff"], deptId: "d_fe", deptPath: ["d_head", "d_rd", "d_fe"] };
+const manager: DataScopeUser = { id: "u2", name: "Bob", roleIds: ["r_dept_manager"], deptId: "d_rd", deptPath: ["d_head", "d_rd"] };
+const auditor: DataScopeUser = { id: "u3", name: "Carol", roleIds: ["r_auditor"], deptId: "d_fe", deptPath: ["d_head", "d_rd", "d_fe"] };
+const superAdmin: DataScopeUser = { id: "u0", name: "root", roleIds: [], isSuperAdmin: true, deptId: "d_head", deptPath: ["d_head"] };
+
+console.log("=== 普通员工数据范围 ===");
+console.log(resolveDataScope(staff, roles));
+
+console.log("\n=== 部门主管数据范围 ===");
+const mgrScope = resolveDataScope(manager, roles);
+console.log("scope:", mgrScope.scope);
+console.log("可访问部门:", resolveAccessibleDeptIds(mgrScope));
+
+console.log("\n=== 审计（自定义范围） ===");
+const auditScope = resolveDataScope(auditor, roles);
+console.log("scope:", auditScope.scope);
+console.log("可访问部门:", resolveAccessibleDeptIds(auditScope));
+
+console.log("\n=== 超管数据范围 ===");
+const saScope = resolveDataScope(superAdmin, roles);
+console.log("scope:", saScope.scope);
+console.log("可访问部门:", resolveAccessibleDeptIds(saScope));
+```
+
+> 运行方式：`npx tsx examples/35-05-data-scope.ts`。
+
+### 35.5.3 应用实践
+
+- **数据范围是后端的事**：前端的 `resolveAccessibleDeptIds` 只用于列表预过滤/展示优化，**后端必须独立根据 token 里的用户身份重新计算数据范围并拼 SQL 条件**。绝不能信任前端传来的 `deptIds`。
+- **多角色取最大范围**：一个用户有多个角色时，数据范围取最宽松的那个（`all` > `dept_and_children` > `dept` > `custom` > `self`），避免出现「有主管角色却只能看自己数据」的反直觉结果。
+- **超管不要走常规权限流程**：超管在后端中间件里直接放行，不查角色-权限表。这样即使权限表被误改，超管也不会被锁死。
+
+---
+
+## 35.6 前后端权限约定与防越权
+
+### 35.6.1 前后端契约
+
+权限体系要稳定运行，前后端必须遵守同一套约定：
+
+| 约定项 | 前端职责 | 后端职责 |
+| --- | --- | --- |
+| 登录态 | 存 token，请求带 Authorization | 签发/校验 token，过期返回 401 |
+| 权限码 | 消费 `permissionCodes`，不判断角色名 | 维护角色-权限关系，登录接口返回权限码 |
+| 菜单/路由 | 按权限码过滤展示 | 不参与前端菜单结构，只返回权限码 |
+| 按钮级 | 按权限码显隐 | 接口层校验权限码，返回 403 |
+| 数据范围 | 展示预过滤 | 按用户身份重新计算，拼 SQL 条件 |
+| 超管 | `isSuperAdmin` 绕过判定 | 独立字段，中间件直接放行 |
+
+### 35.6.2 防越权的三道防线
+
+1. **前端展示层**：菜单、路由、按钮按权限过滤——这是**体验层**，不是安全层。
+2. **接口网关层**：每个接口声明所需权限码，网关校验 token → 查权限码 → 不匹配返回 403。
+3. **数据层**：查询时按数据范围拼 `where dept_id IN (...)`，操作时校验「这条数据是否在用户的数据范围内」。
+
+**最常见的越权漏洞**：接口只校验了「登录态」没校验「权限码」，或者校验了权限码但没校验「数据归属」（普通员工能改别人的订单）。
+
+---
+
+## 35.7 自测题
+
+<details>
+<summary><b>1. 【基础】为什么前端不应该直接判断 `role === 'admin'`，而应该判断权限码？</b></summary>
+
+因为角色是后端可以动态增删的概念。如果前端把角色名写死在判断里（`if (role === 'admin')`），后端新增一个「运营主管」角色时，前端必须同步改代码才能让运营主管看到管理员功能。改为判断权限码（`hasPermission('user:edit', permissions)`）后，后端只需在「运营主管」角色上挂 `user:edit` 权限码，前端零改动即可生效。
+</details>
+
+<details>
+<summary><b>2. 【基础】按钮级权限为什么要用「销毁」（removeChild）而不是「隐藏」（display:none）？</b></summary>
+
+隐藏只是视觉上不可见，元素仍在 DOM 中：①仍可被 Tab 键聚焦，影响可访问性；②仍可被 `querySelector` 选中并触发点击，存在安全隐患；③仍占布局空间。销毁直接把元素从 DOM 移除，不可聚焦、不可选中、不占布局，是按钮级权限的正确姿势。
+</details>
+
+<details>
+<summary><b>3. 【进阶】动态路由方案 A（前端静态路由表 + 权限过滤）相比方案 B（后端下发菜单树 + componentMap），优势是什么？</b></summary>
+
+方案 A 的组件映射完全在前端控制，后端只返回权限码。新增菜单时只需在前端静态路由表补一条配置，后端无需改动；新增角色时前端完全不用动。方案 B 把菜单结构和组件映射都交给后端，后端新增菜单必须前端补 `componentMap`，前后端强耦合，每次菜单变更都要双端同步发布。
+</details>
+
+<details>
+<summary><b>4. 【进阶】超管为什么要用 `isSuperAdmin` 独立字段，而不是发一个 `*` 权限码？</b></summary>
+
+如果超管身份依赖 `*` 权限码，后端在角色-权限表里误操作（如批量回收权限、角色被删除）会导致超管降级为普通用户，甚至把自己锁死在系统外。用独立字段 `isSuperAdmin` 后，超管身份在用户表层面标记，不受角色-权限关系表影响，判定层直接绕过权限码匹配，更稳定也更安全。
+</details>
+
+<details>
+<summary><b>5. 【挑战】前端按数据范围预过滤了列表，后端还需要再校验数据范围吗？为什么？</b></summary>
+
+必须再校验。前端的预过滤只是体验优化（减少用户看到无权限数据的困惑），但前端数据完全不可信——攻击者可以直接调接口、改请求参数、绕过前端过滤。后端必须根据 token 里的用户身份独立计算数据范围，在 SQL 层拼 `where` 条件，操作（改/删）时还要校验目标数据的归属。越权漏洞几乎都出在「后端信任了前端传来的数据范围参数」。
+</details>
+
+---
+
+## 35.8 本章避坑清单
+
+| # | 坑点 | 触发场景 | 规避方案 |
+| --- | --- | --- | --- |
+| 1 | 前端判断角色名而非权限码 | `if (role === 'admin')` | 只消费 `permissionCodes`，角色名不出现在前端逻辑里 |
+| 2 | 超管用 `*` 权限码而非独立字段 | 角色表误操作导致超管降级 | 用 `isSuperAdmin` 布尔字段，判定层绕过权限码 |
+| 3 | 按钮级用 `display:none` 隐藏 | 元素仍可聚焦/选中/点击 | 用 `removeChild` 销毁，无权限元素不进 DOM |
+| 4 | 动态路由用后端 `componentKey` 映射 | 后端新增菜单必须前端补映射 | 前端静态路由表 + 权限码过滤，后端只返回权限码 |
+| 5 | 动态路由未注册完就命中 404 | 刷新页面时 `/:pathMatch(.*)` 先注册 | 404 路由放最后，动态路由全部 `addRoute` 后再注册 |
+| 6 | 只校验功能权限不校验数据范围 | 普通员工能看/改全公司数据 | 查询拼数据范围 `where`，操作校验目标数据归属 |
+| 7 | 信任前端传来的 `deptIds` | 攻击者改请求参数越权 | 后端根据 token 身份独立计算数据范围 |
+| 8 | 菜单过滤后出现空菜单组 | 父节点子节点全被剔除但父节点仍显示 | 过滤时判断「子节点全空则父节点也剔除」 |
+| 9 | 权限码用两级 `user:edit` 跨模块重名 | 订单的 `view` 和用户的 `view` 冲突 | 用三级 `system:user:edit` / `biz:order:view` |
+| 10 | 路由守卫写在框架钩子里不可复用 | Vue/React 各写一份逻辑分叉 | 守卫抽成纯函数，框架层只调用并翻译返回值 |

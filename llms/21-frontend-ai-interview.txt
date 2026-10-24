@@ -1,0 +1,1270 @@
+# 第二十一部分：前端 AI 技术与面试通关（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/21-frontend-ai-interview
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第二十一部分：前端 AI 技术与面试通关
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[6.6 实时通信技术](./06-network.md#_6-6-实时通信技术) · [第十四部分 前端 AI 工程](./14-frontend-ai.md) · [10.3 渲染性能优化](./10-browser-rendering.md#_10-3-渲染性能优化实战) · [7.1 XSS 攻防](./07-security.md#_7-1-xss-跨站脚本攻击)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-20" target="_blank" rel="noopener">EP.20《SSE 流式传输》</a>、<a href="/comics/index.html#ep-21" target="_blank" rel="noopener">EP.21《打字机渲染》</a>、<a href="/comics/index.html#ep-22" target="_blank" rel="noopener">EP.22《AI 客服系统》</a>、<a href="/comics/index.html#ep-23" target="_blank" rel="noopener">EP.23《MCP 协议》</a>、<a href="/comics/index.html#ep-24" target="_blank" rel="noopener">EP.24《Markdown 增量渲染》</a>、<a href="/comics/index.html#ep-25" target="_blank" rel="noopener">EP.25《WebSocket 实时渲染》</a>
+>
+> 🎬 配套漫画剧场：[EP.20 SSE 流式传输](./comics/EP.20-sse-streaming.md) · [EP.21 打字机渲染](./comics/EP.21-typewriter-render.md) · [EP.22 AI 客服系统](./comics/EP.22-ai-cs-system.md) · [EP.23 MCP 协议](./comics/EP.23-mcp-protocol.md) · [EP.24 Markdown 增量渲染](./comics/EP.24-markdown-incremental.md) · [EP.25 WebSocket 实时渲染](./comics/EP.25-websocket-render.md)
+
+## 本部分内容
+
+- [21.1 SSE 流技术：AI 流式响应的地基](#_21-1-sse-流技术-ai-流式响应的地基)
+- [21.2 打字机效果：从「能用」到「流畅」](#_21-2-打字机效果-从「能用」到「流畅」)
+- [21.3 AI 客服系统：端到端系统设计](#_21-3-ai-客服系统-端到端系统设计)
+- [21.4 MCP：模型上下文协议](#_21-4-mcp-模型上下文协议)
+- [21.5 Markdown 增量渲染](#_21-5-markdown-增量渲染)
+- [21.6 WebSocket 与实时渲染](#_21-6-websocket-与实时渲染)
+- [21.7 通用面试方法论与评分标准](#_21-7-通用面试方法论与评分标准)
+- [21.8 本章避坑清单](#_21-8-本章避坑清单)
+
+---
+
+> 大模型时代，前端的主战场从「请求 JSON → 渲染表单」变成了「**消费一条持续生长的流，并把生成过程优雅地呈现出来**」。这条主线串起了六个高频面试主题：SSE 负责传输、打字机负责呈现节奏、Markdown 增量渲染负责富文本、WebSocket 负责双向实时、MCP 负责工具生态、AI 客服则是把一切组装起来的系统设计题。
+>
+> 本章每节统一按五个维度展开：**概念解析 → 技术对比 → 应用实践 → 代码实现 → 面试指导**；面试题库分三级——L1 基础概念题、L2 原理理解题、L3 综合应用题，每题给出「回答框架 / 评分要点 / 常见误区 / 加分项」。
+
+## 知识地图
+
+```mermaid
+flowchart LR
+    subgraph 传输层
+        SSE[SSE 单向流<br/>21.1]
+        WS[WebSocket 双向<br/>21.6]
+    end
+    subgraph 呈现层
+        TW[打字机节奏<br/>21.2]
+        MD[Markdown 增量渲染<br/>21.5]
+    end
+    subgraph 能力层
+        MCP[MCP 工具协议<br/>21.4]
+    end
+    subgraph 系统层
+        CS[AI 客服系统<br/>21.3]
+    end
+    SSE --> TW --> MD
+    WS --> TW
+    MCP --> CS
+    SSE --> CS
+    MD --> CS
+    WS --> CS
+```
+
+---
+
+## 21.1 SSE 流技术：AI 流式响应的地基
+
+### 21.1.1 概念解析
+
+**SSE（Server-Sent Events）** 是 HTML5 规范的一部分：浏览器发起一个普通 HTTP 请求，服务器**不结束响应**，持续以 `text/event-stream` 格式往这条长连接里写事件，直到任一方关闭。它是「一个 HTTP 请求 + 一条持续增长的响应体」。
+
+#### 事件流格式规范（W3C EventSource 语法）
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache
+Connection: keep-alive
+X-Accel-Buffering: no
+
+retry: 3000
+
+id: 101
+event: token
+data: 你好
+
+id: 102
+event: token
+data: ，世界
+
+data: 这是第二条 data 行，会与上一行用 \n 拼接
+
+event: done
+data: [DONE]
+
+: 以冒号开头的是注释行，常被用作心跳保活
+```
+
+| 字段 | 含义 | 细节 |
+| ---- | ---- | ---- |
+| `data:` | 事件数据 | 可出现多次，分发时用 `\n` 拼接；AI 网关通常一帧一个 JSON |
+| `event:` | 事件类型 | 省略时默认 `message`，对应 `onmessage`；自定义类型用 `addEventListener` |
+| `id:` | 事件 ID | 浏览器自动记录为 `Last-Event-ID`；断线重连时自动带上该请求头 |
+| `retry:` | 重连等待毫秒数 | 指示浏览器断线后多久重连 |
+| `:` 开头 | 注释 | 常用于每 15~30s 发一行心跳，防中间代理掐断空闲连接 |
+| 分隔符 | **空行（`\n\n`，规范允许 `\r\n\r\n`）** | 一个事件必须以空行结束，否则浏览器不分发 |
+
+#### 客户端接收处理流程
+
+```mermaid
+sequenceDiagram
+    participant B as 浏览器 EventSource
+    participant S as 服务器
+    B->>S: GET /stream（自动带 Cookie / Last-Event-ID）
+    S-->>B: 200 text/event-stream（保持连接）
+    loop 事件推送
+        S-->>B: data: ...\n\n
+        Note over B: 按空行切帧 → 触发 message 事件
+    end
+    Note over B,S: 网络中断 → 浏览器按 retry 自动重连
+    B->>S: 重连请求（Last-Event-ID: 最后收到的 id）
+```
+
+`EventSource` 的关键行为（面试常考）：
+
+1. **自带断线自动重连**，重连间隔可被服务端 `retry:` 字段调控；
+2. **只能 GET**，不能自定义请求方法与请求头（这是 LLM 场景放弃它的根本原因）；
+3. 自动携带同源 Cookie，跨域需 `new EventSource(url, { withCredentials: true })` 且服务端给 `Access-Control-Allow-Credentials: true`；
+4. 连接状态三态：`CONNECTING(0) / OPEN(1) / CLOSED(2)`；
+5. HTTP/1.1 下浏览器对同域长连接有 **6 个连接上限**（HTTP/2 多路复用后基本消失），页面开太多 SSE 会排队；
+6. 服务端返回的 HTTP 状态码语义不同：**200 才正常建立流**；204 会立即重连；500/502/503/504 走「失败重连」（有退避上限）。
+
+### 21.1.2 技术对比
+
+| 维度 | 短轮询 | 长轮询 | SSE | WebSocket |
+| ---- | ---- | ---- | ---- | ---- |
+| 协议 | 反复 HTTP 请求 | HTTP 请求挂起 | **单个长 HTTP 响应** | 独立 ws 协议（HTTP 握手升级） |
+| 方向 | 拉 | 拉（服务端 hold） | **服务端→客户端单向** | 全双工双向 |
+| 数据格式 | 任意 | 任意 | 文本（事件流语法） | 文本 + 二进制帧 |
+| 断线重连 | 天然支持 | 天然支持 | **浏览器内置 + Last-Event-ID 续传** | 需自己实现 |
+| 自定义头/POST | ✅ | ✅ | ❌（EventSource 限制） | ❌（握手时可带，靠子协议/票据变通） |
+| 服务端成本 | 高（大量无效请求） | 中 | 低（一条连接） | 低，但需常驻连接管理 |
+| 代理/防火墙穿透 | 最好 | 好 | **好（就是 HTTP）** | 偶尔被企业代理拦截 |
+| 典型场景 | 兼容性兜底 | 老旧系统消息 | **LLM 流式输出、通知、行情、日志** | 协同编辑、语音、游戏、IM |
+
+**选型口诀**：只需要服务端推文本、且能接受 GET → SSE；需要双向或二进制 → WebSocket；要带复杂鉴权头/POST body → 用 `fetch` + ReadableStream 手写 SSE 解析（本质还是 SSE 协议，只是不用 EventSource API）。
+
+### 21.1.3 在 AI 前端中的应用实践
+
+主流大模型 API（OpenAI Chat Completions、Anthropic Messages、国内主流模型）的流式接口几乎全部选用 SSE，原因有三：**生成天然单向、HTTP 穿透性好、出错语义清晰**。
+
+- **首字延迟（TTFT, Time To First Token）**：非流式要等整段生成完（可能 20s+）；流式通常 300ms~1s 出第一个 token，感知速度差距数十倍；
+- **进度反馈**：token 逐块到达即「思考过程可见」；还可在 SSE 上扩展自定义事件类型（`event: tool_call`、`event: usage`、`event: reasoning`），驱动工具调用卡、token 计费条、深度思考折叠块；
+- **可中断**：`AbortController.abort()` 关闭连接即可「停止生成」，服务端检测到断连应同步取消模型请求，避免空转烧钱；
+- **断线续传**：消息级幂等 ID + 服务端输出缓冲，配合 `id:` / `Last-Event-ID` 可实现「重连后从断点继续吐字」。
+
+> ⚠️ 部署坑：Nginx 默认 `proxy_buffering on` 会攒够一段才转发，流变成「便秘流」；开 gzip 后也有缓冲。要显式 `proxy_buffering off;` 或响应头 `X-Accel-Buffering: no`，并关闭该响应的压缩（或用流式 flush 的压缩器）。CDN、网关、云函数都要逐一确认不缓冲、超时时间够长（≥ 数分钟）。
+
+### 21.1.4 代码实现
+
+#### ① 前端：零依赖 SSE 解析器（POST + 自定义头 + 可中止）
+
+`EventSource` 不能 POST，AI 场景的标准做法是 `fetch` 读流、自己按空行切帧。可直接对照运行的实现见 [examples/14-01-sse-parser.ts](./examples/14-01-sse-parser.ts)，生产封装如下：
+
+```typescript
+// 文件: examples/ai-interview/sse-fetch-client.ts
+// ============ 生产级 SSE 客户端：POST / 自定义头 / 残帧缓冲 / 可中止 ============
+export interface SseHandlers {
+    onEvent?: (event: { event: string; data: string; id?: string }) => void;
+    onError?: (err: Error) => void;
+    onClose?: () => void;
+}
+
+export interface StreamChatOptions {
+    url: string;
+    body: unknown;
+    token: string;               // 鉴权头——EventSource 做不到，fetch 可以
+    signal?: AbortSignal;
+}
+
+export async function streamSSE(opts: StreamChatOptions, handlers: SseHandlers = {}): Promise<void> {
+    const { url, body, token, signal } = opts;
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            Accept: 'text/event-stream',
+        },
+        body: JSON.stringify(body),
+        signal,
+    });
+
+    // 非 200：先读出错误体，再抛分类错误（流接口的 4xx/5xx 往往是 JSON）
+    if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`SSE HTTP ${res.status}: ${text.slice(0, 200)}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = ''; // 残帧缓冲：网络 chunk 边界与协议帧边界毫无关系
+
+    const dispatch = (block: string) => {
+        const evt: { event: string; data: string; id?: string } = { event: 'message', data: '' };
+        const dataLines: string[] = [];
+        for (const line of block.split('\n')) {
+            if (line.startsWith(':')) continue;          // 注释/心跳
+            else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+            else if (line.startsWith('event:')) evt.event = line.slice(6).trim();
+            else if (line.startsWith('id:')) evt.id = line.slice(3).trim();
+        }
+        if (dataLines.length) {
+            evt.data = dataLines.join('\n');
+            handlers.onEvent?.(evt);
+        }
+    };
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            // stream: true —— 多字节 UTF-8（如半个汉字）跨 chunk 时保留残字节，否则乱码
+            buffer += decoder.decode(value, { stream: true });
+            let sep: number;
+            while ((sep = buffer.indexOf('\n\n')) !== -1) {
+                const rawBlock = buffer.slice(0, sep);
+                buffer = buffer.slice(sep + 2);
+                dispatch(rawBlock.replace(/\r\n/g, '\n')); // 兼容 CRLF
+            }
+        }
+        if (buffer.trim()) dispatch(buffer); // 收尾：宽容处理服务端漏发最后空行
+        handlers.onClose?.();
+    } catch (err) {
+        if ((err as Error).name === 'AbortError') return handlers.onClose?.(); // 用户主动停止不算错
+        handlers.onError?.(err as Error);
+    }
+}
+```
+
+使用与「停止生成」：
+
+```tsx
+const controller = new AbortController();
+streamSSE(
+    { url: '/api/chat', body: { messages }, token: userToken, signal: controller.signal },
+    { onEvent: (e) => e.event === 'token' && appendText(JSON.parse(e.data).delta) },
+);
+// 用户点击停止按钮
+controller.abort();
+```
+
+#### ② 后端：Node.js（node:http 零依赖，避免框架响应缓冲）
+
+```javascript
+// 文件: examples/ai-interview/sse-server-node.mjs
+import http from 'node:http';
+
+http.createServer((req, res) => {
+    if (req.method !== 'GET' || req.url !== '/stream') {
+        res.writeHead(404).end(); return;
+    }
+    // 关键三件套：事件流类型 + 禁缓存 + 禁代理缓冲
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+    });
+
+    let id = 100;
+    const tokens = ['你好', '，', '我是', '流式', '助手'];
+    const timer = setInterval(() => {
+        const t = tokens.shift();
+        if (t) {
+            res.write(`id: ${++id}\nevent: token\ndata: ${JSON.stringify({ delta: t })}\n\n`);
+        } else {
+            res.write('event: done\ndata: [DONE]\n\n');
+            res.end(); clearInterval(timer);
+        }
+    }, 300);
+
+    req.on('close', () => clearInterval(timer)); // 客户端断开立即清理，防资源泄漏
+}).listen(3000);
+```
+
+#### ③ 后端：Python（FastAPI，StreamingResponse）
+
+```python
+# 文件: examples/ai-interview/sse_server_fastapi.py
+# pip install fastapi uvicorn
+import asyncio, json
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+
+app = FastAPI()
+
+async def event_gen():
+    for i, tok in enumerate(['你好', '，', '世界']):
+        # 同样必须：一帧 = data 行 + 空行；生产中在反向代理层关掉 buffering
+        yield f"id: {i}\nevent: token\ndata: {json.dumps({'delta': tok}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.2)
+    yield "event: done\ndata: [DONE]\n\n"
+
+@app.get("/stream")
+async def stream():
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+```
+
+#### ④ EventSource 适用时的简洁封装（GET 通知流）
+
+已有可运行示例 [examples/06-03-sse.ts](./examples/06-03-sse.ts)：`new EventSource('/api/notifications')` 自动重连、`addEventListener('order-paid')` 收自定义事件、组件卸载 `source.close()`。
+
+### 21.1.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：什么是 SSE？它和普通 HTTP 响应有什么区别？**
+
+- 回答框架：定义（一个 HTTP 长响应）→ 三个特征（`text/event-stream`、空行分帧、服务端持续写）→ 与普通响应对比（普通响应收完即关，SSE 保持连接持续分发）。
+- 评分要点：说出 MIME 类型、空行分帧、单向推送。
+- 常见误区：把 SSE 说成 WebSocket 一样的新协议；漏说空行是「事件结束符」。
+- 加分项：提到 `id/retry/event` 字段语义、`Last-Event-ID` 续传。
+
+**Q2：SSE 和 WebSocket 有什么区别？什么场景选哪个？**
+
+- 参考 21.1.2 对比表。核心采分点：单向 vs 双向、HTTP 穿透 vs 独立协议、自带重连 vs 自己做、文本 vs 二进制。
+- 常见误区：说「SSE 比 WebSocket 性能好」——两者量级接近，差异在模型而非性能；应说**SSE 更简单、穿透性好，WS 能力更全**。
+- 加分项：指出 HTTP/1.1 同域 6 连接限制、HTTP/2 下消失；提到 LLM API 几乎都选 SSE 的工程理由。
+
+**Q3：EventSource 有哪些 API 和状态？**
+
+- 要点：构造、`onmessage/addEventListener`、`readyState` 三态、`close()`、`withCredentials`、自动重连。
+
+#### L2 原理理解题
+
+**Q4：为什么 LLM 流式接口不用 EventSource 而用 fetch 读流？**
+
+- 答题要点：EventSource 只支持 GET、不能自定义请求头（Authorization）、不能随请求发送大 body（messages 可能几十 KB）；`fetch + ReadableStream` 既走标准 SSE 格式，又保留 POST/头部/AbortController 能力。
+- 加分项：补充「也可以让 EventSource 走 URL 传短期票据」，但票据可能进日志/历史，有泄露面，故不主流。
+
+**Q5：一段 SSE 数据通过 TCP 到达时被切成了三个 chunk，直接按 chunk 渲染会怎样？怎么解决？**
+
+- 现象：半个 JSON（`{"delt` + `a":"好"}`）JSON.parse 抛错；半个汉字 UTF-8 乱码；逻辑帧重复/丢失。
+- 方案：**两级缓冲**——`TextDecoder.decode(value, { stream: true })` 解字节（保多字节残字节），字符串缓冲按 `\n\n` 切逻辑帧，最后一段残帧留在 buffer 等下次。对照 [examples/14-01-sse-parser.ts](./examples/14-01-sse-parser.ts)。
+- 评分要点：区分「网络 chunk 边界」与「协议帧边界」是两个层次。
+- 加分项：兼容 `\r\n\r\n`、宽容服务端漏发尾空行。
+
+**Q6：SSE 连接为什么会被意外断开？如何保活与续传？**
+
+- 断开原因：NAT/网关空闲超时、Nginx/CDN 缓冲与 `proxy_read_timeout`、云函数执行时长上限、服务端发布、网络抖动。
+- 保活：15~30s 注释行心跳、服务端定期 flush。
+- 续传：`id:` + 浏览器自动带 `Last-Event-ID`，服务端从该 ID 后补发；fetch 手写版需自己在重连请求头里带。
+- 加分项：提「重连后去重」——服务端可能已发但客户端未确认的帧，需幂等消费。
+
+**Q7：SSE 怎么做错误处理？为什么要区分「主动中止」和「异常断开」？**
+
+- 要点：建立前非 200 读错误体分类提示；建立后断流按「重试可恢复」处理，配合消息 ID 续传；AbortError 是用户意图，不应弹错误提示也不应自动重连。
+
+#### L3 综合应用题
+
+**Q8：设计一个流式 AI 问答接口的完整前端链路（请求 → 展示 → 异常）。**
+
+回答框架（按时间线讲）：
+
+1. 请求：POST 到自有 BFF（Key 不落前端），带会话/消息幂等 ID、AbortSignal；
+2. 接收：SSE 解析器两级缓冲；自定义事件 `token/tool_call/usage/done/error`；
+3. 渲染：token 入待渲染队列，rAF 合批 setState（详见 21.2），Markdown 增量渲染（21.5），贴底才自动滚动；
+4. 控制：停止按钮 abort；错误自动重试一次并从消息 ID 续传，失败则气泡内就地重试；
+5. 可观测：记录 TTFT、tokens/s、中断率、错误率。
+
+- 加分项：提服务端在客户端断连时取消模型调用省钱；提 token 用量事件做上下文预算管理（对照 [examples/14-05-context-budget.ts](./examples/14-05-context-budget.ts)）。
+
+**Q9：线上反馈「AI 回复总是一卡一卡地整段蹦出来」，如何排查？**
+
+- 排查路径（按链路分层）：`curl -N` 直连服务端口看是否真流式 → 查应用框架是否启用响应压缩/缓冲（Express compression 中间件、Koa compress）→ Nginx `proxy_buffering`/gzip → CDN 缓冲与超时 → 客户端是否在按 chunk 而不是按帧消费、是否被渲染节流拖慢。
+- 常见误区：只盯前端；90% 的「假流式」是中间代理缓冲造成。
+- 加分项：用 TTFT/首帧时间监控定位，而不是靠用户录屏。
+
+---
+
+## 21.2 打字机效果：从「能用」到「流畅」
+
+### 21.2.1 概念解析
+
+打字机效果的本质是**把「文本在时刻 T 全部可见」变成「文本随时间 f(T) 逐步可见」**。在 AI 场景里，文本的真实来源是网络流，打字机要解决两个独立问题：
+
+1. **消费节奏**：网络 token 到达速率不均匀（burst + idle），渲染速率要平滑；
+2. **呈现质量**：不能卡主线程、不能让未完成的 Markdown 反复闪烁、不能抢走用户的滚动位置。
+
+三个核心概念：
+
+- **字符粒度**：码元（UTF-16 code unit，`str[i]`）会切断 emoji（`👨‍👩‍👧` 是多码元序列）；应按 **Unicode 码点**（`for...of`）或**字形簇**（`Intl.Segmenter`，组合 emoji/带音标的字母）切分；
+- **速度控制算法**：
+  - 固定间隔：每 N ms 出一字，最简单，长文本会明显落后于流；
+  - 每帧预算：rAF 回调里按「队列长度/剩余预算」决定本帧吐几个字，队列长就快、短就慢，既跟得上又有打字感；
+  - 常量时间消费：保证「无论多少积压，K 毫秒内消费完」——生产推荐，避免流结束后还在慢慢打字；
+- **文本分块策略**：按「块（token 原文）」追加比逐字拼字符串更省；代码块/表格等结构性内容适合「整块出现」，普通段落才逐字，观感更自然。
+
+### 21.2.2 技术对比
+
+| 方案 | 实现 | 优点 | 缺点 | 适用 |
+| ---- | ---- | ---- | ---- | ---- |
+| CSS `steps()` 动画 | `width` 0→100% + `steps(N)` + `overflow:hidden` + `::after` 光标 | 零 JS、不占主线程 | 等宽前提，**中文/变宽字符崩版**；无法随流动态改文本；难暂停续播 | 固定文案 banner |
+| `setInterval` 逐字 | 定时器切字符串 | 直观 | 后台标签页节流漂移、与屏幕刷新不同步、逐次 DOM 写入易抖 | 演示 Demo |
+| **rAF 队列消费（推荐）** | token 入队，rAF 合批出队渲染 | 与刷新率同步、天然合批、后台自动暂停、可中断 | 代码稍多 | **AI 流式 UI** |
+| 第三方库（TypeIt / typed.js） | 配置式 | 特效全（删除重打、换行、光标） | 为「播固定文案」设计，接流需适配；体积 | 营销页 |
+| 直接全量追加 | 收到就 append | 最快无卡顿 | 没有打字感，长文本瞬间撑高 | 语音转文字等实时字幕 |
+
+### 21.2.3 性能优化策略
+
+1. **合并 DOM 写入**：一帧内到达的 20 个 token 只做一次文本提交（React 一次 setState、Vue 一次响应式赋值），杜绝每 token 一次重渲染；
+2. **避免重排重绘**：
+   - 纯文本节点增长只触发布局，避免同时改 width/height/margin/padding；
+   - 光标用 `::after` + `opacity` 闪烁（合成层属性），不要用 display 切换；
+   - 长列表容器加 `content-visibility: auto` 跳过屏外渲染（见 <a href="./examples/12-09-content-visibility.html" target="_blank" rel="noopener">examples/12-09-content-visibility.html</a>）；
+3. **rAF 而非 setInterval**：与浏览器刷新对齐，标签页切后台时 rAF 自动暂停，回来不会堆积爆发；
+4. **降低 Markdown 解析频率**：流式期间解析结果变化最剧烈，通常 50~100ms 或每 2~4 帧解析一次即可（详见 21.5）；
+5. **内存管理**：token 队列在停止/切换会话时清空；组件卸载取消 rAF；避免每帧闭包持有大字符串。
+
+### 21.2.4 代码实现
+
+```tsx
+// 文件: examples/ai-interview/use-typewriter.ts
+// ============ 生产级打字机 Hook：rAF 合批 + 队列自适应速度 + 暂停/继续/停止 ============
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+export interface TypewriterState {
+    text: string;
+    status: 'idle' | 'playing' | 'paused' | 'done';
+}
+
+// 可调参数：积压越多消费越快；最长在 DRAIN_MS 内追平网络流
+const MAX_FRAME_CHARS = 6;   // 单帧最多吐字，限制视觉跳动
+const DRAIN_MS = 240;        // 期望追平积压的时间窗口
+
+export function useTypewriter() {
+    const [text, setText] = useState('');
+    const [status, setStatus] = useState<TypewriterState['status']>('idle');
+    const queueRef = useRef<string[]>([]);   // 待消费的块（保留 token 原文，减少切分损耗）
+    const shownRef = useRef(0);               // 队列拼接串中已展示的字符数
+    const fullRef = useRef('');               // 已提交给队列的完整文本
+    const rafRef = useRef(0);
+    const lastTickRef = useRef(0);
+    const pausedRef = useRef(false);
+
+    const tick = useCallback((now: number) => {
+        rafRef.current = requestAnimationFrame(tick);
+        if (pausedRef.current) { lastTickRef.current = now; return; }
+        const pending = fullRef.current.length - shownRef.current;
+        if (pending === 0) return; // 没有积压：rAF 空转极廉价；也可选择取消、来时再调度
+
+        const elapsed = now - lastTickRef.current || 16;
+        lastTickRef.current = now;
+        // 自适应预算：按追平窗口计算目标速度，并用单帧上限夹住视觉跳动
+        const byDrain = Math.ceil(pending / Math.max(1, DRAIN_MS / elapsed));
+        const step = Math.min(pending, Math.max(1, byDrain), MAX_FRAME_CHARS);
+        shownRef.current += step;
+        // 一次 setState 提交本帧文本：同帧多个网络块天然合并
+        setText(fullRef.current.slice(0, shownRef.current));
+    }, []);
+
+    // 网络块入队（由 SSE onEvent 调用）
+    const push = useCallback((chunk: string) => {
+        if (!chunk) return;
+        fullRef.current += chunk;
+        setStatus((s) => (s === 'done' ? s : 'playing'));
+    }, []);
+
+    const pause = useCallback(() => { pausedRef.current = true; setStatus('paused'); }, []);
+    const resume = useCallback(() => { pausedRef.current = false; setStatus('playing'); }, []);
+    const stop = useCallback(() => {                 // 停止：立即呈现已到达的全部文本并清空积压
+        cancelAnimationFrame(rafRef.current);
+        shownRef.current = fullRef.current.length;
+        setText(fullRef.current);
+        setStatus('done');
+    }, []);
+    const reset = useCallback(() => {
+        cancelAnimationFrame(rafRef.current);
+        queueRef.current = []; fullRef.current = ''; shownRef.current = 0;
+        pausedRef.current = false;
+        setText(''); setStatus('idle');
+    }, []);
+
+    useEffect(() => {
+        rafRef.current = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(rafRef.current);
+    }, [tick]);
+
+    return { text, status, push, pause, resume, stop, reset };
+}
+```
+
+#### 高级特性
+
+- **闪烁光标**（纯 CSS，不动 JS 时序）：
+
+```css
+.ai-caret::after {
+    content: '▍';
+    margin-left: 1px;
+    animation: caret-blink 1s steps(1) infinite;
+}
+@keyframes caret-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ai-caret::after { animation: none; } }
+```
+
+- **错误修正模拟**（营销场景：打错 → 停顿 → 删除 → 重打）：给打字机一个「动作队列」而不是纯文本队列，动作类型 `type / delete(n) / wait(ms)`，rAF 循环按动作消费；
+- **速度动态变化**：标点后停 1 帧、段落开始慢 2 帧，模拟人类节奏；AI 场景则相反——积压多就加速（上面的 `byDrain`）；
+- **暂停/继续**：暂停只停「消费」，网络继续入队；恢复后积压加速消化。注意暂停态要在 UI 上明确提示，否则用户以为卡死；
+- **字形安全**：需要精确按 emoji 吐字时用 `Intl.Segmenter`（中文 Safari 14.1+/现代浏览器）：
+
+```typescript
+const segmenter = new Intl.Segmenter('zh', { granularity: 'grapheme' });
+const graphemes = [...segmenter.segment('你好👨‍👩‍👧')].map((s) => s.segment);
+```
+
+### 21.2.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：打字机效果怎么实现？** 先分层：数据消费（定时器/rAF/队列）→ 文本提交（一次写入）→ 视觉（光标 CSS）。只答 `setInterval` 拼字符串是及格线，能主动说「生产用 rAF 合批」是高分线。
+
+**Q2：setInterval 和 requestAnimationFrame 做打字机有什么差别？** 要点：rAF 与刷新率对齐不掉帧、后台标签页自动暂停不堆积、无需手动对齐 vs setInterval 在后台被节流到 ≥1s、间隔漂移、可能在一帧内触发多次造成多次布局。
+
+**Q3：打字机光标怎么做？** `::after` + border 或字符 + opacity 动画；避免用 display:none 切换（触发布局）；尊重 `prefers-reduced-motion`。
+
+#### L2 原理理解题
+
+**Q4：流式输出时每个 token 都 setState 为什么卡？怎么优化？**
+
+- 卡顿机制：token 到达频率可达 50~150 次/秒，每次 setState 都走完整渲染管线；若气泡里再做 Markdown 解析（正则/AST），CPU 直接打满，主线程长任务导致掉帧、输入框卡顿。
+- 优化：**缓冲队列 + rAF 每帧一次提交**；Markdown 解析再降频到 50~100ms；长消息用 `content-visibility`/虚拟列表；纯文本部分先上屏、富文本延迟一帧增强。
+- 评分关键词：合批（batching）、帧预算、长任务。
+
+**Q5：为什么按 `str[i]` 切字会把 emoji 切碎？如何正确切分？** JS 字符串是 UTF-16，emoji 占代理对（2 码元），ZWJ 组合 emoji 长达 7+ 码元。`for...of` 按码点可解决代理对；组合字形用 `Intl.Segmenter`。
+
+**Q6：打字机效果可能引发哪些重排？如何避免？** 文本增长本身引发布局（不可避免但便宜）；贵的是同步 `scrollHeight` 测量后立即写样式造成的**强制同步布局**，以及逐字改宽导致的容器抖动。解决：先三读后写、滚动用 `transform` 或在下一帧统一处理、容器定宽定高、光标只动 opacity。
+
+#### L3 综合应用题
+
+**Q7：设计一个「打字速度自适应」的流式气泡：网络慢时逐字出现，网络瞬间吐来一大段时不傻等。**
+
+- 方案：维护队列长度与帧预算，速度 = clamp(积压/追平时长, 1, 单帧上限)；流结束信号到达后允许加速但仍保留轻微打字感，或提供「立即显示全部」按钮（消费体验 > 形式）。
+- 加分项：讨论「是否还需要打字机」——当 tokens/s 远高于阅读速度时，打字感反而是噪音，很多产品（如语音转写）选择直接追加。**形式服务于感知，不是必须**。
+
+**Q8：用户上滑看历史时新 token 不断到达，如何不破坏阅读又不丢信息？**
+
+- 贴底检测：`scrollHeight - scrollTop - clientHeight < 阈值（如 80px）` 才自动跟随；非贴底时显示「↓ 新内容」按钮，未读数计数；恢复贴底时平滑滚到底。代码气泡新消息保持在内存照常更新，仅不滚动。
+- 常见误区：无脑 `scrollIntoView()` / `scrollTop = scrollHeight` 每帧执行。
+
+---
+
+## 21.3 AI 客服系统：端到端系统设计
+
+### 21.3.1 概念解析：系统架构
+
+#### 拓扑选择（生产红线：API Key 永远不落前端）
+
+```mermaid
+flowchart LR
+    U[用户浏览器<br/>SPA/小程序] -->|HTTPS + SSE| BFF[自有 BFF/网关<br/>鉴权·限流·计费·审计]
+    BFF -->|SSE| LLM[(大模型 API)]
+    BFF --> DB[(会话/消息库)]
+    BFF --> KM[知识库 RAG<br/>向量库+检索]
+    BFF --> TOOLS[业务工具<br/>订单/物流/工单]
+```
+
+| 层 | 职责 |
+| ---- | ---- |
+| 客户端 | 会话状态机、流式渲染、断线重试、历史缓存、无障碍 |
+| BFF | 会话鉴权、模型路由、Key 管理、限流熔断、token 计费、审计日志、prompt 编排、RAG 检索、工具调用代理 |
+| 模型层 | 多模型路由（便宜模型兜底/复杂问题升级）、流式输出、function calling |
+| 数据层 | 会话元数据、消息持久化、知识库向量索引、反馈与质检 |
+
+为什么必须 BFF：Key 泄露 = 资产被盗刷；没有 BFF 就无法做限流、按租户计费、内容合规审计、模型故障切换、Prompt 版本管理。
+
+#### 前端核心模块与数据流
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant UI as 聊天 UI（状态机）
+    participant BFF
+    participant LLM as 模型/工具
+    U->>UI: 输入问题（乐观插入 user 气泡）
+    UI->>BFF: POST /api/chat/stream（sessionId, messageId, messages）
+    BFF-->>UI: event: queue（已受理）
+    BFF->>LLM: 编排后请求（RAG 上下文 + 工具）
+    LLM-->>BFF: tool_call（查订单）
+    BFF-->>UI: event: tool_call（渲染工具卡）
+    BFF->>LLM: 工具结果回灌
+    LLM-->>BFF: token 流
+    BFF-->>UI: event: token × N
+    BFF-->>UI: event: usage + done
+    UI->>UI: rAF 合批渲染 / 落 IndexedDB
+```
+
+### 21.3.2 与 AI 模型 / API 的集成
+
+**接口设计规范**：
+
+| 接口 | 方法 | 说明 |
+| ---- | ---- | ---- |
+| `/api/sessions` | POST/GET | 创建/列举会话 |
+| `/api/sessions/:id/messages` | GET | 历史分页（游标分页，别用深 offset） |
+| `/api/chat/stream` | POST + SSE | 发消息并流式返回 |
+| `/api/chat/regenerate` | POST | 重新生成（复用原 user 消息 ID） |
+| `/api/feedback` | POST | 点赞/点踩，用于质检与微调 |
+
+- **认证授权**：用户态用 HttpOnly Secure Cookie 或短期 Bearer；BFF 与模型间用服务端 Key + KMS；
+- **API 版本控制**：URL 版本（`/v1/`）+ 响应里带版本字段；Prompt 与工具 schema 独立版本化，便于灰度与回滚；
+- **幂等**：每条消息由客户端生成 `messageId`（UUID），重试/重连不重复扣量、不产生重复答案；
+- **追踪**：BFF 注入 `x-request-id`，SSE 的 error 事件里带回，问题可串联日志、模型供应商工单；
+- **事件协议建议**：`queue / token / reasoning / tool_call / tool_result / usage / error / done`，均放在 SSE `data:` JSON 里，前端按 `type` 分发（对照 [examples/14-03-tool-ui.tsx](./examples/14-03-tool-ui.tsx)）。
+
+### 21.3.3 状态管理与对话历史
+
+**消息状态机**（比布尔标志位可靠得多，对照 [examples/11-06-state-machine.ts](./examples/11-06-state-machine.ts)）：
+
+```typescript
+type MsgStatus = 'sending' | 'streaming' | 'tool_wait' | 'done' | 'error' | 'aborted';
+interface ChatMessage {
+    id: string;                 // 客户端幂等 ID
+    role: 'user' | 'assistant' | 'system' | 'tool';
+    content: string;
+    status: MsgStatus;
+    toolCalls?: ToolCallVM[];   // 工具调用卡视图模型
+    usage?: { inputTokens: number; outputTokens: number };
+    parentId?: string;          // 支持「重新生成」分支
+    createdAt: number;
+}
+```
+
+| 存储方案 | 适合 | 注意 |
+| ---- | ---- | ---- |
+| 内存（zustand/pinia） | 运行态 | 刷新丢失；单一 store + 消息实体化（`Record<id, Msg>`） |
+| localStorage | 草稿、偏好 | 5MB 上限、同步阻塞，只存草稿和最近会话索引 |
+| **IndexedDB** | 完整历史/富文本 | 异步、容量大；封装简单仓储层，分页读取 |
+| 服务端库 | 跨设备、合规审计 | 唯一权威源；本地只是缓存，冲突以服务端为准 |
+
+历史维护要点：本地按会话分库/分表存；**上下文预算 ≠ 全量历史**——发给模型的 messages 要按 token 预算裁剪（对照 [examples/14-05-context-budget.ts](./examples/14-05-context-budget.ts)：保 system + 最近 N 条，更早的折叠为摘要）；多 Tab 打开同一会话用 BroadcastChannel 做新增消息同步（对照 <a href="./examples/18-01-cross-tab/index.html" target="_blank" rel="noopener">examples/18-01-cross-tab/</a>）。
+
+### 21.3.4 用户体验优化
+
+- **发送即反馈**：用户消息乐观上屏（`sending` 态），失败就地变红可重试，不弹全局 toast；
+- **加载的层次**：连接建立前用骨架气泡 + 「正在思考」；一旦收到首 token 立刻切换为打字机——**TTFT 是客服系统的核心体感指标**；
+- **控制感**：停止生成、重新生成、复制、点赞点踩、编辑问题重发；
+- **错误提示三分类**：网络断（可重连续传）、模型限流（排队中/稍后再试）、内容被安全策略拦截（明确告知而非假装故障）；
+- **无障碍（容易被忽略的面试加分项）**：
+  - 消息列表用 `aria-live="polite"` + `aria-atomic="false"`，让读屏器播报新增而非重播全文；
+  - 流式中按钮 `aria-busy="true"`；停止按钮焦点可达；
+  - 光标/动画尊重 `prefers-reduced-motion`；颜色不作为唯一信息载体；
+- **移动端**：软键盘弹起时输入框贴 keyboard、避免 100vh 抖动（用 `dvh`）。
+
+### 21.3.5 安全性与隐私
+
+| 风险 | 措施 |
+| ---- | ---- |
+| Key 盗用 | 仅服务端持有；前端永远直连自有 BFF；Key 轮换 + 最小权限 + 用量告警 |
+| Prompt 注入（用户/知识库内容诱导模型泄密、调工具） | 工具最小权限、危险操作二次确认、工具调用走服务端策略校验（不能让模型直接下单/退款）、输入输出双向过滤 |
+| XSS | 模型输出是不可信 HTML：Markdown 渲染必须 sanitize（见 21.5.6），代码块转义 |
+| 越权（IDOR） | 每次取会话/调工具都校验 `sessionId` 归属，不能只信前端传的 userId |
+| 个人信息 | PII 入模前脱敏（手机号/身份证/卡号正则与模型双通道）；提供删除入口（个保法「删除权」）；最小留存周期；敏感行业本地化部署 |
+| 传输与租户隔离 | 全链路 HTTPS/WSS；多租户日志与向量库物理或行级隔离；审计日志谁在何时让模型访问了什么数据 |
+| 成本攻击 | 每用户/每租户限流、最大上下文与输出长度、异常用量熔断、验证码兜底 |
+
+### 21.3.6 面试指导
+
+#### L1 基础概念题
+
+**Q1：AI 客服前端和普通聊天前端最大的区别是什么？** 消息不是「发完即得」而是「持续生长」：状态多了 streaming/aborted，渲染从一次性变成流式增量，多了停止/续传/工具调用卡/打字机/Markdown 增量等命题；错误处理也从「请求失败」细分为「失败在建立前/流中/工具阶段」。
+
+**Q2：为什么不能浏览器直连大模型 API？** Key 泄露被盗刷、无限流/审计/计费、无法注入业务上下文与 RAG、CORS 与供应商条款、内容合规责任。能答全 4 条以上为佳。
+
+#### L2 原理理解题
+
+**Q3：一条用户提问从发送到回答完成，链路上发生了什么？** 用 21.3.1 时序图作答，采分点：乐观插入 → BFF 鉴权/编排 → RAG/工具 → SSE 事件流 → 分帧解析 → rAF 渲染 → 持久化 → usage 结算。**关键是讲清 tool_call 的两段式（模型请求工具 → BFF 执行 → 结果回灌 → 续写）**。
+
+**Q4：刷新页面后如何恢复一个进行中的流式回答？** 消息与会话有服务端 ID；重连后 GET 流状态接口或复用 SSE（服务端把尚未消费的输出缓冲按 messageId 续推）；客户端用 messageId 去重；已完成部分从历史接口拉取。要点：**流是可以被「重新订阅」的资源**，不是一次性 Promise。
+
+**Q5：客服历史会话越来越多，前端存储如何设计？** 分层：服务端权威 + IndexedDB 缓存最近 N 会话 + localStorage 只存草稿/索引；列表游标分页；按会话懒加载消息；向量检索/全文搜索放服务端；退出登录清理本地库。
+
+#### L3 综合应用题（系统设计）
+
+**Q6：设计一个日均百万会话的电商 AI 客服（能查订单、能转人工）。**
+
+建议答题骨架（需求澄清先行，再架构、再细节、再权衡）：
+
+1. **澄清**：峰值 QPS？是否多语言？回答准确性要求（退换货等不能胡说）？SLA 与预算？
+2. **容量估算**：百万会话/日，按峰均比 5~10 估并发流数与网关连接成本；单会话 token 量 × 单价估成本；
+3. **架构**：21.3.1 拓扑 + RAG 知识库（商品/政策，带版本与生效时间）+ 工具网关（订单/物流只读优先，写操作强制确认 + 走既有权限）+ **转人工队列**（置信度低、用户连续负反馈、关键词命中即升级，人工端复用同一消息系统）；
+4. **质量**：回答带引用来源；关键结论（退款金额等）必须来自工具返回而非模型生成；离线质检 + 反馈闭环；
+5. **稳定性**：多供应商故障切换、流超时与重试幂等、降级到 FAQ 检索；
+6. **成本**：模型分级路由（意图分类用小模型、复杂才上旗舰模型）、上下文裁剪、缓存高频问题答案（注意个性化失效）；
+7. **安全合规**：21.3.5 全表。
+
+- 加分项：主动提出「如何评估效果」——解决率、转人工率、首响时延、用户满意度、幻觉抽检率；以及灰度与 Prompt 版本管理。
+- 常见误区：一上来讲模型选型/微调；面试官想看的是**工程系统与产品权衡**，模型只是一个带 SLA 和单价的下游。
+
+**Q7：如何向非技术的产品经理解释「为什么 AI 客服会答错」并给出缓解方案？** 评估沟通能力。要点：语言模型是概率生成不是数据库（会一本正经地编）→ 缓解：让模型「查了再说」（RAG + 工具）、关键信息必须引用来源、无依据时走「转人工/不知道」话术、上线后用反馈与抽检持续迭代——把幻觉率当 SLO 治理而非追求零幻觉。
+
+---
+
+## 21.4 MCP：模型上下文协议
+
+### 21.4.1 概念解析
+
+> 名称澄清：**MCP = Model Context Protocol（模型上下文协议）**，Anthropic 于 2024 年 11 月开源的开放标准（2025 年起被主流模型客户端与 IDE 广泛采纳）。它不是「Model Control Protocol」。一句话定位：**MCP 是给 AI 应用接外部能力的「USB-C」**——统一了模型/AI 应用如何发现并调用外部工具、读取资源、获取提示词模板。
+
+#### 三种角色
+
+| 角色 | 说明 | 举例 |
+| ---- | ---- | ---- |
+| **Host（宿主）** | 用户正在使用的 AI 应用，负责权限与 UI | Claude Desktop、IDE、你做的客服工作台 |
+| **Client（客户端）** | Host 内部为每个 Server 维持的 **1:1 协议连接** | 协议 SDK 的 Client 实例 |
+| **Server（服务端）** | 暴露 tools / resources / prompts 的进程或服务 | GitHub MCP Server、公司内部订单 Server |
+
+一个 Host 可同时连多个 Server；一个 Server 也可被多个 Host 连接。Client 与 Server 一一对应。
+
+#### 通信基础：JSON-RPC 2.0
+
+所有消息都是 JSON-RPC 2.0：请求有 `id`（要响应）、通知没有 `id`（不响应）、错误用 `error.code/message`。
+
+```json
+// 请求
+{ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+  "params": { "name": "query_order", "arguments": { "orderId": "A1024" } } }
+// 成功响应
+{ "jsonrpc": "2.0", "id": 1, "result": { "content": [ { "type": "text", "text": "已揽件" } ], "isError": false } }
+// 错误响应
+{ "jsonrpc": "2.0", "id": 1, "error": { "code": -32602, "message": "缺少 orderId" } }
+```
+
+#### 两种传输（Transport）
+
+1. **stdio**：本地 Server，宿主启动子进程，stdin/stdout 收发 JSON-RPC（每行一条消息），stderr 打日志。适合本地工具（文件系统、数据库）；
+2. **Streamable HTTP**（2025-03 规范，取代旧的 HTTP+SSE 双端点方案）：单个 HTTP 端点，客户端 POST JSON-RPC；服务端可返回普通 JSON，也可升级为 `text/event-stream` 流式回多个响应/进度；支持服务端通过 SSE 流下发请求（如工具主动请求权限）。适合远程、多租户、云端 Server。
+
+#### 生命周期与核心方法
+
+```mermaid
+sequenceDiagram
+    participant H as Host/Client
+    participant S as MCP Server
+    H->>S: initialize（协议版本 + client 能力）
+    S-->>H: 响应（server 能力：tools/resources/prompts + 版本）
+    H->>S: notifications/initialized（通知，无响应）
+    H->>S: tools/list
+    S-->>H: 工具清单（每个带 JSON Schema 输入描述）
+    H->>S: tools/call(name, arguments)
+    S-->>H: result.content[]（或 SSE 流式进度 + 最终结果）
+    Note over H,S: 运行期间：ping 心跳、权限变更、列表变更通知
+```
+
+- **Tools（工具）**：模型可调用的函数，入参用 **JSON Schema** 描述，Host 负责向用户申请权限；
+- **Resources（资源）**：可被读取的上下文数据（文件、记录），分 `resources/list` 与 `resources/read`；
+- **Prompts（提示模板）**：Server 提供的参数化提示词，供用户显式选用；
+- **Roots / Sampling**：反向能力——Server 可请求 Host 提供文件根目录、甚至请 Host 代调模型补全信息；
+- **能力协商（capabilities）**：initialize 时双方声明各自支持什么，保证不同 Server 可降级共存。
+
+### 21.4.2 MCP 与相邻概念对比（高频陷阱题）
+
+| | MCP | Function Calling（工具调用） | OpenAPI/REST | 插件体系 |
+| ---- | ---- | ---- | ---- | ---- |
+| 本质 | **应用 ↔ 工具服务器的连接协议** | **模型输出结构化调用意图**（一次推理能力） | HTTP API 描述规范 | 各平台私有扩展机制 |
+| 解决的问题 | 怎么连、怎么发现、怎么协商、怎么流式 | 模型决定「调哪个、传什么参」 | 服务怎么定义 | 平台生态分发 |
+| 关系 | **互补**：MCP Server 收到调用后，是否触发模型 function calling 由 Host 编排 | 可作为 MCP 的上层：模型 function-call → Host 经 MCP 执行 | MCP Server 内部常用 REST 对接真实业务 | MCP 是跨平台开放标准，插件锁定平台 |
+
+记忆法：**Function Calling 是「模型的嘴」，MCP 是「应用的手」**——模型说要调工具，MCP 规定应用怎么连到工具并把结果拿回来。
+
+前端应用中的模型交互模式：
+
+- **请求-响应模式**：`tools/call` → 单个 JSON 结果。适合查订单、查天气；
+- **流式交互模式**：Streamable HTTP 上 SSE 持续下发进度（「检索了 12 篇文档…」）、结构化部分结果，最后一条才是最终 result。适合长检索、多步 Agent；前端用 21.1 的 SSE 解析器消费，按进度渲染步骤卡（与 [examples/14-03-tool-ui.tsx](./examples/14-03-tool-ui.tsx) 的工具卡同一套 UI 模式）。
+
+### 21.4.3 数据格式与校验
+
+工具的输入契约是 JSON Schema，宿主在调用前做**双重校验**：模型生成的参数先过 schema（防模型幻觉出非法参数），用户确认后再发给 Server。
+
+```typescript
+// 文件: examples/ai-interview/mcp-tool-schema.ts
+// MCP tools/list 返回的工具描述（节选）+ 前端校验
+export const queryOrderTool = {
+    name: 'query_order',
+    description: '按订单号查询物流状态。仅可查询当前登录用户名下订单。',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            orderId: { type: 'string', pattern: '^[A-Z]\\d{8,16}$' },
+        },
+        required: ['orderId'],
+        additionalProperties: false,
+    },
+} as const;
+
+// 生产用 ajv 编译 schema 做运行时校验；开发期可用 zod 推导类型
+import Ajv from 'ajv';
+const ajv = new Ajv({ strict: false });
+const validate = ajv.compile(queryOrderTool.inputSchema);
+
+export function safeCall(args: unknown) {
+    if (!validate(args)) {
+        // 非法参数不交后端：把错误回喂给模型让它自我修正，或直接提示
+        throw new Error(`工具参数非法: ${ajv.errorsText(validate.errors)}`);
+    }
+    return args as { orderId: string };
+}
+```
+
+高效处理建议：工具清单一次 `tools/list` 后本地缓存，按 `notifications/tools/list_changed` 增量更新；大结果走分页/资源 URI 而非塞进一次响应；前端把 content 数组（text/image/embedded resource）按类型渲染。
+
+### 21.4.4 错误处理、重试与熔断
+
+JSON-RPC 标准错误码：`-32700` 解析错误、`-32600` 非法请求、`-32601` 方法不存在、`-32602` 参数非法、`-32603` 内部错误；MCP 在此之上扩展了业务错误码区间。注意还有「协议成功但业务失败」：HTTP/RPC 200 且 `result.isError = true`——**两层错误都要检查**。
+
+```typescript
+// 文件: examples/ai-interview/mcp-retry.ts
+// ============ 指数退避 + 全抖动 + 熔断器（MCP 远程 Server 调用） ============
+interface RetryPolicy {
+    maxAttempts: number;
+    baseMs: number;
+    maxMs: number;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const fullJitterDelay = (attempt: number, p: RetryPolicy) =>
+    Math.random() * Math.min(p.maxMs, p.baseMs * 2 ** attempt);
+
+// 仅「可重试错误」才重试：网络故障、5xx、-32603；
+// 参数非法(-32602)、方法不存在(-32601) 重试无意义，应立即失败
+const RETRYABLE = new Set([-32603, -32700]);
+
+export async function callMCPWithResilience<T>(
+    fn: () => Promise<T>,
+    policy: RetryPolicy = { maxAttempts: 4, baseMs: 200, maxMs: 5000 },
+): Promise<T> {
+    let attempt = 0;
+    // 简单熔断：连续失败到阈值后短路一段时间
+    const breaker = callMCPWithResilience as typeof callMCPWithResilience & {
+        failures?: number; openedUntil?: number;
+    };
+    breaker.failures ??= 0;
+    if (breaker.openedUntil && Date.now() < breaker.openedUntil) {
+        throw new Error('MCP Server 熔断中，稍后再试');
+    }
+    for (;;) {
+        try {
+            const out = await fn();
+            breaker.failures = 0;
+            return out;
+        } catch (err) {
+            const code = (err as { code?: number }).code;
+            if (++attempt >= policy.maxAttempts || (code !== undefined && !RETRYABLE.has(code))) throw err;
+            if (attempt === policy.maxAttempts) {
+                breaker.failures += 1;
+                if (breaker.failures >= 5) breaker.openedUntil = Date.now() + 30_000;
+                throw err;
+            }
+            await sleep(fullJitterDelay(attempt, policy)); // 全抖动防雪崩
+        }
+    }
+}
+```
+
+其他要点：超时按方法分级（list 短、call 长，流式用心跳判活）；写操作要求工具实现幂等键；权限被拒走明确 UI 而非静默重试。
+
+### 21.4.5 面试指导
+
+#### L1 基础概念题
+
+**Q1：MCP 是什么？解决什么问题？** 开放标准协议；三角色 host/client/server；解决「N 个 AI 应用 × M 个工具」的 N×M 适配爆炸，变成 N+M；类比 USB-C。必须说全 JSON-RPC 2.0、tools/resources/prompts 三类能力。
+
+**Q2：MCP 有哪两种传输方式？** stdio（本地子进程、每行一条 JSON-RPC）与 Streamable HTTP（远程、单端点、可 SSE 流式）；能说出旧版 HTTP+SSE 双端点已废弃更佳。
+
+#### L2 原理理解题
+
+**Q3：MCP 和 Function Calling 是一回事吗？** 不是，互补（见 21.4.2 表）。**这是本主题最高频的区分题**：function calling 是模型推理产物（结构化意图），MCP 是应用与工具服务器间的连接/发现/协商协议；一条链路里模型先 function-call，Host 再通过 MCP 执行。
+
+**Q4：MCP 连接建立的握手过程？** initialize 交换协议版本与 capabilities → 客户端发 `notifications/initialized` → 才能调 list/call；协商失败如何降级（只使用双方都声明的能力）。
+
+**Q5：调用 MCP 工具可能拿到哪几种「失败」？** 三层：传输失败（网络/超时）、JSON-RPC 错误（标准负数码，区分可重试与否）、`isError:true` 业务失败；再加一个「Host 权限被用户拒绝」。每类处理策略不同。
+
+#### L3 综合应用题
+
+**Q6：在你做的 AI 客服里接入「查订单 + 查物流 + 创建工单」三个能力，MCP 方案怎么落地？**
+
+- 架构：BFF 作为 MCP Client 连公司内部「售后 MCP Server」（远程 Streamable HTTP，走服务间鉴权与用户身份透传）；Server 内再调订单/物流/工单 REST；工具入参 JSON Schema 严格约束 + `additionalProperties:false`；
+- 安全：**写操作（创建工单）必须用户在 UI 二次确认**，Host 不把模型当授权主体；行级权限在 Server 侧按用户身份校验；
+- 前端：tools/list 驱动工具卡 UI；调用过程展示进度流；失败按 21.4.4 分层处理；
+- 权衡：相比让 BFF 直接写死三个 REST 调用，MCP 多了协议层，但换来工具可发现、可复用、可被别的 AI 产品共享，且非技术团队可独立迭代工具。
+
+**Q7：MCP Server 响应特别慢导致客服卡壳，如何排查与治理？** 分段计时（initialize / list / call / 上游 REST）；慢在工具上游就加缓存与超时降级；流式进度让等待可见；熔断防雪崩；Server 侧加索引/连接池；观察并发连接数与排队。加分项：提 MCP 生态的安全面——社区 Server 代码不可盲信，要沙箱化、最小权限、审计它对资源的访问。
+
+---
+
+## 21.5 Markdown 增量渲染
+
+### 21.5.1 概念解析
+
+Markdown 渲染管线：**源码 → 词法/块级解析（block lexing）→ 行内解析（inline）→ AST/token → HTML/虚拟 DOM → 注入文档 → 代码高亮/公式等增强**。
+
+流式场景的核心矛盾：**Markdown 的语法是「需要看到结尾才能确定开头含义」的**。
+
+- 代码块：<code>```js</code> 已出现但闭合 <code>```</code> 还在路上——当前所有内容都应算在 code block 里；
+- 表格：表头分隔线 `|---|` 未到齐时，一堆 `|` 只是普通文本；
+- HTML 块、链接 `[text](url`、强调 `**bold`：括号/星标未闭合，行内解析结果会随下一个 chunk 改变；
+- 嵌套列表、引用的缩进归属也会「翻盘」。
+
+因此「增量渲染」的真实含义不是「只解析新增部分」（块边界会变化，严格增量极易出错），而是**「以合理频率、对累积全文做幂等重渲染，并让 DOM 变化最小化」**。
+
+### 21.5.2 主流渲染引擎对比
+
+| 引擎 | 形态 | 优点 | 缺点 | 流式适配 |
+| ---- | ---- | ---- | ---- | ---- |
+| **marked** | 同步函数，tokens API | 极快、API 简单 | 内建无 sanitize（已移除）、插件弱 | 高频调用性能最好，手动 walk tokens 做高亮 |
+| **markdown-it** | token 流 + 丰富插件 | GFM 全、插件生态成熟、可配置 | 同步阻塞，超长文需切片 | 良好，社区流式实践多 |
+| **remark/rehype（unified）** | AST 插件管道 | 可操控 AST、插件最强（MDX 生态） | 重、慢，高频全量解析吃力 | 适合解析放 Worker 或降频到 100ms+ |
+| **react-markdown** | React 组件 | 默认安全（不渲染危险 HTML）、组件化定制 | 每次 children 变更新走管道，大数据量偏慢 | 配合 memo/降频使用 |
+| markdown-wasm | WASM | 极快、可丢 Worker | API 生态小 | 大文档/Worker 方案优选 |
+
+选型经验：**聊天流高频小增量 → marked/markdown-it + 自管 DOM；React 技术栈且内容量中等 → react-markdown + rehype 插件；需要重度 AST 变换/MDX → remark 生态；超大文档 → wasm 或 Worker 卸载**。
+
+### 21.5.3 性能优化技术
+
+1. **渲染节流（第一道）**：SSE token 先进文本缓冲，rAF 合批；Markdown 解析降频到每 50~100ms 或帧计数 2~4 帧一次，流结束再做一次「终态解析」保证最终正确；
+2. **未完成块补全再解析**：解析前把未闭合的 fence/HTML/emphasis「临时补上闭包」，得到视觉稳定的半成品；或者对最后一个未闭合块降级为纯文本（`<pre>`），闭合后再升级为高亮代码块——避免颜色与结构每帧跳变；
+3. **DOM 最小化变更**：
+   - 自管 DOM 方案：按块（block）做 keyed diff，只替换变化的块节点；已闭合的代码块/表格一旦定稿就**冻结**（memo），后续 token 只影响最后一块；
+   - React 方案：把消息拆成 block 数组，前面的 block 组件 `React.memo` 命中，重渲染只发生在尾部；
+4. **虚拟滚动**：长会话只渲染视口附近消息（窗口化：存 1000 条渲染 60 条是常见策略），配合 `content-visibility: auto`；
+5. **渲染缓存**：同一段已闭合代码的高亮结果按内容 hash 缓存（Shiki 高亮很贵）；重复回答（如 FAQ）整段缓存；
+6. **Worker 卸载**：remark/wasm 解析丢 Worker，主线程零阻塞，消息传递增量文本（Transferable 不适用字符串，直接 postMessage 拷贝，注意超长文本的拷贝成本）；
+7. **图片/图表懒加载**：`loading="lazy"`、Mermaid 图在节点进入视口时才渲染。
+
+### 21.5.4 高级特性
+
+- **代码高亮**：Shiki（TextMate 语法、效果最准、包体大，建议按需引入语言或用 WASM/Worker）、Prism（轻、插件多）、highlight.js（自动语言检测）；流式期间未完成代码块用轻量高亮或纯 pre，定稿再上 Shiki；
+- **数学公式**：KaTeX 快且可同步渲染，适合流式；MathJax 功能全但重。注意 `$` 未闭合时不要触发渲染；
+- **图表**：Mermaid 在块闭合后一次性 render，内容稳定前不渲染（否则报错刷控制台）；
+- **自定义组件**：代码块加复制按钮/语言标签/行号；链接强制 `target="_blank" rel="noopener noreferrer"`；表格外包一层滚动容器；
+- **流式光标**：挂在最后一个文本节点后，避免光标触发整段重解析。
+
+### 21.5.5 代码实现
+
+````tsx
+// 文件: examples/ai-interview/markdown-stream.tsx
+// ============ 流式 Markdown：降频重解析 + 尾部块冻结 + DOMPurify 消毒 ============
+import { useEffect, useRef, useState, memo } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+// ① 未闭合围栏保护：流式中最后一个代码块未闭合时，临时补齐让解析稳定
+function stabilizeStreaming(src: string): string {
+    const fences = src.match(/```/g)?.length ?? 0;
+    let out = src;
+    if (fences % 2 === 1) out += '\n```'; // 奇数个 ```：补一个闭合
+    return out;
+}
+
+// ② 降频 hook：文本高频变化时，每 80ms 才真正产出一次待渲染文本，结束立即定稿
+function useThrottledText(text: string, streaming: boolean, gap = 80) {
+    const [view, setView] = useState(text);
+    const timer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => {
+        if (!streaming) { setView(text); return; } // 流结束：立即终态渲染
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setView(text), gap);
+        return () => clearTimeout(timer.current);
+    }, [text, streaming, gap]);
+    return view;
+}
+
+// ③ 已闭合块冻结：按双换行切块，memo 让未变化的块不重新生成 HTML
+const Block = memo(function Block({ html }: { html: string }) {
+    return <div dangerouslySetInnerHTML={{ __html: html }} />;
+});
+
+export function StreamingMarkdown({ text, streaming }: { text: string; streaming: boolean }) {
+    const throttled = useThrottledText(text, streaming);
+    // 生产环境建议在 Worker 中做 marked.parse；此处演示主线程路径
+    const blocks = marked.parse(stabilizeStreaming(throttled), { async: false, gfm: true })
+        .split(/(?<=<\/(?:p|pre|h\d|ul|ol|blockquote|table)>)/) // 按顶层块切分
+        .filter(Boolean)
+        .map((b) => DOMPurify.sanitize(b, { ADD_ATTR: ['target'] })); // ④ 每块消毒
+    return (
+        <div className="md-body">
+            {blocks.map((html, i) => <Block key={i} html={html} />)}
+            {streaming && <span className="ai-caret" aria-hidden="true" />}
+        </div>
+    );
+}
+````
+
+> 自管框架无关的「纯块 diff」思路：维护 `Map<blockKey, Node>`，每次解析后按 key 增删改，已闭合块 key = 内容 hash，永不再变；React/Vue 中同样的 key 思想配合 memo 即可。
+
+### 21.5.6 安全：Markdown 是 XSS 重灾区
+
+模型输出与用户输入一样**不可信**：
+
+- 原生 Markdown 允许内联 HTML：`<img onerror=...>`、`<a href="javascript:...">` 必须过滤；
+- 代码高亮器、Mermaid、自定义 URL scheme 是常见绕过点；sanitize 要放在**所有变换之后、注入 DOM 之前**；
+- 标准组合：`marked/markdown-it（不启用内建 html，或解析后）→ DOMPurify.sanitize(html, {ALLOWED_TAGS/ADD_ATTR})`；React 系用 react-markdown 时默认不输出原始 HTML，但自定义 `rehype-raw` 后仍需 `rehype-sanitize`；
+- 链接安全：强制 noopener、校验协议白名单（http/https/锚点）；
+- 与第 7 章安全清单联动：[7.1 XSS 攻防](./07-security.md#_7-1-xss-跨站脚本攻击)。
+
+### 21.5.7 面试指导
+
+#### L1 基础概念题
+
+**Q1：Markdown 渲染的基本流程？** 源码 → 块级解析 → 行内解析 → AST/token → HTML → 增强（高亮/公式）；说出任意两个主流库及区别（marked 快、unified AST 强）。
+
+**Q2：流式 Markdown 和普通 Markdown 渲染有什么不同？** 输入不完整、会持续变化；未闭合的 fence/表格/链接导致解析结果翻盘；需要节流、半成品稳定化和最小 DOM 更新；终态必须再渲染一次保证正确。
+
+#### L2 原理理解题
+
+**Q3：为什么不能每来一个 token 就 `marked.parse(全文)` 一次？** CPU 复杂度随文本长度叠加（长答案时 O(n²) 量级）、每次全量替换 innerHTML 造成闪烁/滚动跳动/图片重载、高亮重复执行。对策：80ms 降频 + 块级冻结 + 高亮缓存 + Worker。
+
+**Q4：代码块流式时高亮闪烁、结构乱跳，怎么解决？** 根因是闭合 fence 未到，解析器在「代码块/普通文本」间反复横跳。方案：奇数 fence 临时补闭包；或最后未闭合块先按纯 `<pre>` 渲染，闭合后再升级高亮；已闭合块 memo 冻结。
+
+**Q5：怎么保证流式 Markdown 的 XSS 安全？** 输出不可信；注入前 DOMPurify 消毒（所有插件变换之后）；关 raw HTML 或配 rehype-sanitize；链接协议白名单 + noopener；代码块内容转义；再加 CSP 兜底。能讲出「sanitize 顺序」是加分点。
+
+#### L3 综合应用题
+
+**Q6：一个 AI 回答可能有 2 万字、含 30 段代码和图表，如何保证页面 60fps？** 组合拳：解析降频/Worker 卸载；块级 keyed diff 与冻结；Shiki 按需语言 + 结果缓存；虚拟列表只渲染视口消息与块；Mermaid/图片视口懒加载；`content-visibility`；历史消息静态化（定稿后不再参与解析）。评分关注**分层意识**：网络层节流、解析层缓存、DOM 层 diff、视口层窗口化。
+
+**Q7：用户反馈「流式回答里的表格要等整段结束才出现」，如何改进？** 现状多半是把表格块当未完成块降级到了终态；改进：检测表格分隔线到达即提前升级为「行级增量表格」，未闭合表格的最后一行用纯文本占位；权衡是复杂度上升，可按业务频率决定是否值得。
+
+---
+
+## 21.6 WebSocket 与实时渲染
+
+### 21.6.1 概念解析：协议基础与握手
+
+WebSocket 在 HTTP 之上**升级**出一条全双工通道：
+
+```http
+GET /ws HTTP/1.1
+Host: example.com
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25j==        # 16 随机字节的 base64
+Sec-WebSocket-Version: 13
+Sec-WebSocket-Protocol: chat.v2                    # 可选：子协议协商
+Origin: https://example.com
+
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo= # base64(SHA1(Key + 固定 GUID))
+```
+
+握手后连接脱离 HTTP 语义，双方互发**帧（frame）**：
+
+- 操作码：`0x1` 文本、`0x2` 二进制、`0x8` 关闭、`0x9` ping、`0xA` pong；
+- FIN 位支持**消息分片**（大消息拆帧）；客户端发出的帧必须带掩码（mask），服务端帧不掩码；
+- 扩展 `permessage-deflate` 提供帧压缩；
+- API：`new WebSocket(url, protocols)`、`readyState` 四态（CONNECTING/OPEN/CLOSING/CLOSED）、`send/binaryType/onmessage/onclose`、`bufferedAmount`（**背压观测口**：发送前看积压字节数，避免把浏览器缓冲区撑爆）。
+
+### 21.6.2 连接管理（面试核心区）
+
+生产级连接必须回答三件事：**怎么知道死了、死了怎么连、重连期间消息怎么办**。
+
+```typescript
+// 文件: examples/ai-interview/ws-resilient.ts
+// 完整可运行的简化版对照 examples/06-04-websocket-manager.ts
+export class ResilientSocket {
+    private ws: WebSocket | null = null;
+    private attempts = 0;
+    private closedByUser = false;
+    private hbTimer?: ReturnType<typeof setInterval>;
+    private watchdogTimer?: ReturnType<typeof setTimeout>;
+    private queue: string[] = [];           // 未连接期间的发送队列
+    private lastSeq = 0;                    // 服务端据此去重与补发
+
+    constructor(private url: string, private onMsg: (m: unknown) => void) {
+        this.connect();
+    }
+
+    private connect() {
+        const ws = new WebSocket(this.url);
+        this.ws = ws;
+        ws.onopen = () => {
+            this.attempts = 0;
+            ws.send(JSON.stringify({ type: 'resume', lastSeq: this.lastSeq })); // 断点续传握手
+            this.queue.forEach((m) => ws.send(m)); this.queue = [];
+            this.startHeartbeat();
+        };
+        ws.onmessage = (e) => {
+            const msg = JSON.parse(e.data as string);
+            if (msg.type === 'pong') { this.feedWatchdog(); return; }
+            if (typeof msg.seq === 'number') this.lastSeq = Math.max(this.lastSeq, msg.seq);
+            this.onMsg(msg);
+        };
+        ws.onclose = () => {
+            this.stopHeartbeat();
+            if (!this.closedByUser) this.reconnect();
+        };
+        ws.onerror = () => ws.close(); // 统一收敛到 onclose，避免错误与关闭竞态双处理
+    }
+
+    // ① 应用层心跳：协议层 ping 在浏览器 API 里不可主动发，用业务消息 {"type":"ping"}
+    private startHeartbeat() {
+        this.hbTimer = setInterval(() => {
+            this.ws?.send(JSON.stringify({ type: 'ping' }));
+            // ② 看门狗：发出后 N 秒没等到 pong，判定半开连接，主动 close 触发重连
+            this.watchdogTimer = setTimeout(() => this.ws?.close(), 8000);
+        }, 25_000);
+    }
+    private feedWatchdog() { clearTimeout(this.watchdogTimer); }
+    private stopHeartbeat() { clearInterval(this.hbTimer); clearTimeout(this.watchdogTimer); }
+
+    // ③ 全抖动指数退避：1s→2s→4s… 上限 30s，随机抖动防大量客户端同时重连打爆网关
+    private reconnect() {
+        const delay = Math.min(30_000, 1000 * 2 ** this.attempts) * (0.5 + Math.random() * 0.5);
+        this.attempts++;
+        setTimeout(() => this.connect(), delay);
+    }
+
+    send(msg: object) {
+        const frame = JSON.stringify(msg);
+        if (this.ws?.readyState === WebSocket.OPEN) {
+            if (this.ws.bufferedAmount > 1_000_000) throw new Error('发送缓冲积压，背压保护');
+            this.ws.send(frame);
+        } else {
+            this.queue.push(frame); // 重连中排队，恢复后随 resume 一起补发
+        }
+    }
+    close() { this.closedByUser = true; this.ws?.close(); this.stopHeartbeat(); }
+}
+```
+
+框架集成的竞态注意（React StrictMode 双挂载会让连接开两次）：用单例 manager + 引用计数，或在 effect cleanup 里只「取消订阅」、连接由模块级单例维持；`visibilitychange` 回前台时主动探活，因为移动浏览器会挂起页面导致看门狗失真。这些坑与 [examples/06-04-websocket-manager.ts](./examples/06-04-websocket-manager.ts) 的注释一致。
+
+### 21.6.3 数据传输与渲染优化
+
+- **二进制**：高频数值流（语音电平、坐标、张量）用 `binaryType = 'arraybuffer'` + DataView 解码，体积比 JSON 小数倍；需要 schema 演进用 Protobuf/MessagePack；
+- **消息分片与合批**：客户端收到的高频消息不直接渲染，进队列后 **rAF 整批 flush**（看板/监控场景一帧只画最新状态，中间帧直接丢弃——coalesce）；
+- **渲染层**：大列表窗口化（存 1000 渲染 60）、行级 memo、ref 缓冲 + rAF 写入，避免每消息触发响应式全量比对；
+- **背压**：`bufferedAmount` 超阈值降级（降频、丢弃非关键帧、提示网络差）；接收端处理不过来也要能向服务端发「降速」信令；
+- **顺序与去重**：全局单调 `seq`；乱序时缓存等待，重复 seq 丢弃；断线 resume 让服务端补发缺口。
+
+### 21.6.4 实时协作场景
+
+| 问题 | 方案 |
+| ---- | ---- |
+| 多人同时编辑冲突 | **OT（操作变换）**：对操作做变换后再应用（Google Docs 路线，需中央服务器，复杂但收敛强） |
+| 无中心/弱中心合并 | **CRDT**：数据结构保证可交换合并（Yjs/Automerge，前端生态成熟，开销略大） |
+|  presence（光标/在线状态） | 单独的瞬时信令通道，不入持久历史，延迟优先可丢帧 |
+| 历史同步 | 版本号/向量时钟 + 差量同步；快照 + 操作日志两段式加载 |
+
+AI 场景中的协作新形态：多人共享一个 Agent 会话——一个 WebSocket 房间扇出模型的 token 流（服务端对一次模型调用做 fan-out，避免每个观看者各触发一次模型请求）。
+
+### 21.6.5 安全与性能考量
+
+1. **鉴权放哪**：不要把长期 token 拼在 `ws://` URL query 上——会进访问日志、代理日志、浏览器历史。推荐：**短生命周期票据**（先 REST 换一次性 ticket，再 `wss://.../ws?ticket=xxx`，5~30s 过期、单次有效），或握手时用 Cookie / `Sec-WebSocket-Protocol` 携带 Bearer；
+2. **校验 Origin**：浏览器握手自带 Origin，服务端白名单校验，防跨站 WebSocket 劫持（CSWSH）；
+3. **wss（TLS）**：全链路加密；企业代理对 ws 不友好时准备 SSE/HTTP 降级；
+4. **消息级防护**：单帧大小上限、鉴权后的速率限制、服务端按用户做并发连接数限制；入站消息同样要鉴权（握手认证 ≠ 每条消息可信，注意权限在会话中途被收回）；
+5. **资源占用**：连接是有内存成本的，服务端需连接表 + 心跳超时清理；前端单页应用全局单连接复用，按频道（topic）多路复用而不是开 N 条；
+6. **调试**：DevTools Network → WS 帧面板看握手与帧；`wscat`/代理抓包看握手头；常见问题先查 101 是否成功、掩码/压缩协商、网关空闲超时（Nginx `proxy_read_timeout` + `proxy_set_header Upgrade`）。
+
+### 21.6.6 SSE vs WebSocket（AI 场景终局选择）
+
+- 纯文本问答流式：**SSE 优先**——简单、穿透好、鉴权走标准 HTTP 头、断线语义清晰；
+- 需要浏览器上行（语音输入、Agent 中途追加指令）、双向工具事件、协作、游戏、IM：WebSocket；
+- 复杂工程也可混合：SSE 走 token 流 + 普通 REST 走控制指令（停止、反馈），避免为少量双向需求维护 WS；
+- WebTransport（HTTP/3 QUIC 流 + datagram）面向未来关注，当前生态与兼容性尚早。
+
+### 21.6.7 面试指导
+
+#### L1 基础概念题
+
+**Q1：描述 WebSocket 握手过程。** Upgrade/Connection 头、101、Sec-WebSocket-Key/Accept 的算法（Key + RFC6455 GUID 做 SHA1 再 base64，**作用仅是证明对方懂 WebSocket，不是安全机制**）、子协议协商。
+
+**Q2：WebSocket 和 SSE 的区别？** 全双工/单向、二进制/文本、握手是独立协议/纯 HTTP、重连要自己做/内置、应用场景。补一句「AI 问答用 SSE 就够」体现选型判断。
+
+**Q3：`readyState` 有哪些状态？send 时连接还没建立会怎样？** 四态；CONNECTING 时 send 抛错或进浏览器缓冲（实现不一），生产要自己排队。
+
+#### L2 原理理解题
+
+**Q4：如何实现 WebSocket 断线重连？** 三段式：检测（onclose + 应用心跳/看门狗发现半开死链）→ 退避（指数退避 + 全抖动 + 上限）→ 恢复（resume + lastSeq 补发 + 排队消息重放）。采分点全覆盖心跳、抖动、续传。
+
+**Q5：为什么需要应用层心跳？TCP keepalive 不够吗？** TCP keepalive 默认两小时才探测、且中间代理可能不转发；进程假死（服务端 accept 线程挂了但内核还在）TCP 检测不到。应用层 ping/pong + 看门狗超时主动断连，分钟级内自愈。注意浏览器无法主动发协议层 ping，用业务消息实现。
+
+**Q6：高频率实时消息（如每秒 60 条状态）如何渲染不卡？** 接收与渲染解耦：消息入缓冲 → rAF 每帧取最新值合批/coalesce → 直接写 DOM ref 或 canvas，绕过响应式；列表窗口化；非关键帧丢弃；二进制降体积；背压用 bufferedAmount。**关键词：coalesce、rAF、窗口化、背压**。
+
+**Q7：WebSocket 怎么做鉴权？为什么不能在 URL 带 token？** 票据模式/子协议头/Cookie 三方案；query 会泄露在日志、历史、Referer 衍生场景；即使 wss 加密了内容，URL 元数据仍可能被记录。再补 Origin 校验与 CSWSH。
+
+#### L3 综合应用题
+
+**Q8：为 AI 客服加「坐席与用户实时协同、多人可见同一个流式回答」能力，如何设计？**
+
+- 通道：WebSocket 房间（会话即房间），成员含用户/坐席/Agent；一次模型调用的 token 流由服务端 fan-out 给房间全体（不重复调模型）；
+- 消息模型：服务端下发消息统一带 seq/房间版本，客户端去重补缺；presence（谁在输入/在线）走可丢帧的瞬时信令；
+- 冲突：人工坐席可中断/接管 Agent（角色状态机：bot → human），接管后停模型流；输入中状态与草稿同步用 CRDT 或「最后写入 + 光标位置」轻量方案；
+- 可靠性：21.6.2 全套（心跳看门狗、抖动退避、resume 补发）；消息持久化走既有存储，WS 只负责实时扇出；
+- 安全：房间成员资格在每次加入和每次消息时校验，离职/会话结束立即踢连接。
+
+**Q9：线上 WebSocket 频繁断开，如何系统化排查？** 按层定位：握手是否 101（网关配置/鉴权失败 4xx）→ 空闲超时（Nginx/负载均衡/SLB 的 idle timeout，心跳间隔要小于链路最短超时）→ 服务端重启/发布（优雅关闭先发 close code 1001 让客户端立即重连新实例）→ 移动端切网/挂起（online/visibilitychange 探活）→ 消息过大被代理切断（分片/压缩）→ 用帧面板与服务端连接日志比对断开时间点与 close code。**能主动列出 close code（1000 正常 / 1001 离开 / 1006 异常断开 / 1011 服务端错误 / 鉴权 4401 自定义）是加分项**。
+
+---
+
+## 21.7 通用面试方法论与评分标准
+
+### 21.7.1 三级题库回答框架
+
+| 题型 | 推荐结构 | 时长 | 雷区 |
+| ---- | ---- | ---- | ---- |
+| L1 概念题 | 定义 → 核心特征（2~3 点）→ 一句话场景 | 30~60s | 背名词、无边界（说过头被追问翻车） |
+| L2 原理题 | 结论先行 → 机制分层拆解 → 举一个自己踩过/验证过的例子 | 2~3min | 只讲 API 不讲为什么；给不出实际案例 |
+| L3 设计题 | **澄清需求 → 容量/SLA → 总体架构 → 关键模块 → 数据模型 → 异常与扩展 → 权衡取舍** | 5~15min | 不澄清直接画图；只谈技术不谈成本/产品；没有降级方案 |
+
+### 21.7.2 评分要点（面试官视角自评表）
+
+- **准确性**：协议字段、状态码、错误码等硬知识不能错（如 SSE 空行分帧、MCP 名称与 JSON-RPC、Sec-WebSocket-Accept 不是加密）；
+- **完整性**：链路闭环——正常路径 + 异常路径（断、慢、错、重、安全）；
+- **权衡感**：说方案必带代价与适用边界（「SSE 简单但只能单向」「全量重渲染简单但 O(n²)」）；
+- **数据意识**：TTFT、tokens/s、帧率、连接数、错误率——能用指标讨论体验与容量；
+- **工程细节**：AbortController、rAF 合批、贴底检测、DOMPurify、抖动退避、背压、幂等 ID——本章代码里每个细节都是天然加分点；
+- **产品与用户**：停止按钮、就地重试、无障碍、感知速度、转人工——区分「前端工程师」与「会写页面的人」。
+
+### 21.7.3 常见误区总清单
+
+1. 把 SSE 当新协议 / 不知道空行是帧边界；
+2. 按网络 chunk 直接解析，不做残帧与多字节缓冲；
+3. 每个 token 一次 setState / 一次 marked.parse / 一次 scrollIntoView；
+4. 打字机用 setInterval 逐字写 innerHTML；
+5. 浏览器直连模型 API，Key 写进代码；
+6. MCP 说成「控制协议」或与 Function Calling 混为一谈；
+7. Markdown 渲染不消毒，或消毒发生在注入之后；
+8. WebSocket 重连无退避（重连风暴）、无心跳（半开死链）、无续传（消息丢/重）；
+9. 鉴权 token 放 WS URL query；
+10. 设计题只谈模型与 UI，不谈 BFF、限流、计费、降级、可观测。
+
+### 21.7.4 加分项弹药库
+
+- 引用规范与版本：W3C SSE / RFC 6455 / JSON-RPC 2.0 / MCP 规范版本（Streamable HTTP 取代旧 SSE 传输）；
+- 引用本仓库可运行示例形成「我写过」的证据链：
+    - SSE 解析与流式聊天：[examples/14-01-sse-parser.ts](./examples/14-01-sse-parser.ts)、[examples/14-02-stream-chat.tsx](./examples/14-02-stream-chat.tsx)
+    - 工具卡与上下文预算：[examples/14-03-tool-ui.tsx](./examples/14-03-tool-ui.tsx)、[examples/14-05-context-budget.ts](./examples/14-05-context-budget.ts)
+    - EventSource / 重连 WebSocket：[examples/06-03-sse.ts](./examples/06-03-sse.ts)、[examples/06-04-websocket-manager.ts](./examples/06-04-websocket-manager.ts)
+    - 渲染性能与窗口化：[10.4 高性能虚拟列表](./10-browser-rendering.md#_10-4-高性能虚拟列表)、<a href="./examples/12-09-content-visibility.html" target="_blank" rel="noopener">examples/12-09-content-visibility.html</a>
+    - XSS 防护：[examples/07-01-xss-defense.ts](./examples/07-01-xss-defense.ts)
+- 主动提「可观测性」：TTFT、tokens/s、帧时长、断流率、工具成功率、幻觉抽检率；
+- 主动提「降级路径」：WS→SSE→长轮询、旗舰模型→小模型→FAQ、流式失败→整包重试。
+
+### 21.7.5 自测：六问串讲（能脱稿讲清即通关）
+
+1. 一条 SSE 响应从 Nginx 到屏幕像素，中间经过哪些缓冲与切分？
+2. 50~150 tokens/s 的流如何稳定呈现为 60fps 的 Markdown 气泡？
+3. AI 客服从发送到完成的时序中，有哪些状态、事件、幂等键与异常分支？
+4. MCP 三角色如何协作？它与 Function Calling 的边界在哪？
+5. 未闭合的代码块为什么会闪烁？你有几种解法，各自代价？
+6. WebSocket 死链如何被发现？重连期间与重连之后的消息分别怎么处理？
+
+> 结语：前端 AI 面试的所有题，最终都收敛到同一句话——**把一条不可靠、不均匀、持续生长的流，变成可靠、平滑、可中断、可恢复、可观测的用户体验**。把这条主线讲透，六个主题就是六个证据。
+
+---
+
+## 21.8 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| MCP 概念 | 把 MCP 说成「控制协议」，或与 Function Calling 混为一谈 | 讲清 MCP 是标准化「模型↔工具/数据源」的协议（Host/Client/Server 三角色），Function Calling 是模型给出调用意图的机制，二者协作不等同（呼应 21.4） |
+| RAG 质量 | 只背「检索→拼接→生成」三步，不谈检索质量与幻觉来源 | 讲切分粒度、embedding 与混合检索、rerank、引用溯源，并给出「命中置信阈值 + 无依据则拒答」的兜底 |
+| Prompt 注入 | 把用户输入直接拼进 system prompt，或把工具返回当可信指令执行 | 用户与工具内容一律当不可信数据，用角色隔离与分隔标记，敏感工具加人工确认（呼应 14.5） |
+| 答非所问 | 只背概念定义，不讲取舍、边界与失败场景，面试变成背书 | 每题按「结论→原理→取舍→落地证据」四段答，主动给对比项与反例，落到本仓库可运行示例（呼应 21.7.1） |
+| 流式时序 | 说不清「空行才是帧边界」「chunk 会切断行」，讲不出丢字根因 | 明确空行是帧边界、解析必须带缓冲，回答里给出「收字节→拼帧→解析→rAF 渲染」的完整时序（呼应 21.1） |
+| 工具调用时序 | 讲不清模型两段式返回，以为一次响应就能完成工具调用 | 说清一轮 tool call 是「模型输出调用意图→客户端执行→结果回传→模型续写」，并强调人工确认与幂等键 |
+| 实时方案选择 | 用 WebSocket 代替 SSE，或笼统说 WebSocket 更「高级」 | 单向流式生成用 SSE（自动重连、复用 HTTP 基建），双向实时协作才上 WebSocket，能讲清二者取舍（呼应 21.6.6） |
+| 渲染性能 | 每个 token 都二次解析 Markdown 并 `scrollIntoView`，高频 `setState` 掉帧 | rAF 批量刷新、Markdown 分块或增量解析、滚动节流，回答里带上帧时长与 TTFT 指标佐证（呼应 21.2） |

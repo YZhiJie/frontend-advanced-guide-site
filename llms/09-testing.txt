@@ -1,0 +1,1702 @@
+# 第九部分：测试策略（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/09-testing
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九部分：测试策略
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[跨端开发](./08-cross-platform.md)｜下一篇：[浏览器原理与渲染性能](./10-browser-rendering.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-9" target="_blank" rel="noopener">EP.09《测试金字塔》</a>
+
+## 本部分内容
+
+- [第九部分：测试策略](#第九部分-测试策略)
+  - [本部分内容](#本部分内容)
+  - [9.1 测试金字塔与整体策略](#_9-1-测试金字塔与整体策略)
+      - [概念解析](#概念解析)
+      - [测试金字塔的演变](#测试金字塔的演变)
+      - [金字塔各层决策流程](#金字塔各层决策流程)
+      - [反模式：为什么很多团队测试一启动就崩盘](#反模式-为什么很多团队测试一启动就崩盘)
+      - [最佳实践](#最佳实践)
+  - [9.2 单元测试与 Vitest](#_9-2-单元测试与-vitest)
+      - [概念解析](#概念解析-1)
+      - [Vitest 全景知识地图](#vitest-全景知识地图)
+      - [完整代码示例：被测代码](#完整代码示例-被测代码)
+      - [完整代码示例：单测本体](#完整代码示例-单测本体)
+      - [完整配置示例](#完整配置示例)
+      - [假定时器：测试异步时间的核心工具](#假定时器-测试异步时间的核心工具)
+      - [快照测试：何时该用、何时是陷阱](#快照测试-何时该用、何时是陷阱)
+      - [基准测试 bench：给热点函数上护栏](#基准测试-bench-给热点函数上护栏)
+      - [In-source Testing：工具库的最佳实践](#in-source-testing-工具库的最佳实践)
+      - [最佳实践](#最佳实践-1)
+  - [9.3 组件测试与 Testing Library](#_9-3-组件测试与-testing-library)
+      - [概念解析](#概念解析-2)
+      - [查询优先级：从最贴近用户到最后兜底](#查询优先级-从最贴近用户到最后兜底)
+      - [三种 query 的语义区别](#三种-query-的语义区别)
+      - [复数场景：`getAllBy*` / `findAllBy*`](#复数场景-getallby-findallby)
+      - [完整代码示例：被测组件](#完整代码示例-被测组件)
+      - [完整代码示例：组件测试本体](#完整代码示例-组件测试本体)
+      - [`userEvent` vs `fireEvent`：永远选前者](#userevent-vs-fireevent-永远选前者)
+      - [自定义 render：避免每次手动注入 Provider](#自定义-render-避免每次手动注入-provider)
+      - [Vue 场景：`@testing-library/vue` 等价用法](#vue-场景-testing-library-vue-等价用法)
+      - [jest-dom 常用 matchers 速查](#jest-dom-常用-matchers-速查)
+      - [最佳实践](#最佳实践-2)
+  - [9.4 E2E 测试与 Playwright](#_9-4-e2e-测试与-playwright)
+      - [概念解析](#概念解析-3)
+      - [Playwright vs Cypress 对照](#playwright-vs-cypress-对照)
+      - [核心能力：Auto-waiting](#核心能力-auto-waiting)
+      - [完整代码示例：基础用法](#完整代码示例-基础用法)
+      - [POM（Page Object Model）模式：E2E 可维护的关键](#pom-page-object-model-模式-e2e-可维护的关键)
+      - [复用登录状态：`storageState` 把 30s 登录压成 0ms](#复用登录状态-storagestate-把-30s-登录压成-0ms)
+      - [Fixture：测试数据用 API 而不是 UI 创建](#fixture-测试数据用-api-而不是-ui-创建)
+      - [网络拦截：模拟后端未就绪](#网络拦截-模拟后端未就绪)
+      - [并行与 CI 分片](#并行与-ci-分片)
+      - [最佳实践](#最佳实践-3)
+  - [9.5 Mock 策略与 MSW](#_9-5-mock-策略与-msw)
+      - [概念解析](#概念解析-4)
+      - [Mock 的三个层级对比](#mock-的三个层级对比)
+      - [完整代码示例：handlers 设计](#完整代码示例-handlers-设计)
+      - [测试环境接入（Node 端）](#测试环境接入-node-端)
+      - [浏览器/Storybook 接入（开发态）](#浏览器-storybook-接入-开发态)
+      - [临时覆盖：`server.use()`](#临时覆盖-server-use)
+      - [MSW 与 Storybook 集成：组件走查时的假数据](#msw-与-storybook-集成-组件走查时的假数据)
+      - [最佳实践](#最佳实践-4)
+  - [9.6 视觉回归与快照测试](#_9-6-视觉回归与快照测试)
+      - [概念解析](#概念解析-5)
+      - [Playwright 截图对比](#playwright-截图对比)
+      - [Storybook + Storyshots：组件库自动视觉回归](#storybook-storyshots-组件库自动视觉回归)
+      - [视觉回归的 flaky 防护](#视觉回归的-flaky-防护)
+  - [9.7 性能测试与基准](#_9-7-性能测试与基准)
+      - [概念解析](#概念解析-6)
+      - [基准测试：用 Vitest bench](#基准测试-用-vitest-bench)
+      - [React Profiler：测组件渲染次数](#react-profiler-测组件渲染次数)
+      - [Lighthouse CI：门禁 Web Vitals](#lighthouse-ci-门禁-web-vitals)
+  - [9.8 类型测试与契约测试](#_9-8-类型测试与契约测试)
+      - [概念解析](#概念解析-7)
+      - [`tsd`：库的导出类型测试](#tsd-库的导出类型测试)
+      - [类型级单测：用 `expectType` 等价断言](#类型级单测-用-expecttype-等价断言)
+      - [Pact 契约测试：前后端 API 的安全网](#pact-契约测试-前后端-api-的安全网)
+  - [9.9 CI 集成与质量门禁](#_9-9-ci-集成与质量门禁)
+      - [概念解析](#概念解析-8)
+      - [GitHub Actions 完整示例](#github-actions-完整示例)
+      - [质量门禁分层](#质量门禁分层)
+      - [CI 优化清单](#ci-优化清单)
+  - [9.10 自测题](#_9-10-自测题)
+  - [9.11 本章避坑清单](#_9-11-本章避坑清单)
+
+---
+
+## 9.1 测试金字塔与整体策略
+
+#### 概念解析
+
+测试金字塔（Test Pyramid）是 Mike Cohn 在《Succeeding with Agile》里提出的经典分层模型，核心思想是：**越靠底层的测试越多、越快、越稳定；越靠顶层的测试越少、越慢、越脆**。前端经过十几年演化，金字塔的"层数"已不再固定，但其背后的 ROI（投入产出比）原则依然成立。
+
+```
+            ╭───────────╮
+            │   E2E     │  少量(≤20条):关键用户路径,慢、贵、脆
+            ╰───────────╯
+        ╭───────────────────╮
+        │  集成/组件测试      │  适量:组件按用户视角交互,性价比最高
+        ╰───────────────────╯
+    ╭────────────────────────────╮
+    │      单元测试                │  大量:工具函数/hooks/store,快、稳、定位精准
+    ╰────────────────────────────╯
+╭────────────────────────────────────╮
+│  类型测试 / 静态检查 / Lint          │  海量:tsc --noEmit + ESLint,零运行成本
+╰────────────────────────────────────╯
+```
+
+对应到工具栈：
+
+| 层级 | 工具 | 数量占比 | 单测耗时 | 维护成本 | 反馈粒度 |
+| ---- | ---- | -------- | -------- | -------- | -------- |
+| 静态检查 | TypeScript / ESLint / Prettier | — | <1s | 低 | 编译期 |
+| 单元 | Vitest / Jest | 60~80% | <10ms/条 | 低 | 函数级 |
+| 集成/组件 | Vitest + Testing Library + jsdom | 15~30% | 50~200ms/条 | 中 | 组件级 |
+| E2E | Playwright / Cypress | 2~5% | 5~30s/条 | 高 | 流程级 |
+| 视觉/契约 | Percy / Storyshots / tsd | 视情况 | 几秒~分钟 | 中 | 像素/类型级 |
+
+前端测试的投入排序：**纯函数 > hooks/composable > 组件交互 > E2E**。另一个高回报项是 **类型测试**——`tsc --noEmit` 本身就是最便宜的全量回归，必须进 CI 且失败即阻断。
+
+#### 测试金字塔的演变
+
+实际工程中常出现三个变体，对应不同业务阶段：
+
+```
+    ╭─╮            ╭───────╮             ╭─────╮
+    │E│            │       │             │  E  │
+   ╭─╮╮           ││ 集成 ││            ╭─╮╭─╮╭─╮
+   │U│            ╰───────╯             │U││E││U│
+   ╰─╯            ╭───╮ ╭───╮           ╰─╯╰─╯╰─╯
+  金字塔          冰淇淋甜筒           测试奖杯
+ (经典)          (反模式)            (Trophy)
+```
+
+- **金字塔**：经典形态。单元层厚、E2E 薄。适合后台管理、纯工具库。
+- **冰淇淋甜筒（Ice Cream Cone）**：单元层薄、E2E 层厚。前端团队最容易踩的坑——"懒得写单测，全靠手点或一条慢 E2E 兜底"。CI 跑半小时、定位一个 bug 要回放录像。
+- **测试奖杯（Trophy，Kent C. Dodds 提出）**：在金字塔基础上抬高"集成测试"层。因为现代前端的核心价值在"组件按真实用户行为整合后的表现"，集成层比单元层更能捕获真实 bug，且仍比 E2E 快一个数量级。React 生态推荐这个形态。
+
+#### 金字塔各层决策流程
+
+```mermaid
+flowchart TD
+    A[新增一段代码] --> B{是纯函数/hook?<br/>无 DOM、无网络}
+    B -- 是 --> C[单元测试 Vitest]
+    B -- 否 --> D{是 UI 组件?<br/>有交互/渲染}
+    D -- 是 --> E[组件测试<br/>Testing Library]
+    D -- 否 --> F{是关键用户路径?<br/>登录/下单/支付}
+    F -- 是 --> G[E2E Playwright<br/>≤20 条]
+    F -- 否 --> H{有公开 API/类型?<br/>导出给他人用}
+    H -- 是 --> I[类型测试 tsd/契约]
+    H -- 否 --> J{只是配置/文案?<br/>无需测试}
+    J -- 是 --> K[静态检查 + Review]
+    C --> L[进 CI 阻断合并]
+    E --> L
+    G --> L
+    I --> L
+```
+
+> 决策口诀：**能写单测的不写集成，能写集成的不写 E2E**。E2E 是兜底保险，不是主力。
+
+#### 反模式：为什么很多团队测试一启动就崩盘
+
+| 反模式 | 表现 | 后果 | 解法 |
+| ------ | ---- | ---- | ---- |
+| 追求 100% 覆盖率 | 给 `getter/setter`、纯类型声明、`index.ts` re-export 写测试 | 凑数测试，重构即碎，团队对测试产生厌恶 | 覆盖率门禁设 70~80%，排除 `index.ts`/类型文件/配置文件 |
+| E2E 堆砌 | 所有验收点都写成 E2E | CI 30 分钟+，flaky 频发，定位难 | E2E 限制 ≤20 条核心流程，其余下沉为组件/集成测试 |
+| Mock 一切 | 把被测函数内部依赖全 mock 掉 | 重构即碎，测试只测了 mock 而非代码 | Mock 只在**模块边界**（API/IO），不在被测函数内部 |
+| 测试环境不稳 | E2E 直连测试库真实 DB，数据互相污染 | 串行跑、flaky、随机失败 | 每个测试独立 fixture、用 `request` 夹具调 API 造数据、test.afterEach 清理 |
+| 测试不可读 | `expect(fn).toBe(expected)` 不写行为描述 | 失败时只知道"红色"，不知道哪里坏了 | 命名用行为：`it('连续触发只在停止后执行一次', ...)` |
+
+#### 最佳实践
+
+- ✅ 新代码先补单测（工具函数），重构前先给"将被改动模块"补集成测试——这是"测试先行保护"思想；
+- ✅ CI 中测试失败阻断合并，覆盖率报告贴 PR（`vitest --coverage` + `json`/`lcov` 报告上传）；
+- ✅ 优先选 **测试奖杯**形态：单元 + 集成层并重，E2E 兜底核心流程；
+- ✅ 把 `tsc --noEmit` 和 `eslint` 也算进"测试"门禁，二者是零运行成本的全量回归；
+- ⚠️ 不要追求 100% 覆盖率，`getter/setter`、类型声明、`index.ts` re-export、配置文件凑数没有价值；
+- ⚠️ 测试代码与生产代码同等规范：ESLint、Prettier、Review 一条都不能少，否则半年后没人看得懂。
+
+## 9.2 单元测试与 Vitest
+
+#### 概念解析
+
+Vitest 由 Vite 团队出品，定位是"Vite 原生测试框架"。相比 Jest 的最大优势：
+
+1. **零配置 TS/ESM**：直接复用项目的 `vite.config.ts` 解析管道，alias、TS、JSX、CSS Modules 全部"开箱即用"，不再需要 `ts-jest`/`babel-jest` 那套繁琐链路；
+2. **API 与 Jest 兼容**：`describe/it/expect/vi` 完全对应，迁移成本是改一行 `import`；
+3. **真正的并发**：内置 [Tinybench](https://github.com/tinylibs/tinybench) 与 [Tinypool](https://github.com/tinylibs/tinypool)（Worker Threads 池），多核并行跑测试；
+4. **统一 HMR**：watch 模式只重跑受影响测试，秒级反馈。
+
+#### Vitest 全景知识地图
+
+```mermaid
+mindmap
+  root((Vitest))
+    配置
+      vitest.config.ts(合并 vite.config)
+      environment: jsdom/happy-dom/node
+      globals: true(免 import)
+      setupFiles(每文件前钩子)
+      coverage(v8/istanbul)
+      pool: forks/threads/vmThreads
+    断言 expect
+      内置(matchers 与 Jest 一致)
+      @vitest/expect-extend 扩展
+      jest-dom(组件测试专用)
+    Mock 工具 vi
+      fn/spyImplementation
+      mock 模块/全局
+      mocked 取类型
+      hoisted 提前 mock
+    假定时器
+      useFakeTimers
+      advanceTimersByTime
+      runAllTimers
+      setSystemTime
+    参数化
+      it.each / it.concurrent.each
+      describe.each
+    快照
+      toMatchSnapshot
+      toMatchInlineSnapshot
+      @vitest/snapshot 环境隔离
+    基准 bench
+      bench(name, fn)
+      自动对比 baseline
+    In-source Testing
+      源码内 if(import.meta.vitest) 块
+      工具库一处维护
+    UI 模式
+      vitest --ui
+      时间旅行调试
+```
+
+#### 完整代码示例：被测代码
+
+```typescript
+// 文件: src/utils/money.ts —— 被测代码:金额计算(经典浮点坑)
+export function toCents(yuan: number): number {
+    return Math.round(yuan * 100);
+}
+
+export function formatPrice(cents: number): string {
+    return (cents / 100).toFixed(2);
+}
+
+export function applyDiscount(cents: number, percent: number): number {
+    if (percent < 0 || percent > 100) throw new RangeError('折扣需在 0~100 之间');
+    return Math.round((cents * (100 - percent)) / 100); // 以"分"为单位取整,规避浮点误差
+}
+```
+
+> **为什么金额计算不用 `toFixed`**：`(1.005).toFixed(2)` 得到 `"1.00"` 而不是 `"1.01"`——`1.005` 的二进制表示其实略小于 1.005，舍入方向就错了；`(0.1 + 0.2).toFixed(2)` 显示 `"0.30"` 只是误差恰好没过半的侥幸。所以约定是：**计算全程走整数（分）**（如 `toCents` / `applyDiscount`），**展示把整数分交给 `Intl.NumberFormat` 格式化**，`toFixed` 只用于对舍入方向无所谓的纯显示裁剪。这类「输入 0.07+0.1 期望 0.17」的用例值得像下面这样显式写进单测，把约定固化下来。
+
+```typescript
+// 文件: src/utils/debounce.ts —— 防抖:常用被测函数
+export function debounce<A extends unknown[]>(fn: (...args: A) => void, wait = 200) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return function (this: unknown, ...args: A) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), wait);
+    };
+}
+```
+
+#### 完整代码示例：单测本体
+
+```typescript
+// 文件: examples/09-02-money.test.ts —— Vitest 单测全特性示例
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { toCents, formatPrice, applyDiscount } from '@/utils/money';
+import { debounce } from '@/utils/debounce';
+
+describe('toCents 金额转分', () => {
+    it('常规金额', () => {
+        expect(toCents(12.34)).toBe(1234);
+    });
+
+    it('经典浮点陷阱:0.1 + 0.2 !== 0.3', () => {
+        expect(0.1 + 0.2).not.toBe(0.3);         // 0.30000000000000004
+        expect(toCents(0.1) + toCents(0.2)).toBe(toCents(0.3)); // ✅ 整数运算规避浮点误差
+    });
+
+    // 参数化测试:一张表覆盖多边界,失败时清楚是哪一行
+    it.each([[0], [99.99], [1e6]])('边界值 %d 互逆', (input) => {
+        expect(formatPrice(toCents(input))).toBe(input.toFixed(2));
+    });
+
+    // 异常分支必须覆盖,否则 throw 形同未测
+    it('折扣越界抛 RangeError', () => {
+        expect(() => applyDiscount(1000, -1)).toThrow(RangeError);
+        expect(() => applyDiscount(1000, 101)).toThrow(/0~100/);
+    });
+});
+
+describe('debounce', () => {
+    beforeEach(() => vi.useFakeTimers());   // 假定时器:测试不需要真的等 300ms
+    afterEach(() => vi.useRealTimers());
+
+    it('连续触发只在停止后执行一次', () => {
+        const fn = vi.fn();                  // vi.fn = spy,既可断言调用次数也可指定返回
+        const debounced = debounce(fn, 300);
+
+        debounced();
+        vi.advanceTimersByTime(100);
+        debounced();                          // 中途再次触发 → 重新计时
+        vi.advanceTimersByTime(299);
+        expect(fn).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);            // 距最后一次触发恰好 300ms
+        expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('参数与 this 正确透传', () => {
+        const fn = vi.fn();
+        const debounced = debounce(fn, 100);
+        debounced('a', 'b');
+        vi.runAllTimers();
+        expect(fn).toHaveBeenCalledWith('a', 'b');
+    });
+});
+
+// ---- Mock 外部依赖:只在"模块边界"mock,不 mock 被测函数内部 ----
+import { fetchUserProfile } from '@/api/user';
+import { http } from '@/api/http';
+
+vi.mock('@/api/http', () => ({
+    http: { get: vi.fn() },
+}));
+
+describe('fetchUserProfile', () => {
+    it('成功时返回用户数据', async () => {
+        vi.mocked(http.get).mockResolvedValue({ id: '1', name: 'Alice' });
+        const user = await fetchUserProfile('1');
+        expect(user.name).toBe('Alice');
+        expect(http.get).toHaveBeenCalledWith('/user/1');
+    });
+
+    it('网络错误抛异常', async () => {
+        vi.mocked(http.get).mockRejectedValue(new Error('Network'));
+        await expect(fetchUserProfile('1')).rejects.toThrow('Network');
+    });
+});
+```
+
+> 运行方式：`npm i -D vitest`，`vitest.config.ts` 中配置 alias 后 `npx vitest`（watch 模式）/ `npx vitest run`（CI）/ `npx vitest --ui`（可视化时间旅行）。
+
+#### 完整配置示例
+
+```typescript
+// 文件: examples/09-01-vitest-config.ts —— 生产级 vitest.config(可直接抄)
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'node:url';
+
+export default defineConfig({
+    plugins: [react()],
+    resolve: {
+        // alias 与 vite.config 一致,避免双份维护
+        alias: {
+            '@': fileURLToPath(new URL('./src', import.meta.url)),
+        },
+    },
+    test: {
+        environment: 'jsdom',                // 默认 node,组件测试切 jsdom;追求极致速度可换 happy-dom
+        globals: true,                       // 免 import { describe, it, expect }
+        setupFiles: ['./tests/setup.ts'],   // 每文件执行前注入:jest-dom matchers、MSW server.listen
+        include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+        exclude: ['**/node_modules/**', '**/e2e/**'], // e2e 走 Playwright,不混跑
+        coverage: {
+            provider: 'v8',                  // 比 istanbul 快、零插桩
+            reporter: ['text', 'json', 'lcov', 'html'],
+            include: ['src/**/*.{ts,tsx}'],
+            exclude: ['src/**/*.d.ts', 'src/**/index.ts', 'src/main.tsx'],
+            thresholds: {                   // 覆盖率门禁:低于即 CI 失败
+                statements: 80,
+                branches: 75,
+                functions: 80,
+                lines: 80,
+            },
+        },
+        pool: 'forks',                      // 多进程隔离;threads 模式更快但共享内存
+        poolOptions: {
+            forks: { singleFork: true },    // 用了原生模块/EsmModule 时强制单进程
+        },
+        retry: 0,                           // 单测原则上不重试,flaky 必须根治
+        bail: 10,                           // 连续失败 10 条立即停,避免雪崩
+    },
+});
+```
+
+```typescript
+// 文件: tests/setup.ts —— 全局注入钩子(配合 setupFiles)
+import '@testing-library/jest-dom/vitest';   // 注入 toBeInTheDocument 等 matchers
+import { server } from '@/mocks/server';      // MSW,见 9.5
+import { afterAll, afterEach, beforeAll } from 'vitest';
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterEach(() => server.resetHandlers());       // 每个 it 之间清掉 runtime mock
+afterAll(() => server.close());
+```
+
+#### 假定时器：测试异步时间的核心工具
+
+| API | 作用 | 典型用法 |
+| --- | ---- | -------- |
+| `vi.useFakeTimers()` | 接管 `setTimeout/setInterval/Date/raf` | `beforeEach(() => vi.useFakeTimers())` |
+| `vi.advanceTimersByTime(ms)` | 推进指定毫秒 | `vi.advanceTimersByTime(299)` |
+| `vi.runAllTimers()` | 跑完所有队列 | 防抖多次触发后清空 |
+| `vi.runOnlyPendingTimers()` | 只跑当前已有的 | 递归 timer 防死循环 |
+| `vi.setSystemTime(date)` | 固定 `Date.now`/`new Date()` | 测时间相关业务（订单过期） |
+| `vi.useRealTimers()` | 还原真实时间 | `afterEach` 必备 |
+
+> ⚠️ 坑：`vi.useFakeTimers` 默认接管 `Date`，若被测代码用 `new Date()` 取真实时间而你的 mock 没设，会拿到 1970-01-01。要么用 `vi.setSystemTime(new Date('2026-09-23'))`，要么 `vi.useFakeTimers({ toFake: ['setTimeout'] })` 只接管需要的 API。
+
+#### 快照测试：何时该用、何时是陷阱
+
+```typescript
+// ✅ 推荐:稳定契约的快照(组件渲染结构、CLI 输出、配置生成)
+describe('UserCard 组件', () => {
+    it('默认渲染结构稳定', () => {
+        render(<UserCard user={{ id: 1, name: 'Alice' }} />);
+        expect(screen.getByTestId('user-card')).toMatchInlineSnapshot(`
+          <div data-testid="user-card">
+            <h3>Alice</h3>
+            <p>ID: 1</p>
+          </div>
+        `);
+    });
+});
+
+// ❌ 反例:把可变业务数据塞进快照,稍有数据变化就一片红
+it('用户列表快照', () => {
+    expect(fetchUsers()).toMatchInlineSnapshot(); // ← 每次后端改字段都得 npx vitest -u
+});
+```
+
+> 决策：**契约稳定 → 用快照**（组件默认结构、解析器输出、配置生成）；**数据可变 → 用断言**（断言只验关键字段，不要全量快照）。
+
+#### 基准测试 bench：给热点函数上护栏
+
+```typescript
+// 文件: examples/09-08-bench.ts —— Vitest bench:对工具函数做性能基准
+import { bench, describe } from 'vitest';
+import { toCents } from '@/utils/money';
+
+describe('toCents 性能', () => {
+    bench('常规金额', () => {
+        toCents(12.34);
+    }, { iterations: 1_000_000 });
+
+    bench('大额 1e9', () => {
+        toCents(1e9);
+    });
+});
+```
+
+> 运行方式：`npx vitest bench`，结果会对比上次 baseline，回归 >10% 自动告警。适合给排序、深拷贝、虚拟列表 key 计算等热点函数加护栏。
+
+#### In-source Testing：工具库的最佳实践
+
+把单测直接写在源文件里，不再单独维护 `xxx.test.ts`：
+
+```typescript
+// 文件: src/utils/lru-cache.ts
+export class LRUCache<K, V> {
+    // ... 实现
+}
+
+// 当模块作为"测试入口"被 vitest 加载时才执行
+if (import.meta.vitest) {
+    const { describe, it, expect } = import.meta.vitest;
+    describe('LRUCache', () => {
+        it('超容量淘汰最久未用', () => {
+            const cache = new LRUCache<string, number>(2);
+            cache.set('a', 1); cache.set('b', 2); cache.set('c', 3);
+            expect(cache.get('a')).toBeUndefined();
+            expect(cache.get('c')).toBe(3);
+        });
+    });
+}
+```
+
+> `vite.config.ts` 加 `test: { includeSource: ['src/**/*.ts'] }` 即生效。优点：示例与实现同文件，重构时一改俱改，避免"测试漂移"。
+
+#### 最佳实践
+
+- ✅ 用假定时器测试防抖/节流，用 `vi.useFakeTimers` 消灭测试中的真实等待；
+- ✅ Mock 只发生在**模块边界**（API 层），不要 mock 被测函数内部细节，否则重构即碎；
+- ✅ 异常分支必须测：`expect(() => fn()).toThrow()`、`await expect(p).rejects.toThrow()`，否则 `throw` 形同未测；
+- ✅ 参数化测试 `it.each` 用一张表覆盖边界，避免散落的 10 个 `it`；
+- ✅ 覆盖率门禁设 70~80%，排除 `index.ts`/类型声明/配置文件，不追求 100%；
+- ⚠️ 测试命名写成行为描述（"连续触发只在停止后执行一次"），失败时读名字就知道哪里坏了；
+- ⚠️ 单测原则上不 retry：flaky 必须根治（要么改代码、要么改测试），靠 retry 蒙混是 E2E 才允许的妥协。
+
+## 9.3 组件测试与 Testing Library
+
+#### 概念解析
+
+Testing Library 的哲学：**像用户一样测试**——通过"角色（role）、文本、标签"查询元素，而不是查询实现细节（class、state），测试随重构保持稳定。它的核心 GUIDING 原则：
+
+> "The more your tests resemble the way your software is used, the more confidence they give you."
+
+换句话说：**测试代码应该模拟真实用户与 UI 的交互（点击、输入、键盘、滚动），而不是检查 `state.count === 1` 这种实现细节**。这样组件内部从 class 改成 hooks、从 Redux 换 Zustand，测试都不动。
+
+#### 查询优先级：从最贴近用户到最后兜底
+
+| 优先级 | 方法 | 适用场景 | 为什么靠前 |
+| ------ | ---- | -------- | ---------- |
+| 1 | `getByRole` | 按钮、链接、对话框、菜单 | 用户与可访问性角色交互，最贴近真实体验 |
+| 2 | `getByLabelText` | 表单字段（label 关联 input） | 视障用户靠 label 识别字段，最语义化 |
+| 3 | `getByPlaceholderText` | 仅当无 label 时 | 弱化版 label |
+| 4 | `getByText` | 标题、说明文字 | 文案易变，仅次选 |
+| 5 | `getByDisplayValue` | 当前值（select/input 显示） | 表单回显场景 |
+| 6 | `getByAltText` | 图片 alt | `<img alt />` |
+| 7 | `getByTitle` | 元素 title 属性 | tooltip 等 |
+| 8 | `getByTestId` | 兜底 | 唯一稳定但脱离语义，最后选 |
+
+> 口诀：**先 role，再 label，再 text，最后 testId**。前三个能找到就别用 testId。
+
+#### 三种 query 的语义区别
+
+| 前缀 | 行为 | 不匹配时 | 异步出现时 |
+| ---- | ---- | -------- | ---------- |
+| `getBy*` | 同步取一个 | 抛错（测试红） | 立即抛错（需先 wait） |
+| `queryBy*` | 同步取一个 | 返回 `null`（不抛错） | 返回 `null`，适合 `not.toBeInTheDocument` |
+| `findBy*` | 异步等一个（Promise） | 超时抛错 | 自动等到出现 |
+
+```typescript
+// ✅ 同步出现 → getBy
+expect(screen.getByRole('button', { name: '登录' })).toBeInTheDocument();
+
+// ✅ 异步出现 → findBy(自带等待,无需手写 sleep)
+expect(await screen.findByText('加载完成')).toBeInTheDocument();
+
+// ✅ 断言"不存在" → queryBy(找不到返回 null,不抛错)
+expect(screen.queryByText('错误提示')).not.toBeInTheDocument();
+
+// ❌ 反例:get 找不到会立即抛错,断言"不存在"会误报
+expect(screen.getByText('错误提示')).not.toBeInTheDocument(); // ← 永远抛"找不到"
+```
+
+#### 复数场景：`getAllBy*` / `findAllBy*`
+
+匹配多个时用 `All` 变体，断言用 `toHaveLength`：
+
+```typescript
+const items = screen.getAllByRole('listitem');
+expect(items).toHaveLength(3);
+expect(items[0]).toHaveTextContent('商品 A');
+```
+
+#### 完整代码示例：被测组件
+
+```tsx
+// 文件: src/components/Counter.tsx —— 被测组件
+import { useState } from 'react';
+
+export function Counter({ initial = 0 }: { initial?: number }) {
+    const [count, setCount] = useState(initial);
+    return (
+        <div>
+            <p>当前计数:{count}</p>
+            <button onClick={() => setCount((c) => c + 1)}>增加</button>
+            <button onClick={() => setCount(initial)}>重置</button>
+        </div>
+    );
+}
+```
+
+```tsx
+// 文件: src/components/LoginForm.tsx —— 被测组件(含异步)
+import { useState } from 'react';
+
+export function LoginForm({ onLogin }: { onLogin: (u: string, p: string) => Promise<void> }) {
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const submit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true); setError('');
+        try {
+            await onLogin(
+                (document.getElementById('u') as HTMLInputElement).value,
+                (document.getElementById('p') as HTMLInputElement).value,
+            );
+        } catch {
+            setError('登录失败,请重试');
+        } finally { setLoading(false); }
+    };
+    return (
+        <form onSubmit={submit}>
+            <label>用户名<input id="u" /></label>
+            <label>密码<input id="p" type="password" /></label>
+            <button type="submit">{loading ? '登录中…' : '登录'}</button>
+            {error && <p role="alert">{error}</p>}
+        </form>
+    );
+}
+```
+
+#### 完整代码示例：组件测试本体
+
+```tsx
+// 文件: examples/09-04-counter.test.tsx —— Testing Library 全特性示例
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Counter } from '@/components/Counter';
+import { LoginForm } from '@/components/LoginForm';
+
+describe('Counter 组件', () => {
+    it('渲染初始值', () => {
+        render(<Counter initial={5} />);
+        expect(screen.getByText('当前计数:5')).toBeInTheDocument();
+    });
+
+    it('点击增加按钮后计数 +1(异步交互用 userEvent)', async () => {
+        render(<Counter />);
+        await userEvent.click(screen.getByRole('button', { name: '增加' }));
+        expect(screen.getByText('当前计数:1')).toBeInTheDocument();
+    });
+
+    it('连续点击三次后为 3,重置后回到初始值', async () => {
+        render(<Counter initial={10} />);
+        const inc = screen.getByRole('button', { name: '增加' });
+        await userEvent.click(inc);
+        await userEvent.click(inc);
+        await userEvent.click(inc);
+        expect(screen.getByText('当前计数:13')).toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole('button', { name: '重置' }));
+        expect(screen.getByText('当前计数:10')).toBeInTheDocument();
+    });
+});
+
+describe('LoginForm 组件', () => {
+    it('登录中显示 loading 文案,失败后显示错误提示', async () => {
+        const onLogin = vi.fn().mockRejectedValue(new Error('fail'));
+        render(<LoginForm onLogin={onLogin} />);
+        await userEvent.type(screen.getByLabelText('用户名'), 'alice');
+        await userEvent.type(screen.getByLabelText('密码'), 'pass');
+        await userEvent.click(screen.getByRole('button', { name: '登录' }));
+
+        // 异步文案:findBy 自带等待,绝不手写 setTimeout
+        expect(await screen.findByRole('button', { name: '登录中…' })).toBeDisabled();
+        expect(await screen.findByRole('alert')).toHaveTextContent('登录失败');
+        expect(onLogin).toHaveBeenCalledWith('alice', 'pass');
+    });
+});
+```
+
+> 运行方式：`npm i -D @testing-library/react @testing-library/user-event @testing-library/jest-dom jsdom`，Vitest 配置 `environment: 'jsdom'`，setupFiles 注入 `@testing-library/jest-dom/vitest`。React 生态还需 `@vitejs/plugin-react` 处理 JSX。
+
+#### `userEvent` vs `fireEvent`：永远选前者
+
+| 维度 | `fireEvent` | `userEvent` |
+| ---- | ----------- | ----------- |
+| 行为粒度 | 直接触发单个 DOM 事件（`click`、`input`） | 模拟真实用户：聚焦、按键、失焦、防抖、键盘组合 |
+| `type('abc')` | 触发 1 次 input | 触发 3×KeyDown + 3×Input + 3×KeyUp |
+| 键盘组合 | 需手写 | `userEvent.keyboard('{Shift>}A{/Shift}')` 一行 |
+| 文件上传 | 需手构 `File` | `userEvent.upload(input, file)` |
+| Tab 顺序 | 不模拟 | 真实走 DOM 焦点链 |
+| 推荐度 | 兜底（库未支持的场景） | **默认选** |
+
+> 哲学：`fireEvent` 是"我把事件砸到 DOM 上"，`userEvent` 是"我像用户那样操作"。后者能捕获"点击不到""焦点跳错"这类真实 bug，前者测不到。
+
+#### 自定义 render：避免每次手动注入 Provider
+
+```tsx
+// 文件: tests/test-utils.tsx —— 封装 render,统一注入 Theme/Router/QueryClient
+import { render, RenderOptions } from '@testing-library/react';
+import { ThemeProvider } from '@/theme/ThemeProvider';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
+import { ReactElement } from 'react';
+
+function AllProviders({ children }: { children: ReactElement }) {
+    const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } }, // 测试中不重试,加快反馈
+    });
+    return (
+        <ThemeProvider>
+            <QueryClientProvider client={queryClient}>
+                <MemoryRouter>{children}</MemoryRouter>
+            </QueryClientProvider>
+        </ThemeProvider>
+    );
+}
+
+export function renderWithProviders(ui: ReactElement, options?: RenderOptions) {
+    return render(ui, { wrapper: AllProviders, ...options });
+}
+```
+
+```tsx
+// 测试用 renderWithProviders 替代 render,避免每个 it 都手写 Provider 包裹
+import { renderWithProviders } from '../test-utils';
+renderWithProviders(<Dashboard />);
+```
+
+#### Vue 场景：`@testing-library/vue` 等价用法
+
+```ts
+// 文件: tests/Counter.spec.ts —— Vue 3 组件测试
+import { describe, it, expect } from 'vitest';
+import { render, fireEvent } from '@testing-library/vue';
+import Counter from '@/components/Counter.vue';
+
+describe('Counter.vue', () => {
+    it('点击增加后计数 +1', async () => {
+        const { getByText } = render(Counter, { props: { initial: 0 } });
+        await fireEvent.click(getByText('增加'));
+        expect(getByText('当前计数:1')).toBeTruthy();
+    });
+});
+```
+
+> Vue 3 还可以用 `@vue/test-utils` 风格（mount/shallow），但社区共识：新项目优先 Testing Library，避免过度依赖内部实例细节。
+
+#### jest-dom 常用 matchers 速查
+
+| Matcher | 断言 |
+| ------- | ---- |
+| `toBeVisible()` | 元素可见（无 `display:none`/`hidden`） |
+| `toBeDisabled()` / `toBeEnabled()` | 禁用/可用 |
+| `toBeInTheDocument()` | 已挂载到 document |
+| `toHaveTextContent('abc')` | 文本包含（可传正则） |
+| `toHaveValue('alice')` | 表单值 |
+| `toHaveAttribute('href', '/x')` | 属性 |
+| `toHaveClass('active')` | class |
+| `toHaveFocus()` | 当前焦点 |
+| `toBeInvalid()` / `toBeValid()` | 表单校验状态 |
+
+#### 最佳实践
+
+- ✅ 查询优先级：`getByRole` > `getByLabelText` > `getByText` > `getByTestId`（testId 是最后手段）；
+- ✅ 异步用 `findBy*` 自带等待，绝不手写 `setTimeout(sleep)`；
+- ✅ 优先 `userEvent` 而非 `fireEvent`，前者更接近真实用户行为；
+- ✅ 封装 `renderWithProviders` 统一注入 Provider，避免每个测试重复样板代码；
+- ✅ 断言用语义 matcher（`toBeVisible`/`toHaveTextContent`），不要断言 class 名；
+- ⚠️ 不要断言"调用了几次 setState"——测行为结果，不测实现，否则一改 hooks 测试全碎；
+- ⚠️ jsdom 不支持 `IntersectionObserver`/`ResizeObserver`/Canvas，需在 setup 里 mock，否则组件挂载即崩。
+
+## 9.4 E2E 测试与 Playwright
+
+#### 概念解析
+
+Playwright 由 Microsoft 出品（前身是 Puppeteer 团队核心成员跳槽后造的），定位是"跨浏览器、跨平台的可靠 E2E 框架"。相比 Cypress 的最大优势：
+
+1. **跨浏览器**：Chromium/Firefox/WebKit 一套 API 全覆盖，能测 Safari 兼容性；
+2. **多进程并行**：每个测试在独立 `BrowserContext` 跑，无串行瓶颈；
+3. **自动等待（auto-waiting）**：`click`/`fill` 自带等待元素可见、可点击、稳定，告别手写 `waitForSelector`；
+4. **Trace Viewer**：失败时能像录像一样回放每一步操作（DOM 快照、网络、控制台、截图）；
+5. **Codegen**：录制操作自动生成测试代码，降低入门门槛。
+
+#### Playwright vs Cypress 对照
+
+| 维度 | Playwright | Cypress |
+| ---- | ---------- | ------- |
+| 浏览器 | Chromium/Firefox/WebKit | 仅 Chromium 系（10+ 才支持 Firefox） |
+| 进程模型 | Node 主进程 + 浏览器进程，无同源限制 | 测试代码跑在浏览器内，受同源策略约束 |
+| 并行 | 内置多进程并行 + 分片 | 串行为主，并行需付费 |
+| 失败回放 | Trace Viewer（DOM/网络/截图全保留） | 视频截图 |
+| 复用登录 | `storageState` 一次性保存 cookie/localStorage | 自定义命令 |
+| iframe/多 Tab | 原生支持 | 受限 |
+| 学习曲线 | 稍陡（fixture/POM） | 平缓 |
+| 选型建议 | 中大型项目、跨浏览器、CI 重度 | 中小型、调试体验优先 |
+
+#### 核心能力：Auto-waiting
+
+Playwright 在执行 `click`/`fill`/`hover` 等动作前，会自动等待元素满足 **6 个条件**：
+
+```
+1. Visible     —— 元素在视口且可见
+2. Stable      —— 元素不再抖动（避免动画过程中点中错位元素）
+3. Enabled     —— 不被 disabled / pointer-events:none 拦截
+4. Receives events —— 不被其他元素遮挡（z-index/overlay）
+5. Hit target   —— 点击坐标确实落在目标元素上（不被浮层遮住）
+6. Actionable   —— 滚动到视口内
+```
+
+满足后才执行，超时抛错（默认 30s）。**绝大多数 E2E flaky 来自手写 sleep 或没等够，auto-waiting 是根治手段。**
+
+#### 完整代码示例：基础用法
+
+```typescript
+// 文件: e2e/login.spec.ts —— Playwright:登录 + 下单关键路径
+import { test, expect } from '@playwright/test';
+
+test.describe('电商核心路径', () => {
+    test('登录后搜索并加入购物车', async ({ page }) => {
+        // ---- 登录 ----
+        await page.goto('https://app.example.com/login');
+        await page.getByLabel('用户名').fill('demo_user');
+        await page.getByLabel('密码').fill('demo_pass');
+        await page.getByRole('button', { name: '登录' }).click();
+
+        // 自动等待导航完成(Playwright 的核心优势:免手动 sleep)
+        await expect(page).toHaveURL(/dashboard/);
+
+        // ---- 搜索 ----
+        await page.getByRole('searchbox').fill('机械键盘');
+        await page.keyboard.press('Enter');
+        await expect(page.getByText('搜索结果')).toBeVisible();
+
+        // ---- 加购并断言角标 ----
+        await page.getByRole('listitem').first().getByRole('button', { name: '加入购物车' }).click();
+        await expect(page.getByTestId('cart-badge')).toHaveText('1');
+
+        // ---- 截图留档:失败时自动附上(trace) ----
+        await page.screenshot({ path: 'artifacts/cart.png', fullPage: true });
+    });
+
+    test('未登录访问受保护页面跳转登录', async ({ page }) => {
+        await page.goto('https://app.example.com/orders');
+        await expect(page).toHaveURL(/login/);
+    });
+});
+```
+
+```typescript
+// 文件: playwright.config.ts
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+    testDir: './e2e',
+    timeout: 30_000,
+    retries: process.env.CI ? 2 : 0,        // CI 重试,降低环境抖动
+    use: {
+        baseURL: 'http://localhost:5173',
+        trace: 'retain-on-failure',          // 失败时保留操作轨迹,可回放
+        screenshot: 'only-on-failure',
+        video: 'retain-on-failure',
+    },
+    projects: [
+        { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+        { name: 'firefox', use: { ...devices['Desktop Firefox'] } },   // CI 多浏览器覆盖
+        { name: 'webkit',  use: { ...devices['Desktop Safari'] } },   // 兼容 Safari
+        { name: 'mobile',  use: { ...devices['iPhone 14'] } },        // 移动端视口一并覆盖
+    ],
+    webServer: {                             // 自动起 dev/preview 服务再跑测试
+        command: 'npm run preview',
+        port: 5173,
+        reuseExistingServer: !process.env.CI,
+    },
+});
+```
+
+> 运行方式：`npm i -D @playwright/test && npx playwright install chromium` → `npx playwright test`；调试用 `npx playwright test --ui`（可视化逐步执行）；录制用 `npx playwright codegen localhost:5173`。
+
+#### POM（Page Object Model）模式：E2E 可维护的关键
+
+直接写选择器会让测试随 UI 改动而崩。POM 把"页面操作"封装成对象，测试只调用方法：
+
+```typescript
+// 文件: e2e/pages/LoginPage.ts —— 登录页面对象
+import { Page, Locator, expect } from '@playwright/test';
+
+export class LoginPage {
+    readonly page: Page;
+    readonly usernameInput: Locator;
+    readonly passwordInput: Locator;
+    readonly submitButton: Locator;
+
+    constructor(page: Page) {
+        this.page = page;
+        this.usernameInput = page.getByLabel('用户名');
+        this.passwordInput = page.getByLabel('密码');
+        this.submitButton  = page.getByRole('button', { name: '登录' });
+    }
+
+    async goto() {
+        await this.page.goto('/login');
+    }
+
+    async loginAs(user: string, pass: string) {
+        await this.usernameInput.fill(user);
+        await this.passwordInput.fill(pass);
+        await this.submitButton.click();
+        await expect(this.page).toHaveURL(/dashboard/);   // 在对象内完成自检
+    }
+}
+```
+
+```typescript
+// 文件: e2e/pages/CartPage.ts
+import { Page, Locator, expect } from '@playwright/test';
+
+export class CartPage {
+    readonly page: Page;
+    readonly badge: Locator;
+
+    constructor(page: Page) {
+        this.page = page;
+        this.badge = page.getByTestId('cart-badge');
+    }
+
+    async expectCount(n: number) {
+        await expect(this.badge).toHaveText(String(n));
+    }
+}
+```
+
+```typescript
+// 文件: e2e/login.spec.ts —— 用 POM 后,UI 变了只改 POM,测试不动
+import { test } from '@playwright/test';
+import { LoginPage } from './pages/LoginPage';
+import { CartPage } from './pages/CartPage';
+
+test('登录并加购', async ({ page }) => {
+    const login = new LoginPage(page);
+    await login.goto();
+    await login.loginAs('demo_user', 'demo_pass');
+
+    const cart = new CartPage(page);
+    await page.getByRole('listitem').first().getByRole('button', { name: '加入购物车' }).click();
+    await cart.expectCount(1);
+});
+```
+
+#### 复用登录状态：`storageState` 把 30s 登录压成 0ms
+
+```typescript
+// 文件: e2e/auth.setup.ts —— 全局 setup:登录一次,序列化 cookie/localStorage
+import { test as setup, expect } from '@playwright/test';
+
+setup('登录并保存状态', async ({ page }) => {
+    await page.goto('/login');
+    await page.getByLabel('用户名').fill('e2e_user');
+    await page.getByLabel('密码').fill('e2e_pass');
+    await page.getByRole('button', { name: '登录' }).click();
+    await expect(page).toHaveURL(/dashboard/);
+    await page.context().storageState({ path: '.auth/user.json' });   // 序列化 cookie/localStorage
+});
+```
+
+```typescript
+// playwright.config.ts 在 projects 中注入
+export default defineConfig({
+    projects: [
+        { name: 'setup', testMatch: /.*\.setup\.ts/ },                  // 先跑 setup
+        {
+            name: 'chromium',
+            dependencies: ['setup'],                                    // 等 setup 完成
+            use: {
+                ...devices['Desktop Chrome'],
+                storageState: '.auth/user.json',                      // 复用登录态
+            },
+        },
+    ],
+});
+```
+
+> 收益：原本每条测试要花 5~10s 登录，复用后变成 0ms，**全套 100 条 E2E 能省 8~15 分钟**。
+
+#### Fixture：测试数据用 API 而不是 UI 创建
+
+```typescript
+// 文件: e2e/fixtures.ts —— 用 request 夹具调 API 造数据,比 UI 点一遍快几十倍
+import { test as base, expect, APIResponse } from '@playwright/test';
+
+interface TestFixture {
+    orderId: string;
+}
+
+export const test = base.extend<TestFixture>({
+    orderId: async ({ request }, use) => {
+        // 用 API 创建一个待支付订单(直接调接口,绕过 UI)
+        const res: APIResponse = await request.post('/api/orders', {
+            data: { sku: 'X1', quantity: 2 },
+            headers: { Authorization: `Bearer ${process.env.E2E_TOKEN}` },
+        });
+        const { id } = await res.json();
+        await use(id);                       // use 内:订单存在
+
+        // use 之后(测试结束):调 API 删掉,保证下次跑干净
+        await request.delete(`/api/orders/${id}`);
+    },
+});
+
+// 用法
+test('支付订单', async ({ page, orderId }) => {
+    await page.goto(`/orders/${orderId}`);
+    await page.getByRole('button', { name: '支付' }).click();
+    await expect(page.getByText('支付成功')).toBeVisible();
+});
+```
+
+> 原则：**造数据用 API，断言行为用 UI**。UI 一遍遍点击造数据是 E2E 最常见的反模式。
+
+#### 网络拦截：模拟后端未就绪
+
+```typescript
+// 不打真实后端,拦截请求返回固定数据(集成测试 / 后端未就绪时联调)
+await page.route('**/api/user', async (route) => {
+    await route.fulfill({ json: { id: '1', name: 'Mocked Alice' } });
+});
+
+// 模拟 500 错误
+await page.route('**/api/orders', (route) => route.fulfill({ status: 500, json: { msg: 'fail' } }));
+
+// 让请求失败,验证前端降级
+await page.route('**/api/user', (route) => route.abort());
+```
+
+> 一般情况下 E2E 不 mock（要测真实集成），仅在"后端未上线""测前端降级"时使用。
+
+#### 并行与 CI 分片
+
+Playwright 默认多进程并行跑测试文件。CI 上配合 sharding 把任务拆给多台机器：
+
+```bash
+# 单机并行(默认)
+npx playwright test
+
+# CI 分片:GitHub Actions 跑 4 个分片,每片约 1/4 时间
+npx playwright test --shard=1/4
+npx playwright test --shard=2/4
+npx playwright test --shard=3/4
+npx playwright test --shard=4/4
+```
+
+```yaml
+# .github/workflows/e2e.yml(简版,完整见 9.9)
+jobs:
+  e2e:
+    strategy:
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - run: npx playwright test --shard=${{ matrix.shard }}/4
+```
+
+> 分片后用 `npx playwright merge-blob-reports` 合并报告。原 12 分钟的 E2E 拆 4 片能压到 ~3 分钟。
+
+#### 最佳实践
+
+- ✅ E2E 只覆盖"公司倒闭级"路径：注册登录、下单支付、核心导出——不超过 20 条；
+- ✅ 测试账号与数据用 API/fixture 铺垫（`request` 夹具直接调接口造数据），不要用 UI 一步步点出来；
+- ✅ 用 POM 把"页面操作"封装成对象，UI 改了只改 POM，测试不动；
+- ✅ 用 `storageState` 复用登录态，把每条测试 5~10s 的登录压成 0ms；
+- ✅ CI 用 sharding 分片，把长套件拆给多台机器并行跑；
+- ✅ 失败保留 trace + screenshot + video，三件套定位问题；
+- ⚠️ 选择器避免依赖文案与 class，用 `getByRole`/`getByTestId`；文案变更不应导致测试崩溃；
+- ⚠️ 不要在 E2E 中 mock 一切——E2E 的核心价值是真实集成，过度 mock 等于退化成集成测试，且更慢。
+
+## 9.5 Mock 策略与 MSW
+
+#### 概念解析
+
+MSW（Mock Service Worker）在**网络层**拦截请求：同一份 mock 同时服务单测、Storybook 与本地开发，且前端代码零感知。它的杀手锏在于——业务代码完全不知道自己在用 mock，因为请求是真的发出去了，只是被 Service Worker（浏览器）或 `msw/node` 的 fetch/XHR 拦截器（Node）截胡了。
+
+#### Mock 的三个层级对比
+
+| 层级 | 代表 | 侵入性 | 真实度 | 适用 |
+| ---- | ---- | ------ | ------ | ---- |
+| 函数级 | `vi.fn`/`vi.mock('@/api/http')` | 高（替换模块） | 低（业务代码感知） | 单测单元边界 |
+| 网络级 | **MSW**、Nock | 低（业务零感知） | 中（拦截请求） | 组件/集成测试、Storybook、联调 |
+| 服务级 | mock server、 Pact | 0 | 高（真起一个端口） | 契约测试、E2E 联调 |
+
+```mermaid
+flowchart LR
+    A[业务代码 fetch] --> B[业务代码 mock fetch<br/>侵入性最高]
+    A --> C[MSW 拦截<br/>网络层]
+    A --> D[真实后端<br/>真起服务]
+    style B fill:#fdd
+    style C fill:#dfd
+    style D fill:#ddf
+```
+
+> 共识：**单测用 `vi.fn` 在模块边界 mock；集成/组件测试、Storybook、联调用 MSW；E2E 用真实后端**。各司其职。
+
+#### 完整代码示例：handlers 设计
+
+```typescript
+// 文件: examples/09-05-msw-handlers.ts —— mock 定义(一处定义,处处可用)
+import { http, HttpResponse, delay, PathParams } from 'msw';
+
+// 用一个固定的假数据池,便于不同测试切换
+const users = new Map<string, { id: string; name: string; age: number }>([
+    ['1', { id: '1', name: 'Alice', age: 18 }],
+    ['2', { id: '2', name: 'Bob',   age: 22 }],
+]);
+
+export const handlers = [
+    // ---- GET 路径参数 ----
+    http.get('/api/user/:id', async ({ params }) => {
+        const id = (params as PathParams).id as string;
+        const user = users.get(id);
+        if (!user) return HttpResponse.json({ message: 'Not Found' }, { status: 404 });
+        await delay(200);                       // 模拟网络延迟,让 loading 态可被测试
+        return HttpResponse.json(user);
+    }),
+
+    // ---- POST 请求体解析 ----
+    http.post('/api/login', async ({ request }) => {
+        const { username, password } = (await request.json()) as { username: string; password: string };
+        if (username === 'admin' && password === 'pass') {
+            return HttpResponse.json({ token: 'fake-token' });
+        }
+        return HttpResponse.json({ message: '用户名或密码错误' }, { status: 401 });
+    }),
+
+    // ---- 查询参数 ----
+    http.get('/api/users', async ({ request }) => {
+        const url = new URL(request.url);
+        const page  = Number(url.searchParams.get('page')  ?? '1');
+        const size  = Number(url.searchParams.get('size')  ?? '10');
+        const list  = [...users.values()].slice((page - 1) * size, page * size);
+        return HttpResponse.json({ total: users.size, list });
+    }),
+
+    // ---- 错误分支:这是 bug 高发区,必须覆盖 ----
+    http.get('/api/orders/:id', async ({ params }) => {
+        const id = (params as PathParams).id as string;
+        if (id === '500') {                      // 占位 ID 测 500 错误
+            return HttpResponse.json({ message: 'DB down' }, { status: 500 });
+        }
+        return HttpResponse.json({ id, status: 'paid' });
+    }),
+
+    // ---- 网络级超时:让前端降级逻辑可被测 ----
+    http.get('/api/slow', async () => {
+        await delay(60_000);                     // 60s 后才返回,测试超时降级
+        return HttpResponse.json({ ok: true });
+    }),
+];
+```
+
+#### 测试环境接入（Node 端）
+
+```typescript
+// 文件: src/mocks/server.ts —— 测试环境接入(Node)
+import { setupServer } from 'msw/node';
+import { handlers } from './handlers';
+
+export const server = setupServer(...handlers);
+
+// 测试入口(tests/setup.ts,Vitest 配置 setupFiles):
+// beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));  ← 未匹配的请求直接报错,防漏 mock
+// afterEach(() => server.resetHandlers());     // 每个 it 之间清掉 runtime mock
+// afterAll(() => server.close());
+```
+
+#### 浏览器/Storybook 接入（开发态）
+
+```typescript
+// 文件: src/mocks/browser.ts —— 开发态浏览器接入
+import { setupWorker } from 'msw/browser';
+import { handlers } from './handlers';
+
+export const worker = setupWorker(...handlers);
+
+// main.tsx 应用入口
+async function enableMocking() {
+    if (process.env.NODE_ENV !== 'production') {
+        const { worker } = await import('./mocks/browser');
+        await worker.start({ onUnhandledRequest: 'bypass' });   // 未匹配的请求放行给真实后端
+    }
+}
+enableMocking().then(() => {
+    // 应用启动逻辑:createRoot(document.getElementById('root')!).render(<App />)
+});
+```
+
+> ⚠️ 浏览器模式需要先执行 `npx msw init public/` 生成 `mockServiceWorker.js` 文件（放在静态目录），首次请求会从 CDN 加载这个 SW 文件。
+
+#### 临时覆盖：`server.use()`
+
+```typescript
+import { server } from '@/mocks/server';
+import { http, HttpResponse } from 'msw';
+import { afterEach } from 'vitest';
+
+describe('UserList 加载失败', () => {
+    afterEach(() => server.resetHandlers());                  // 关键:测完恢复
+
+    it('500 时显示重试按钮', async () => {
+        server.use(
+            http.get('/api/users', () =>
+                HttpResponse.json({ message: 'fail' }, { status: 500 }),
+            ),
+        );
+        renderWithProviders(<UserList />);
+        expect(await screen.findByRole('button', { name: '重试' })).toBeVisible();
+    });
+});
+```
+
+> `server.use()` 只影响当前测试，`afterEach` 的 `resetHandlers` 保证不污染下一个用例。这是写"特定错误分支"测试的标准姿势。
+
+#### MSW 与 Storybook 集成：组件走查时的假数据
+
+```ts
+// .storybook/preview.ts —— Storybook 全局接入 MSW
+import { initialize, mswLoader } from 'msw-storybook-addon';
+import { handlers } from '../src/mocks/handlers';
+
+initialize({ onUnhandledRequest: 'bypass' });
+
+export const parameters = {
+    msw: { handlers },                          // 所有 Story 默认走 handlers
+};
+
+export const loaders = [mswLoader];
+
+// 单个 Story 覆盖
+export const ErrorState = {
+    parameters: {
+        msw: {
+            handlers: [
+                http.get('/api/users', () => HttpResponse.json({}, { status: 500 })),
+            ],
+        },
+    },
+};
+```
+
+> 收益：设计师/PM 走查组件时直接看到"错误态/空态/加载态"，不需要造后端数据，每个 Story 都有真实可交互的假数据。
+
+#### 最佳实践
+
+- ✅ `onUnhandledRequest: 'error'` 让漏 mock 的请求在测试期就暴露；
+- ✅ 错误分支必须 mock：401、500、空数据、超慢响应——这是 bug 高发区；
+- ✅ 用 `server.use()` 在测试内临时覆盖，`afterEach` 用 `resetHandlers` 复位，避免污染；
+- ✅ handlers 用一个固定数据池（`Map`），方便不同测试切换状态；
+- ⚠️ E2E 一般不打 mock（测真实集成），单测/组件测试用 MSW 替代"mock fetch 函数"的脆弱写法；
+- ⚠️ 浏览器模式别忘了 `npx msw init public/` 生成 SW 文件，否则 worker.start 报"找不到 mockServiceWorker.js"。
+
+---
+
+## 9.6 视觉回归与快照测试
+
+#### 概念解析
+
+"代码对了，但样式崩了"是单测抓不到的问题。视觉回归测试（Visual Regression Testing, VRT）通过对比截图像素差异，捕获这类回归。常见方案分两档：
+
+| 方案 | 形态 | 价格 | 适合 |
+| ---- | ---- | ---- | ---- |
+| Playwright 截图对比 | 自托管、零成本 | 免费 | 中小项目、关键页面 ≤ 50 个 |
+| Percy/Applitools/Chromatic | SaaS、跨浏览器 | 收费 | 大型项目、需要历史回溯、跨分辨率 |
+| Storyshots + Storybook | 自动遍历所有 Story 截图 | 免费 | 设计系统/组件库 |
+
+#### Playwright 截图对比
+
+```typescript
+// 文件: examples/09-06-visual-regression.ts —— Playwright 视觉回归示例
+import { test, expect } from '@playwright/test';
+
+test('Dashboard 主页视觉稳定', async ({ page }) => {
+    await page.goto('/dashboard');
+    await expect(page).toHaveScreenshot('dashboard.png', {
+        maxDiffPixelRatio: 0.01,         // 允许 1% 像素差异(抗锯齿/字体渲染抖动)
+        threshold: 0.2,                  // 单像素颜色阈值
+        animations: 'disabled',          // 关掉动画,避免截图时机不稳
+        fullPage: true,                  // 整页,不只是首屏
+    });
+});
+```
+
+> 运行方式：首次跑会生成 baseline（`dashboard-actual.png` → `dashboard.png`），后续跑会对比，差异 >1% 即测试红。需要更新 baseline 用 `npx playwright test --update-snapshots`。
+
+#### Storybook + Storyshots：组件库自动视觉回归
+
+```ts
+// .storybook/main.ts
+export default { framework: '@storybook/react-vite', stories: ['../src/**/*.stories.tsx'] };
+```
+
+```ts
+// src/components/Button.stories.tsx
+import { Meta, StoryObj } from '@storybook/react';
+import { Button } from './Button';
+
+const meta: Meta<typeof Button> = { title: 'Button', component: Button };
+export default meta;
+
+export const Primary: StoryObj<typeof Button> = { args: { variant: 'primary', children: 'Click' } };
+export const Disabled: StoryObj<typeof Button> = { args: { disabled: true, children: 'Click' } };
+```
+
+> 配合 `@storybook/addon-storyshots`，跑 `npm test` 会自动给每个 Story 截图并对比 baseline。组件库改一处样式，所有受影响的 Story 立即报红。
+
+#### 视觉回归的 flaky 防护
+
+| 抖动来源 | 解法 |
+| -------- | ---- |
+| 字体未加载完 | `await page.evaluate(() => document.fonts.ready)` |
+| 异步图片 | `await page.waitForLoadState('networkidle')` |
+| 动画 | `animations: 'disabled'` 关掉，或 `disable-css-animations` 插件 |
+| 不同 OS 字体渲染 | 在 CI 用固定 Docker 镜像，避免本地跑 |
+| 时间相关（如"今日"） | `vi.setSystemTime` 固定时间 |
+
+## 9.7 性能测试与基准
+
+#### 概念解析
+
+性能测试分三类，针对不同关注点：
+
+```
+┌──────────────────────────────────────────────┐
+│ 基准测试 (Vitest bench)        │ 单函数耗时护栏   │
+├──────────────────────────────────────────────┤
+│ 真实渲染测速 (React Profiler)   │ 单组件渲染次数   │
+├──────────────────────────────────────────────┤
+│ 用户体感 (Lighthouse/Web Vitals) │ 整页 LCP/INP/CLS │
+└──────────────────────────────────────────────┘
+```
+
+#### 基准测试：用 Vitest bench
+
+参见 [9.2 基准测试 bench](#基准测试-bench-给热点函数上护栏)。要点：
+
+- 写在 `*.bench.ts` 中，用 `bench(name, fn, options)`；
+- `npx vitest bench` 跑完后对比上次 baseline，回归 >10% 自动告警；
+- 适合 LRU、排序、深拷贝、虚拟列表 key 计算等热点函数。
+
+#### React Profiler：测组件渲染次数
+
+```tsx
+// 文件: tests/useDebounce.test.tsx —— 用 React Profiler API 断言渲染次数
+import { describe, it, expect } from 'vitest';
+import { render, screen, act } from '@testing-library/react';
+import { Profiler } from 'react';
+import { SearchInput } from '@/components/SearchInput';
+
+describe('SearchInput 防抖', () => {
+    it('输入期间只渲染一次(setState 防抖合并)', () => {
+        const onRender = vi.fn();
+        render(
+            <Profiler id="search" onRender={onRender}>
+                <SearchInput debounceMs={200} />
+            </Profiler>,
+        );
+
+        const input = screen.getByRole('searchbox');
+        // 模拟快速输入
+        act(() => {
+            input.value = 'a'; input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.value = 'ab'; input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.value = 'abc'; input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+
+        // onRender 的 commit 阶段记录渲染次数,断言只 commit 了预期次数
+        expect(onRender).toHaveBeenCalledTimes(1); // React 18 自动 batch,只渲染一次
+    });
+});
+```
+
+#### Lighthouse CI：门禁 Web Vitals
+
+```yaml
+# .github/workflows/lighthouse.yml —— PR 时跑 Lighthouse,性能回归阻断合并
+name: Lighthouse
+on: [pull_request]
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci && npm run build
+      - run: npx http-server dist -p 8080 &
+      - name: Run Lighthouse CI
+        run: |
+          npm i -g @lhci/cli
+          lhci autorun --upload.target=temporary-public-storage
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_TOKEN }}
+```
+
+```json
+// lighthouserc.json —— 性能门禁配置
+{
+    "ci": {
+        "assert": {
+            "preset": "lighthouse:no-pwa",       // 不强制 PWA
+            "assertions": {
+                "categories:performance":  ["error", { "minScore": 0.9 }],
+                "categories:accessibility": ["error", { "minScore": 0.95 }],
+                "first-contentful-paint": ["error", { "maxNumericValue": 1800 }],
+                "largest-contentful-paint": ["error", { "maxNumericValue": 2500 }],
+                "cumulative-layout-shift": ["error", { "maxNumericValue": 0.1 }],
+                "interactive": ["warn", { "maxNumericValue": 3500 }]
+            }
+        }
+    }
+}
+```
+
+> LCP/INP/CLS 阈值对应"Good"区间，详见 [10.1 渲染性能](./10-browser-rendering.md) 与 [3.5 性能优化体系](./03-engineering.md#_3-5-性能优化体系)。
+
+## 9.8 类型测试与契约测试
+
+#### 概念解析
+
+类型测试回答："我导出的类型签名，使用方按预期调用时，类型系统是否给出正确判断"。它不是运行时测试，而是编译期断言。契约测试则关注前后端 API 数据契约的稳定性。
+
+| 方案 | 关注点 | 形态 |
+| ---- | ------ | ---- |
+| `tsc --noEmit` | 全量类型回归 | 免费、必进 CI |
+| `tsd` | 库的导出类型对外部用法是否正确 | TS 单测 |
+| `dtslint` | 类型 dts 文件测试（DefinitelyTyped 风格） | TS 单测 |
+| `Pact` | 前后端 API 契约（请求/响应结构） | 跨进程 |
+| `@types/xxx` 兼容性 | 升级类型包后是否破坏用法 | 静态 |
+
+#### `tsd`：库的导出类型测试
+
+```ts
+// 文件: examples/09-09-type-tests.ts —— 用 tsd 断言公共 API 的类型
+import { expectType } from 'tsd';
+import { toCents, applyDiscount } from '@/utils/money';
+
+// 类型正确 → 编译通过
+expectType<number>(toCents(1));
+
+// 错误用法 → 期望类型检查报错(用 expectError 包裹)
+expectError(applyDiscount('100', 10));    // 第一个参数应是 number
+expectError(applyDiscount(100, '10'));    // 第二个参数应是 number
+
+// 字面量联合类型断言
+type Status = 'paid' | 'unpaid' | 'cancelled';
+const s: Status = 'paid';
+expectType<Status>(s);
+```
+
+> 运行：`npm i -D tsd` → `npx tsd`，集成进 `prepublishOnly` 防止发错版本。
+
+#### 类型级单测：用 `expectType` 等价断言
+
+```ts
+// 文件: src/utils/types.test.ts —— 类型工具自测
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+
+import { DeepReadonly } from '@/utils/types';
+
+type Actual = DeepReadonly<{ a: { b: 1 } }>;
+type Expected = { readonly a: { readonly b: 1 } };
+
+const _check: Equal<Actual, Expected> = true;    // 类型不符则编译红
+```
+
+> 这种 `Equal&#60;A,B&#62;` 写法是类型体操圈最常见的"类型断言"工具，比 `expectType&#60;A&#62;(value)` 更严格——它能区分 `any`/`unknown`/联合。
+
+#### Pact 契约测试：前后端 API 的安全网
+
+```ts
+// 文件: tests/pact.consumer.ts —— 前端(Consumer)写契约
+import { Pact } from '@pact-foundation/pact';
+import path from 'node:path';
+
+const provider = new Pact({
+    consumer: 'frontend-dashboard',
+    provider: 'backend-user-api',
+    dir: path.resolve(__dirname, 'pacts'),
+});
+
+provider.setup().then(async () => {
+    await provider.addInteraction({
+        uponReceiving: '请求用户列表',
+        withRequest: { method: 'GET', path: '/api/users', query: { page: '1' } },
+        willRespondWith: {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: { list: [{ id: '1', name: 'Alice' }] },
+        },
+    });
+    // ... 调用真实业务代码,验证与契约一致
+    await provider.verify();
+    await provider.finalize();
+});
+```
+
+> 前端生成 `pacts/frontend-dashboard-backend-user-api.json`，CI 推到 Pact Broker，后端拉下来跑 verify，**前后端独立演进时只要契约不破，就不会出集成 bug**。详见 [6.4 请求层封装](./06-network.md#_6-4-请求层封装实战)。
+
+## 9.9 CI 集成与质量门禁
+
+#### 概念解析
+
+测试单独跑只是工具，进了 CI 才有"门禁"。完整的 CI 流水线包含：静态检查 → 单测 + 集成 → 构建 → E2E → 性能 → 报告。每一步都能阻断合并。
+
+#### GitHub Actions 完整示例
+
+```yaml
+# 文件: examples/09-10-ci-workflow.yml —— 完整测试流水线
+name: CI
+on: [push, pull_request]
+
+jobs:
+  # ---- 第一阶段:静态检查 + 单测 + 集成 ----
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'                 # 缓存 pnpm store,二次跑快很多
+      - run: npm i -g pnpm && pnpm install --frozen-lockfile
+      - run: pnpm typecheck             # tsc --noEmit
+      - run: pnpm lint                  # eslint
+      - run: pnpm test:coverage         # vitest run --coverage
+      - name: 上传覆盖率报告
+        uses: codecov/codecov-action@v4
+        with: { files: ./coverage/lcov.info }
+      - name: 缓存产物
+        uses: actions/upload-artifact@v4
+        with: { name: build, path: dist }
+
+  # ---- 第二阶段:E2E 分片并行 ----
+  e2e:
+    needs: unit                          # 单测过了才跑 E2E,避免无谓浪费
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false                   # 单片失败不取消其他片,全部跑完看报告
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: 'pnpm' }
+      - run: npm i -g pnpm && pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with: { name: build, path: dist }
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --shard=${{ matrix.shard }}/4
+      - name: 上传 blob 报告(每片一份)
+        uses: actions/upload-artifact@v4
+        if: always()                     # 失败也上传,方便定位
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: blob-report
+
+  # ---- 第三阶段:合并 E2E 报告 ----
+  merge-reports:
+    if: always()                         # 即使 E2E 失败也合并,看完整报告
+    needs: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { pattern: blob-report-*, path: all-blob-reports }
+      - run: npx playwright merge-blob-reports --reporter html ./all-blob-reports
+      - uses: actions/upload-artifact@v4
+        with: { name: html-report, path: playwright-report }
+
+  # ---- 第四阶段:性能门禁 ----
+  lighthouse:
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: 'pnpm' }
+      - run: npm i -g pnpm && pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with: { name: build, path: dist }
+      - run: npx http-server dist -p 8080 &
+      - run: npm i -g @lhci/cli && lhci autorun
+```
+
+#### 质量门禁分层
+
+| 层级 | 工具 | 阈值 | 失败策略 |
+| ---- | ---- | ---- | -------- |
+| 静态 | `tsc --noEmit` | 0 error | 阻断 |
+| Lint | ESLint | 0 error（warn 不阻断） | 阻断 |
+| 单测 | Vitest | 通过率 100% | 阻断 |
+| 覆盖率 | `--coverage` | lines/branches/functions ≥ 80% | 阻断 |
+| E2E | Playwright | 通过率 ≥ 95%（允许 1~2 条 flaky） | 阻断 |
+| 性能 | Lighthouse CI | performance ≥ 90 | warn 或阻断 |
+| 安全 | `npm audit` / Snyk | 0 high/critical | 阻断 |
+| 视觉 | 截图对比 | 差异 ≤ 1% | warn |
+
+#### CI 优化清单
+
+- ✅ **缓存依赖**：`cache: 'pnpm'`/`cache: 'npm'` 二次跑能省 1~3 分钟；
+- ✅ **E2E 分片**：用 `--shard` 拆给多机器并行，按机器数线性提速；
+- ✅ **复用登录态**：`storageState` 把 E2E 登录从 5s 压成 0ms；
+- ✅ **fail-fast: false**：单分片失败不取消其他片，跑完看完整报告；
+- ✅ **失败也上传产物**：`if: always()` 让 trace/screenshot 永远能下载；
+- ✅ **依赖前置**：`needs: unit` 让 E2E 在单测过后才跑，节省资源；
+- ⚠️ 别在 CI 跑 `pnpm dev` 起 dev server——慢且不稳，用 `npm run preview` 起生产构建。
+
+---
+
+## 9.10 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】前端测试的投入排序是什么?为什么?</b></summary>
+
+纯函数 > hooks/composable > 组件交互 > E2E。越往下越慢、越脆、维护成本越高;另外 tsc --noEmit 是最便宜的全量回归,必须进 CI。Kent C. Dodds 提出的"测试奖杯"建议在金字塔基础上抬高集成层。
+</details>
+
+<details>
+<summary><b>2. 【挑战】如何用假定时器测试 300ms 的防抖函数?有哪些坑?</b></summary>
+
+vi.useFakeTimers() 接管 setTimeout,连续触发后用 vi.advanceTimersByTime(299) 断言未执行、推进到 300 断言执行一次 —— 测试瞬时完成,不真实等待,还能精确控制时间线。
+
+坑:① vi.useFakeTimers 默认接管 Date,被测代码 new Date() 会拿到 1970-01-01,需用 vi.setSystemTime 固定或 useFakeTimers({ toFake: ['setTimeout'] });② afterEach 必须 useRealTimers 复位,否则下一个测试用真实定时器失效。
+</details>
+
+<details>
+<summary><b>3. 【基础】Testing Library 的查询优先级与设计哲学?</b></summary>
+
+getByRole > getByLabelText > getByPlaceholderText > getByText > getByDisplayValue > getByAltText > getByTitle > getByTestId。哲学是"像用户一样测试":按可访问性角色与文本查询,测试不依赖实现细节(类名/state),重构后测试依然稳定。
+
+getBy*/queryBy*/findBy* 区别:get 同步找不到抛错,query 找不到返回 null(适合断言不存在),find 异步等待出现(自带 retry)。
+</details>
+
+<details>
+<summary><b>4. 【进阶】MSW 相比手写 mock fetch 函数的优势?它在三层 Mock 中处于哪一层?</b></summary>
+
+在网络层(Service Worker/node 拦截)mock,业务代码零感知零侵入;同一份 handlers 同时服务单测、Storybook、本地开发;未匹配的请求可配置直接报错(onUnhandledRequest: 'error'),防止漏 mock 静默通过。
+
+三层 Mock:函数级(vi.fn)、网络级(MSW)、服务级(mock server)。MSW 处于网络级,真实度居中,适合集成测试与联调。
+</details>
+
+<details>
+<summary><b>5. 【基础】测试金字塔有哪几种变体?各自适用场景?</b></summary>
+
+三种:金字塔(经典,单元厚 E2E 薄,适合工具/后台)、冰淇淋甜筒(反模式,单元薄 E2E 厚,CI 慢且 flaky)、测试奖杯(Trophy,抬高集成层,React 生态推荐,因为现代前端核心价值在组件整合后的真实行为)。
+
+选型:有大量纯函数 → 金字塔;以组件交互为主 → 奖杯;千万别长期停留在甜筒。
+</details>
+
+<details>
+<summary><b>6. 【进阶】Playwright 的 auto-waiting 满足哪 6 个条件?为什么能根治 flaky?</b></summary>
+
+① Visible ② Stable ③ Enabled ④ Receives events(不被遮挡)⑤ Hit target(点击坐标落点)⑥ Actionable(滚动到视口)。
+
+flaky 的主要来源是手写 sleep(等不够/等太久)或元素在动画/异步加载完成前就被点。auto-waiting 让框架在动作前自动验证 6 个条件,消除"等与不等"的人肉权衡。
+</details>
+
+<details>
+<summary><b>7. 【进阶】怎么把 E2E 的登录耗时从 5s 压到 0ms?</b></summary>
+
+用 storageState 复用登录态:① 全局 setup 测试用真实账号登录一次,page.context().storageState() 序列化 cookie/localStorage 到 .auth/user.json;② 在 playwright.config 的 projects 中先跑 setup,主 project 用 dependencies: ['setup'] 等待,并 use.storageState 加载该文件;③ 所有后续测试直接跳过登录,cookie/localStorage 已就位。
+
+注意:.auth/user.json 应放 .gitignore,且定期重跑 setup 防止 token 过期。
+</details>
+
+<details>
+<summary><b>8. 【挑战】Vitest 的覆盖率门禁怎么配?为什么不应追求 100%?</b></summary>
+
+coverage.provider: 'v8'(比 istanbul 快、零插桩),thresholds 设 statements/branches/functions/lines ≥ 80%,include 排除 *.d.ts、index.ts re-export、main.tsx 入口。
+
+不追求 100% 的原因:① getter/setter、类型声明、re-export 凑数测试无价值;② 100% 覆盖不代表覆盖了关键路径,可能只是空跑;③ 凑数测试反而让团队厌恶测试,重构时大面积碎裂。
+</details>
+
+<details>
+<summary><b>9. 【挑战】快照测试什么时候该用、什么时候是陷阱?</b></summary>
+
+✅ 适合:契约稳定的结构,如组件默认渲染 DOM、CLI 输出、解析器输出、配置生成。
+❌ 反例:把可变业务数据(用户列表、订单)塞进快照,后端改字段就得 `vitest -u` 全量更新,失去保护意义。
+
+决策口诀:契约稳定用快照,数据可变用断言(只断言关键字段)。
+</details>
+
+<details>
+<summary><b>10. 【进阶】类型测试 tsd 与 tsc --noEmit 的关系?如何为库写类型测试?</b></summary>
+
+tsc --noEmit 是全量类型回归,只能验证"代码符合类型",不能验证"使用方的用法被类型系统正确接受/拒绝"。tsd 弥补这一缺口:用 `expectType<T>(value)` 断言类型相等,`expectError(fn(...))` 期望错误用法被拒绝。
+
+为库写:在 *.test-d.ts 中覆盖每个公共 API 的正确用法 + 错误用法,tsd 跑一遍即可。集成进 prepublishOnly 防止发错版本。
+</details>
+
+<details>
+<summary><b>11. 【进阶】在 E2E 中如何避免"用 UI 一遍遍点造数据"?</b></summary>
+
+用 Playwright 的 fixture 夹具,通过 request 上下文直接调后端 API 造数据:base.extend 后在 orderId 函数内调 request.post('/api/orders', {...}) 拿到 id,await use(id) 给测试用,测试结束后调 request.delete 清理。
+
+收益:1 条 E2E 的造数据从 10~30s 压到 50~200ms,且不受 UI 变更影响。
+</details>
+
+<details>
+<summary><b>12. 【进阶】一套完整的 CI 测试流水线应包含哪些阶段?为什么 fail-fast 要设为 false?</b></summary>
+
+① 静态检查(tsc --noEmit + eslint)② 单测+集成+覆盖率 ③ 构建 ④ E2E(分片) ⑤ 性能(Lighthouse CI) ⑥ 安全(audit) ⑦ 报告合并。每一步都能阻断合并。
+
+fail-fast: false 的理由:E2E 分片时,单片失败不应取消其他片。失败时也想看完整报告(哪个分片坏了、整体通过率),便于决策是否合并 hotfix。同时 if: always() 保证 trace/报告永远上传。
+</details>
+
+---
+
+## 9.11 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 一启动就崩 | 全局 mock、缺失的 `jsdom` 环境让整个测试套跑不起来 | 环境与 mock 集中进 `vitest.config` 的 `setupFiles`，先跑通一条空测试再叠加 |
+| 假异步 | 忘 `await` 异步断言，用例空跑却永远通过 | 断言异步结果必须 `await`；用 eslint 规则、`vitest` 的悬空断言检查兜底 |
+| 快照陷阱 | 把可变业务数据塞进快照，改字段就整片飘红 | 契约稳定（组件结构、序列化输出）才用快照；业务数据改字段断言，别靠 `-u` 一键抹平 |
+| Mock 泄漏 | `vi.mock` 提升后污染其他用例，单跑通过、连跑报错 | mock 写在各用例内并在 `afterEach` 还原；开启 `clearMocks`、`restoreMocks` |
+| 覆盖率误导 | 覆盖率很高却漏关键分支，数字好看掩盖空断言 | 覆盖率只作下限门禁，重点分支单独写用例；用变异测试暴露假覆盖 |
+| flaky 重试 | 用例偶发失败就加 `retries` 掩盖，问题留到线上 | 重试只作临时止血，必须定位根因（时序、共享状态、未清理定时器）再移除 |
+| 全局污染 | 用例改全局、单例不还原，执行顺序一变结果就变 | 每个用例自建数据并在 `afterEach` 复原；单例经 factory 注入，禁止依赖顺序 |
+| 金字塔失衡 | 大量低价值 E2E 拖慢流水线、维护成本高 | 按 ROI 分层：静态检查与单测做主力，E2E 只覆盖关键路径（≤ 20 条） |

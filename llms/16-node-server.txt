@@ -1,0 +1,470 @@
+# 第十六部分：Node.js 与服务端基础（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/16-node-server
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第十六部分：Node.js 与服务端基础
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[可访问性与国际化](./15-accessibility-i18n.md)｜下一篇：[Web 新能力与可视化](./17-web-platform.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-16" target="_blank" rel="noopener">EP.16《Node 流与背压》</a>
+
+## 本部分内容
+
+- [16.1 Node 运行时要点](#_16-1-node-运行时要点)
+- [16.2 Stream 与背压](#_16-2-stream-与背压)
+- [16.3 BFF 层实战](#_16-3-bff-层实战)
+- [16.4 部署与运行](#_16-4-部署与运行)
+- [16.5 优雅重启与信号处理](#_16-5-优雅重启与信号处理)
+- [16.6 自测题](#_16-6-自测题)
+- [16.7 本章避坑清单](#_16-7-本章避坑清单)
+
+---
+
+> 现代前端工程师的"服务端半径"至少要覆盖：能读懂 Node 运行时行为、能写 BFF 层、能把应用部署上去。这一部分补齐这三块——不追求成为后端专家，但求**独立完成前端工程师需要的服务端工作**。
+
+## 16.1 Node 运行时要点
+
+#### 概念解析
+
+Node 与浏览器同源（V8 + 事件循环），但事件循环的实现不同：
+
+| 维度 | 浏览器 | Node |
+| ---- | ------ | ---- |
+| 宏任务分阶段 | 无阶段概念 | **timers → poll → check** 等固定阶段循环 |
+| 微任务时机 | 每个宏任务后清空 | 每个**阶段切换之间**清空（Node 11+ 的 `setTimeout` 回调行为已向浏览器靠拢） |
+| 特有 API | DOM、`requestAnimationFrame` | `setImmediate`、`process`、`Buffer`、fs/net 等 |
+
+最容易混淆的一对：`setTimeout(fn, 0)`（timers 阶段）vs `setImmediate(fn)`（check 阶段）——主模块内两者顺序**不确定**，但在 I/O 回调内 `setImmediate` **保证先执行**。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/16-01-node-event-loop.ts —— Node 事件循环:可验证的执行顺序
+import fs from 'node:fs';
+
+// ---- 第一组:主模块内 setTimeout(0) vs setImmediate(顺序不确定) ----
+setTimeout(() => console.log('setTimeout'), 0);
+setImmediate(() => console.log('setImmediate'));
+Promise.resolve().then(() => console.log('微任务')); // 微任务:当前操作结束后立即执行
+console.log('同步代码');
+// 输出:同步代码 → 微任务 → (setTimeout/setImmediate 顺序不定)
+
+// ---- 第二组:在 I/O 回调内,setImmediate 永远先于 setTimeout(0) ----
+fs.readFile(import.meta.filename ?? '', () => {
+    console.log('--- I/O 回调内 ---');
+    setTimeout(() => console.log('setTimeout'), 0);
+    setImmediate(() => console.log('setImmediate')); // ✓ 保证先打印:check 阶段紧邻 poll 阶段
+});
+
+// ---- 第三组:process.nextTick —— 优先级最高的"微任务" ----
+Promise.resolve().then(() => console.log('promise then'));
+process.nextTick(() => console.log('nextTick'));
+// 输出顺序:nextTick → promise then(nextTick 队列先于 Promise 微任务队列清空)
+```
+
+```typescript
+// 文件: examples/16-02-esm-meta.ts —— ESM 环境下替代 __dirname / __filename
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// ESM 中没有 __dirname(它是 CJS 的包装变量),标准替代:
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+console.log('当前目录:', __dirname);
+
+// 环境变量:12-Factor 的配置原则 —— 配置全部来自环境,代码不分环境
+const PORT = Number(process.env.PORT ?? 3000);
+const NODE_ENV = process.env.NODE_ENV ?? 'development';
+console.log(`启动配置: env=${NODE_ENV}, port=${PORT}`);
+
+// 💡 顶层 await 在 ESM 中合法(浏览器 module 脚本同理),CJS 不行
+const exists = fs.existsSync(__dirname);
+console.log('目录存在:', exists);
+```
+
+> 运行方式：`node --experimental-transform-types --no-warnings examples/16-01-node-event-loop.ts examples/16-02-esm-meta.ts`，多跑几次第一组，观察 `setTimeout`/`setImmediate` 顺序确实不定，而第二组顺序恒定。
+
+#### 最佳实践
+
+- ✅ 在 I/O 回调中需要"尽快的异步"用 `setImmediate`；`process.nextTick` 慎用（会饿死事件循环）；
+- ✅ 配置一律走环境变量 + 默认值兜底，禁止在代码里写死环境判断的密钥/地址；
+- ⚠️ Node 的 DNS 与线程池（libuv 默认 4 线程）是 CPU 密集任务的隐藏瓶颈，重计算参考 [10.5](./10-browser-rendering.md#_10-5-web-worker-计算卸载) 的思路用 worker_threads；
+- 📖 面试高频：Node 事件循环阶段、`setImmediate` vs `setTimeout` vs `nextTick`、Node 与浏览器微任务时机差异。
+
+## 16.2 Stream 与背压
+
+#### 概念解析
+
+**为什么需要流**：把 2GB 的文件 `readFileSync` 进内存会直接 OOM；流按 chunk 处理，内存恒定。四种流：Readable（读）、Writable（写）、Duplex（双向）、Transform（转换）。
+
+**背压（Backpressure）**：生产速度 > 消费速度时（如读 500MB/s、写 50MB/s），无脑 `write` 会把数据堆在内存里。`pipe`/`pipeline` 内置了背压处理——写忙时暂停读，写完继续。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/16-03-stream-pipeline.ts —— 流的实战:复制 + 逐行统计(纯 Node 可运行)
+import fs from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { Writable } from 'node:stream';
+import path from 'node:path';
+
+// ---- 场景一:大文件复制(pipeline 自动处理背压与错误传播) ----
+async function copyFile(src: string, dest: string) {
+    await pipeline(
+        fs.createReadStream(src),          // 可读流:按 chunk 读
+        fs.createWriteStream(dest),        // 可写流:按 chunk 写,写不动就通知上游暂停
+    );
+    console.log(`复制完成: ${src} → ${dest}`);
+}
+
+// ---- 场景二:流式处理 —— 统计文件行数,内存占用与文件大小无关 ----
+function lineCounter() {
+    let lines = 0;
+    // 统计是"终端消费者" → 用 Writable(不需要向下传数据)
+    // ⚠️ 经典坑:如果把 Transform 放在 pipeline 末端,它的 readable 侧没有消费者,
+    //    'end' 永远不会触发,await pipeline 会永久挂起 —— 末端只选 Writable
+    return new Writable({
+        write(chunk: Buffer, _enc, callback) {
+            lines += chunk.toString().split('\n').length - 1;
+            callback(); // 处理完这个 chunk 了,可以给我下一个
+        },
+        final(callback) {           // 上游全部写完后的最后一步
+            console.log(`总行数: ${lines}`);
+            callback();
+        },
+    });
+}
+// 若还要继续向下加工数据,才用 Transform:transform(chunk, enc, cb) { cb(null, 加工后的chunk) }
+
+// ---- 演示:先造一个 10 万行的文件,再流式统计 ----
+const big = path.join(import.meta.dirname ?? '.', 'demo-big.log');
+fs.writeFileSync(big, Array.from({ length: 100_000 }, (_, i) => `line ${i}`).join('\n'));
+
+await copyFile(big, big + '.copy');
+await pipeline(fs.createReadStream(big), lineCounter());
+
+fs.rmSync(big, { force: true });
+fs.rmSync(big + '.copy', { force: true });
+```
+
+> 运行方式：`node --experimental-transform-types --no-warnings examples/16-03-stream-pipeline.ts`。对比 `fs.readFileSync` 全量读入：文件越大差异越明显（流式内存占用恒定在几个 MB 以内）。
+
+#### 最佳实践
+
+- ✅ 涉及文件/网络/大 JSON 的处理，默认想"能不能流式"：上传转发、日志清洗、CSV 导入导出；
+- ✅ 用 `stream/promises` 的 `pipeline`（而非 `pipe`）：错误会正确传播，且支持异步生成器作为处理段；
+- ⚠️ 流的错误必须处理（监听 `error` 或用 pipeline），未处理的流错误是进程崩溃的常见来源；
+- 📖 面试高频：背压是什么、pipe 与 pipeline 区别、四种流类型。
+
+## 16.3 BFF 层实战
+
+#### 概念解析
+
+BFF（Backend For Frontend）是**服务于前端的中间层**，四类职责：
+
+```
+① 聚合:多个微服务接口合并为一个前端友好的响应(减少请求数)
+② 裁剪:只返回页面需要的字段(省流量)
+③ 协议转换:老服务 XML/RPC → 前端 JSON;SSE → WebSocket
+④ 密钥托管:第三方 API Key 只存在于 BFF(呼应 14.1 的模型代理)
+```
+
+Express 的中间件模型是"逐层通过、可短路"的链：`(req, res, next) =>`；Koa 则是真正的洋葱模型（`await next()` 之后的代码在响应阶段执行）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/16-04-bff-aggregator.ts —— BFF 聚合层骨架(Express)
+// 安装:npm i express && npm i -D @types/express
+import express from 'express';
+
+const app = express();
+
+// ---- 中间件 1:统一日志 ----
+app.use((req, _res, next) => {
+    console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+    next(); // 不调用 next,请求就会挂起
+});
+
+// ---- 中间件 2:简易内存缓存(GET 幂等接口) ----
+const cache = new Map<string, { at: number; data: unknown }>();
+const CACHE_TTL = 30_000;
+app.get('/api/*', (req, res, next) => {
+    const hit = cache.get(req.url);
+    if (hit && Date.now() - hit.at < CACHE_TTL) {
+        res.json(hit.data); // 命中缓存,短路:不再 next
+        return;
+    }
+    next();
+});
+
+// ---- 业务路由:聚合两个下游服务,裁剪字段 ----
+app.get('/api/user-profile/:id', async (req, res, next) => {
+    try {
+        // 并行请求两个下游(呼应 1.5:无依赖的请求一律并行)
+        const [user, orders] = await Promise.all([
+            fetch(`https://user-service.internal/${req.params.id}`).then((r) => r.json()),
+            fetch(`https://order-service.internal?userId=${req.params.id}`).then((r) => r.json()),
+        ]);
+        const data = {
+            name: user.name,                    // 裁剪:前端只要三个字段
+            vipLevel: user.vipLevel,
+            recentOrders: orders.slice(0, 5),   // 裁剪:只取最近 5 单
+        };
+        cache.set(req.url, { at: Date.now(), data });
+        res.json({ code: 0, data });
+    } catch (e) {
+        next(e); // 错误交给统一的错误中间件
+    }
+});
+
+// ---- 错误中间件:四个参数的签名,Express 靠参数个数识别 ----
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[BFF 错误]', err.message);
+    res.status(500).json({ code: -1, message: '服务暂不可用' });
+});
+
+app.listen(Number(process.env.PORT ?? 3000));
+```
+
+```typescript
+// 文件: examples/16-05-nestjs-overview.ts —— NestJS 一瞥:装饰器 + 依赖注入(呼应 2.7)
+// 安装:npm i -g @nestjs/cli && nest new my-api
+
+// Controller:声明路由;Provider:可注入的服务 —— 装饰器是 Nest 的语法核心
+// import { Controller, Get, Injectable, Module } from '@nestjs/common';
+
+// @Injectable()                     // 标记为可注入服务(等价于 Angular 的 DI,见 4.6)
+// export class UserService {
+//     private readonly users = [{ id: 1, name: 'Alice' }];
+//     findOne(id: number) {
+//         return this.users.find((u) => u.id === id);
+//     }
+// }
+
+// @Controller('users')
+// export class UsersController {
+//     constructor(private readonly userService: UserService) {} // 构造函数注入
+//
+//     @Get(':id')
+//     getUser(@Param('id') id: string) {
+//         return this.userService.findOne(Number(id));
+//     }
+// }
+
+// 💡 前端学过 Angular(4.6)或 TS 装饰器(2.7)后,NestJS 的心智模型几乎零成本
+export {};
+```
+
+> 运行方式：需先安装 express（`cd examples && npm i express`）再手动运行（BFF 服务常驻），门禁与默认按阅读理解处理；启动后访问 `http://localhost:3000/api/user-profile/1` 观察日志与缓存命中；NestJS 示例为阅读理解。
+
+#### 最佳实践
+
+- ✅ 中间件顺序即执行顺序：日志 → CORS → 解析 body → 缓存 → 路由 → 错误兜底（错误中间件必须最后）；
+- ✅ BFF 里所有对下游的 fetch 都要**设置超时**（呼应 1.8 的 `withTimeout`），防止下游慢导致拖垮自己；
+- ⚠️ BFF 不是二次业务层：业务规则留在微服务，BFF 只做"面向前端的数据编排"，否则两层都要改；
+- 📖 面试高频：Express 与 Koa 中间件模型差异、BFF 的职责边界、错误中间件为什么要放最后。
+
+## 16.4 部署与运行
+
+#### 概念解析
+
+前端相关的三类部署形态：
+
+| 形态 | 内容 | 要点 |
+| ---- | ---- | ---- |
+| 静态托管 | SPA 产物丢 CDN/对象存储 | history 路由 fallback、不可变资源长缓存 |
+| Node 服务 | BFF/SSR 进程 | PM2 集群、健康检查、优雅退出 |
+| 容器化 | Docker 镜像交付 | 多阶段构建、非 root 运行 |
+
+#### 完整代码示例
+
+```dockerfile
+# 文件: examples/16-06-Dockerfile —— 多阶段构建:前端静态 + Node BFF
+# ---- 阶段 1:构建(装全量依赖,跑构建) ----
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm build            # 产出 dist/(SPA) 与 server/(BFF 编译产物)
+
+# ---- 阶段 2:运行(只带生产依赖与产物,镜像小一个量级) ----
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/server ./server
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/node_modules ./node_modules
+USER node                 # 非 root 运行,安全底线
+EXPOSE 3000
+CMD ["node", "server/index.js"]
+```
+
+```nginx
+# 文件: examples/16-07-nginx.conf —— SPA 部署的 Nginx 关键配置
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+
+    # 1. 带哈希的静态资源:强缓存一年
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # 2. history 路由 fallback:所有未知路径回退到 index.html
+    #    (否则刷新 /orders 直接 404 —— SPA 部署第一大坑)
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 3. index.html 本身不缓存(呼应 6.2 黄金法则)
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
+    # 4. 开启 gzip(或 brotli 模块)
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+}
+```
+
+```bash
+# 文件: PM2 集群模式速查(利用多核,零代码改动)
+# pm2 start server/index.js -i max        # 按核数起集群
+# pm2 reload server                       # 零停机重载(优雅重启)
+# pm2 logs / pm2 monit                    # 日志与监控面板
+# 💡 集群前提:进程无共享状态 —— 会话存 Redis,文件用对象存储(12-Factor)
+```
+
+> 运行方式：Dockerfile 与 nginx.conf 放入真实项目后 `docker build -t my-app .` / `nginx -t` 验证；PM2 命令在服务器上直接执行。
+
+#### 最佳实践
+
+- ✅ 镜像构建用多阶段：构建依赖（含 devDependencies）不进最终镜像，体积从 GB 级降到百 MB 级；
+- ✅ SPA 部署自检三件事：强缓存是否带指纹、`try_files` fallback、`index.html` 是否 no-cache；
+- ✅ Node 进程必须处理 `SIGTERM` 优雅退出（停止接新请求 → 处理完存量 → 退出），配合 K8s/PM2 滚动更新；
+- ⚠️ 容器内不要用 PM2（容器本身就是进程管理器），单容器单进程让重启策略生效；
+- 📖 面试高频：多阶段构建省了什么、SPA 刷新 404 的原因与修复、优雅退出的流程。
+
+## 16.5 优雅重启与信号处理
+
+#### 概念解析
+
+滚动更新（K8s / PM2 / 容器编排）替换实例时，先给进程发 `SIGTERM` 而不是直接 `SIGKILL`——**留一段"体面退场"的窗口**。若进程不处理该信号，系统会用默认动作立刻终止它：正在处理的请求被掐断，客户端收到连接重置（`ECONNRESET`），写了一半的数据可能丢失。
+
+优雅退出（Graceful Shutdown）三步：① 停止接受新连接 → ② 等待存量请求处理完（或兜底超时后强制退出）→ ③ 释放资源并退出。前提是信号可被捕获——`SIGTERM` / `SIGINT` 可以监听，`SIGKILL`（`kill -9`）**不可捕获**，所以编排系统只发 `SIGTERM`。
+
+一个高频坑：`server.close()` 只停止接收**新连接**，不会断开已建立的空闲 keep-alive 连接；客户端若挂着不复用，进程会一直等不到退出。Node 18.2+ 提供 `server.closeIdleConnections()` 主动踢掉空闲连接（`server.closeAllConnections()` 则连活跃连接一起断）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/16-08-graceful-shutdown.ts —— 优雅退出:SIGTERM → 停止接新连接 → 处理完存量请求 → 退出
+import http from 'node:http';
+
+let inFlight = 0;          // 正在处理、尚未返回的请求数
+let shuttingDown = false;  // 是否已收到 SIGTERM 进入退出流程
+
+const server = http.createServer((req, res) => {
+    inFlight++;
+    // 模拟一个耗时 600ms 的业务处理(真实场景可能是查下游或写库)
+    setTimeout(() => {
+        res.end(`ok: ${req.url}`);
+        inFlight--;
+        finishIfDrained();
+    }, 600);
+});
+
+function finishIfDrained() {
+    if (shuttingDown && inFlight === 0) {
+        console.log('存量请求已处理完 → 进程退出');
+        process.exit(0);
+    }
+}
+
+// ---- 优雅退出的完整流程:先停止接新请求,再等存量处理完,最后退出 ----
+process.on('SIGTERM', () => {
+    if (shuttingDown) return;      // 幂等:重复收到信号不重复执行
+    shuttingDown = true;
+    console.log('→ 收到 SIGTERM:停止接受新连接(server.close)');
+    server.close();                // 停止接收新连接,回调在全部连接结束后触发
+    server.closeIdleConnections(); // 主动断开空闲 keep-alive 连接,别让它们拖住退出
+    finishIfDrained();             // 若此刻已无存量请求,立即退出
+});
+
+server.listen(0, () => {           // 端口 0 = 随机可用端口,避免固定端口冲突
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    console.log(`✓ 服务已启动,监听端口 ${port}`);
+
+    // 制造两个"存量请求"(真实场景是正在被处理的用户请求)
+    http.get(`http://127.0.0.1:${port}/a`, (res) => res.resume());
+    http.get(`http://127.0.0.1:${port}/b`, (res) => res.resume());
+
+    // 模拟 K8s/PM2 在滚动更新时发出 SIGTERM
+    setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100);
+});
+// 输出:✓ 服务已启动… → 收到 SIGTERM:停止接受新连接(server.close) → 存量请求已处理完 → 进程退出
+```
+
+> 运行方式：`node --experimental-transform-types --no-warnings examples/16-08-graceful-shutdown.ts`。示例自导自演：启动服务 → 制造两个存量请求 → 100ms 后向自己发 `SIGTERM` → 存量处理完进程以退出码 0 退出，可反复运行验证顺序。
+
+#### 最佳实践
+
+- ✅ 收到 `SIGTERM` 先 `server.close()` 停新请求、再等存量，并设**兜底超时**（如 10s 后 `process.exit(1)`）防止个别请求永久挂起拖死滚动更新；
+- ✅ 同时监听 `SIGINT`（Ctrl-C）与 `SIGTERM`，统一走同一个退出函数；退出逻辑要**幂等**，重复信号不重复执行；
+- ⚠️ 不要用 `SIGKILL` / `kill -9` 下线服务（不可捕获，等于强杀）；容器里的 `terminationGracePeriodSeconds` 要大于你的兜底超时；
+- 📖 面试高频：`SIGTERM` 与 `SIGKILL` 区别、`server.close` 与 `closeIdleConnections` 的差异、优雅退出为什么需要超时兜底。
+
+## 16.6 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【进阶】Node 事件循环与浏览器最大的差异是什么？setImmediate 和 setTimeout(0) 谁先执行？</b></summary>
+
+Node 的宏任务分为固定阶段(timers/poll/check 等),微任务在阶段切换间清空;浏览器没有阶段概念。主模块内 setTimeout(0) 与 setImmediate 顺序不确定(受进程性能影响);但在 I/O 回调内 setImmediate 保证先执行 —— poll 阶段后紧接 check 阶段,而下一轮 timers 还要等待。
+</details>
+
+<details>
+<summary><b>2. 【基础】什么是背压？pipeline 相比 pipe 好在哪里？</b></summary>
+
+背压是"消费端来不及处理时,通知生产端暂停"的机制,防止数据堆积在内存中。pipe 内置背压但错误不会自动传播(需要手动监听两端 error,否则进程崩溃);stream/promises 的 pipeline 自动传播错误,还支持异步生成器作为处理段,是现代首选。
+</details>
+
+<details>
+<summary><b>3. 【进阶】BFF 的四类职责是什么？它为什么不应该是"第二业务层"？</b></summary>
+
+聚合(多接口合一)、裁剪(只给前端要的字段)、协议转换(旧协议→JSON/SSE)、密钥托管(API Key 不出 BFF)。业务规则如果下沉到 BFF,每次业务变更都要改微服务和 BFF 两处,还破坏了 BFF"面向前端数据编排"的定位 —— 业务留在微服务,BFF 只做编排。
+</details>
+
+<details>
+<summary><b>4. 【进阶】SPA 部署后刷新 /orders 页面 404,原因和修复?</b></summary>
+
+history 路由模式下 /orders 是前端路由,服务器上并不存在这个路径的文件,直接请求自然 404。修复:Nginx 配置 try_files $uri $uri/ /index.html,把所有未知路径回退到 index.html,由前端路由接管。
+</details>
+
+<details>
+<summary><b>5. 【挑战】为什么 Dockerfile 要多阶段构建？容器里为什么不建议再跑 PM2？</b></summary>
+
+多阶段构建:构建阶段需要全量依赖与构建工具,运行阶段只需要产物与生产依赖 —— 分离后镜像从 GB 级降到百 MB 级,攻击面也更小。容器平台(K8s/Compose)自身就是进程管理器,负责重启与编排;容器内再套 PM2 会让两层管理器互相冲突,且多进程共用一个容器使健康检查与资源限制失真。
+</details>
+
+---
+
+## 16.7 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 事件循环阻塞 | 在主线程做同步大计算或 `readFileSync`，一个慢请求把其余请求全卡住 | 重度 CPU 任务放 `worker_threads`，I/O 一律用异步 API，避免在大循环里同步解析大 JSON（呼应 16.1） |
+| 未捕获异常 | 异步错误没兜住，进程直接退出或 promise 悬挂无人处理 | 监听 `uncaughtException` 与 `unhandledRejection` 记录后优雅退出，流处理用 `pipeline` 自动传播错误 |
+| 优雅退出 | 收到 `SIGTERM` 立刻退出，在途请求被掐断、新请求还在进来 | 监听 `SIGTERM`/`SIGINT`，先停收新连接、`server.close()` 排空在途请求，超时才强制退出（呼应 16.5） |
+| 资源泄漏 | 文件描述符、数据库连接、socket 打开后不释放，跑久了耗尽句柄 | 用 `try/finally` 保证释放，连接池设上限并在退出时关闭，流处理优先走 `pipeline` |
+| 内存泄漏 | 全局缓存或 `Map` 只增不减，长期运行堆内存持续上涨直至 OOM | 缓存加上限与淘汰策略（LRU/TTL），定时清理，持续观测 `heapUsed` 与 RSS 趋势 |
+| 定时器吊住进程 | 后台 `setInterval` 未 `unref` 也未清理，进程迟迟无法退出 | 非关键定时器加 `.unref()`，退出路径里 `clearInterval`，清掉一切残留句柄 |
+| 模块缓存 | 改了文件以为会自动重载，`require` 缓存让旧代码继续运行 | 认清 `require` 的缓存语义，配置变更走显式重载或重启，开发期热更新交给 `--watch` 等工具 |
+| 背压 | 用 `pipe` 却忘了监听两端 `error`，一出错就崩；不处理背压导致内存堆积 | 改用 `stream/promises` 的 `pipeline`，错误自动传播并支持异步生成器，让消费端速度自然反压生产端（呼应 16.2） |

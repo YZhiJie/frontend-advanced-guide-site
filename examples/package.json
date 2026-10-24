@@ -1,0 +1,45 @@
+{
+    "name": "frontend-advanced-guide-examples",
+    "version": "1.36.0",
+    "description": "《高级前端进阶指南》152+ 可运行示例：npx 一键列出 / 运行 / 随机练习",
+    "license": "MIT",
+    "type": "module",
+    "bin": {
+        "frontend-advanced-guide-examples": "bin/cli.mjs",
+        "fag-examples": "bin/cli.mjs"
+    },
+    "files": [
+        "bin/",
+        "*.ts",
+        "*.js",
+        "*.tsx",
+        "tsconfig.json",
+        "README.md"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/YZhiJie/frontend-advanced-guide.git",
+        "directory": "examples"
+    },
+    "keywords": [
+        "frontend",
+        "javascript",
+        "typescript",
+        "interview",
+        "examples",
+        "learning"
+    ],
+    "engines": {
+        "node": ">=18"
+    },
+    "scripts": {
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "tsx": "^4.0.0",
+        "typescript": "^5.5.0",
+        "vitest": "^3.0.0"
+    }
+}

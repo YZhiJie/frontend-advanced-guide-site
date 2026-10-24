@@ -1,0 +1,335 @@
+# 第三十七部分 · ABAC 与策略引擎（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/37-abac-policy-engine
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第三十七部分 · ABAC 与策略引擎
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第三十五部分 · 后台管理系统权限方案](./35-admin-system-auth.md) · [第三十六部分 · 认证体系全景](./36-auth-system.md) · [第十一部分 · 设计模式与架构](./11-patterns-architecture.md)
+
+> 💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。第 35 册的 RBAC 回答「你是什么角色」，本册的 ABAC 回答「你此刻的属性满不满足规则」——从角色爆炸问题、主体/客体/环境四元模型、策略 JSON DSL，到 casl 风格 `can()` 判定器与字段级脱敏，把权限从「枚举角色」升级为「计算策略」。
+
+## 本部分内容
+
+- [37.1 RBAC 的天花板：为什么需要 ABAC](#_37-1-rbac-的天花板-为什么需要-abac)
+- [37.2 ABAC 模型：主体 / 客体 / 动作 / 环境](#_37-2-abac-模型-主体-客体-动作-环境)
+- [37.3 策略 JSON DSL：让规则变成数据](#_37-3-策略-json-dsl-让规则变成数据)
+- [37.4 casl 风格 can() 判定器](#_37-4-casl-风格-can-判定器)
+- [37.5 字段级权限与数据脱敏](#_37-5-字段级权限与数据脱敏)
+- [37.6 策略下发、缓存与前后端分工](#_37-6-策略下发、缓存与前后端分工)
+- [37.7 自测题](#_37-7-自测题)
+- [37.8 本章避坑清单](#_37-8-本章避坑清单)
+
+```mermaid
+flowchart LR
+    A[访问请求<br/>主体+客体+动作+环境] --> B[PDP 策略决策点<br/>deny 优先 → allow → 默认拒绝]
+    C[策略库<br/>JSON DSL / Ability 规则] --> B
+    B --> D{allowed?}
+    D -->|是| E[PEP 执行点放行]
+    D -->|否| E2[统一 403 + 策略 id 审计]
+    F[后端策略服务<br/>运营化增删规则] -->|下发 JSON| C
+    B --> G[字段级输出<br/>白名单 + 脱敏器]
+```
+
+---
+
+> RBAC 的角色是**静态身份**，ABAC 的策略是**动态计算**。「只能编辑自己部门的工单」「金额超 10 万要总监审批」「高风险账号禁止写操作」——这些规则里混着资源属性（owner、部门、金额）和环境属性（时间、IP、风险分），角色枚举永远追不上组合的数量。ABAC 的核心动作只有一个：**把「判断」从 if-else 里抽出来，变成可下发、可审计的数据**。
+
+---
+
+## 37.1 RBAC 的天花板：为什么需要 ABAC
+
+### 37.1.1 概念解析
+
+RBAC 的权限判定函数签名是 `(user, action) → bool`——它只看用户角色。一旦规则需要资源属性（这份文档是谁的？多少钱？），签名就得扩成 `(user, resource, action) → bool`，而 RBAC 没有资源参数，只能靠**造角色**补：
+
+- 「文档读取-本部门」角色
+- 「文档读取-全局」角色
+- 「订单审批-小额」角色
+- 「订单审批-大额」……
+
+维度是相乘关系：10 个部门 × 3 个敏感级 × 2 个时段 = 60 种角色组合。角色表变成运维灾难，权限审计无从下手。
+
+ABAC 的解法：判定不再经过「角色」这层间接，直接对**属性**求值。3 条谓词规则就能覆盖 60 种角色组合的语义。
+
+### 37.1.2 核心代码
+
+```ts
+// 文件: examples/37-01-rbac-limits.ts
+/** ABAC：一条策略规则搞定，用属性表达，不再新增角色 */
+export interface AbacRule {
+    name: string;
+    effect: "allow" | "deny";
+    when: (u: User, d: Doc) => boolean;
+}
+
+/** deny 优先：任一 deny 命中即拒绝；否则任一 allow 命中即放行；默认拒绝 */
+export function abacCanRead(rules: readonly AbacRule[], user: User, doc: Doc): boolean;
+```
+
+> 运行方式：`npx tsx examples/37-01-rbac-limits.ts`。
+
+### 37.1.3 应用实践
+
+- **先问规则里有没有资源属性**：纯「角色 → 功能」的判定，RBAC 足够（第 35 册）；出现「自己/本部门/金额/时段」，上 ABAC。
+- **两者是分层不是二选一**：菜单/按钮用 RBAC（第 35 册），行级/字段级用 ABAC（本册），一个系统里共存很正常。
+- **deny 规则要少而狠**：deny 的表达力强（优先级最高），数量应该是个位数—— deny 泛滥说明 allow 规则设计出了问题。
+
+---
+
+## 37.2 ABAC 模型：主体 / 客体 / 动作 / 环境
+
+### 37.2.1 概念解析
+
+ABAC 把一次访问请求拆成四类属性：
+
+| 属性 | 例子 | 来源 |
+| --- | --- | --- |
+| Subject 主体 | 部门、职级、是否 owner、风险分 | 用户档案 + 风控系统 |
+| Object 客体 | 资源类型、owner、敏感级、金额 | 资源本身 |
+| Action 动作 | read / edit / approve / delete | 请求语义 |
+| Environment 环境 | 时间、内网 IP、设备指纹 | 请求上下文 |
+
+架构上分两层，这是全册最重要的架构决策：
+
+- **PDP（Policy Decision Point，策略决策点）**：只做一件事——输入请求，输出 allow/deny，全站唯一实现；
+- **PEP（Policy Enforcement Point，策略执行点）**：路由守卫、按钮显隐、接口拦截、导出网关——它们全部只「问 PDP」，不自己写规则。
+
+PEP 不实现规则的价值：规则改动只动策略库，所有执行点自动生效；且 403 响应可以统一带上命中的策略 id，审计时能回答「为什么被拒」。
+
+### 37.2.2 核心代码
+
+```ts
+// 文件: examples/37-02-abac-model.ts
+/** PDP：策略决策点。deny 优先，默认拒绝 */
+export function decide(policies: readonly Policy[], req: AccessRequest): { allowed: boolean; by: string };
+
+// 策略库里的规则形态：target 圈定范围 + condition 进一步判断
+{
+    id: "p-high-approve",
+    description: "金额 > 10 万的审批需要职级 ≥ 8 且内网",
+    effect: "allow",
+    target: (r) => r.action.name === "approve" && (r.resource.amount ?? 0) > 100_000,
+    condition: (r) => r.subject.level >= 8 && r.env.ipInternal,
+}
+```
+
+> 运行方式：`npx tsx examples/37-02-abac-model.ts`。
+
+### 37.2.3 应用实践
+
+- **默认拒绝是底线**：没有任何 allow 命中 = 拒绝。绝不允许「没匹配到规则就放行」。
+- **deny 优先求值**：先扫全部 deny，再扫 allow，顺序不能反——「高风险账号禁止写操作」必须压过一切 allow。
+- **策略 id 进日志**：403 响应体带 `by: "p-risk-deny"`，客服工单不再靠猜。
+
+---
+
+## 37.3 策略 JSON DSL：让规则变成数据
+
+### 37.3.1 概念解析
+
+37.2 的策略还是代码里的函数，有两个问题：改规则要发版、规则不可序列化审计。解法是设计一层**极小的 DSL**——规则变成 JSON，求值器只有一份：
+
+```json
+{
+    "id": "allow-dept-or-senior",
+    "effect": "allow",
+    "action": "read",
+    "resourceType": "doc",
+    "condition": {
+        "combinator": "or",
+        "conditions": [
+            { "left": "subject.dept", "op": "eq", "right": "rd" },
+            { "left": "subject.level", "op": "gte", "right": 8 }
+        ]
+    }
+}
+```
+
+DSL 设计三原则：
+
+1. **操作符封闭**（eq/in/gte/contains/isOwner/truthy…）：不提供任意表达式求值，杜绝 `eval` 注入；
+2. **属性点路径取值**：`subject.dept`、`resource.amount`，求值器统一解析；
+3. **未知即拒绝**：未知操作符、缺字段的规则一律返回 false，默认拒绝原则贯穿到 DSL 层。
+
+### 37.3.2 核心代码
+
+```ts
+// 文件: examples/37-03-policy-dsl.ts
+export function evalCondition(cond: Condition, fact: Fact): boolean;   // 单条件求值
+export function matchPolicy(policy: PolicyJson, fact: Fact): boolean;  // 动作/资源匹配
+/** PDP：deny 优先，默认拒绝 */
+export function evaluate(policies: readonly PolicyJson[], fact: Fact): { allowed: boolean; by: string | null };
+```
+
+> 运行方式：`npx tsx examples/37-03-policy-dsl.ts`。
+
+### 37.3.3 应用实践
+
+- **策略 JSON 放服务端管理台**：运营增删规则 → 存库 → 推送版本号，前端拉取更新，无需发版。
+- **规则变更走评审流**：策略是数据不等于可以乱改——diff 审计 + 影响面预检（改一条规则会命中多少用户）是策略引擎的标配。
+- **不要把 DSL 做成图灵完全**：一旦支持循环/自定义函数，就回到了「规则即代码」的老路，审计能力归零。
+
+---
+
+## 37.4 casl 风格 can() 判定器
+
+### 37.4.1 概念解析
+
+组件里写 `if (user.role === 'admin')` 的问题第 35 册已经讲过；本册给出 ABAC 时代的组件判定形态——casl 库的 API 风格，已成为前端事实标准：
+
+```ts
+const { can, cannot, build } = new AbilityBuilder();
+can("edit", "Post", ["title", "content"], (post) => post.authorId === "u1" && post.status === "draft");
+cannot("delete", "Post");
+const ability = build();
+
+ability.can("edit", "Post", "title", myDraft);  // true——动作 + 资源 + 字段 + 实例四层判定
+```
+
+四个判定层次依次收窄：**动作**（read/manage 通配）→ **资源类型**（Post/all 通配）→ **字段**（fields 白名单）→ **实例属性**（when 条件函数）。规则按声明顺序求值，后写覆盖先写，所以 `cannot` 可以收窄 `can`。
+
+界面接线：Vue 用 `<button v-if="$can('edit', 'Post', 'title', post)">`，React 用 `ability.can(...) && <button/>`——第 35 册的 v-permission 指令换一个判定函数就能升级成 ABAC 版。
+
+### 37.4.2 核心代码
+
+```ts
+// 文件: examples/37-04-can-checker.ts
+export class Ability {
+    can(action: AbacAction, subject: SubjectType, field?: string, instance?: Record<string, unknown>): boolean;
+}
+
+export class AbilityBuilder {
+    can = (action, subject, fields?, when?) => void;
+    cannot = (action, subject, fields?, when?) => void;
+    build = () => Ability;
+}
+```
+
+> 运行方式：`npx tsx examples/37-04-can-checker.ts`。
+
+注意示例里的一个真实坑：`AbilityBuilder` 的方法必须用**箭头函数字段**定义。若用普通原型方法，`const { can } = new AbilityBuilder()` 解构后调用会报 `Cannot read properties of undefined (reading 'rules')`——casl 源码里正是靠 bind 解决的。
+
+### 37.4.3 应用实践
+
+- **类型级判定与实例级判定分开用**：`can('read', 'Post')` 不传实例 → 菜单/路由场景；传实例 → 按钮/行内操作场景。有 when 条件的规则在不传实例时视为不命中（保守拒绝）。
+- **规则集中声明**：Ability 在应用启动时构建一次（登录后随权限数据下发），不要散在各组件里各 build 各的。
+- **生产用 casl 库**：示例是教学实现，casl 处理了字段通配、条件包打包、Vue/React 集成包等工程细节。
+
+---
+
+## 37.5 字段级权限与数据脱敏
+
+### 37.5.1 概念解析
+
+字段级权限是两个独立问题的组合：
+
+1. **能力问题——能看哪些字段**：白名单判定，`ability.can('read', 'Customer', 'balance')`；
+2. **形态问题——看到的字段长什么样**：脱敏器（`138****1234`、`>10w` 区间化），是展示策略不是权限策略。
+
+关键工程决策：**在序列化出口统一做**（接口网关 / SSR 渲染 / 导出函数），而不是各组件手动 replace。出口收口后，规则集中、测试一处覆盖；散在组件里则每个新角色上线都要「全站排查一遍哪里漏了手机号」。
+
+另一个细节：白名单外的字段**直接不输出**（对象里没有这个 key），而不是输出 `null`——输出 null 会泄露「这个字段存在且值为空」的结构信息。
+
+### 37.5.2 核心代码
+
+```ts
+// 文件: examples/37-05-field-masking.ts
+export interface FieldPolicy {
+    /** 该角色可读的字段（白名单） */
+    readableFields: readonly (keyof Customer)[];
+    /** 字段 → 脱敏器（未列出的字段原样输出） */
+    masking: Partial<Record<keyof Customer, (v: never) => unknown>>;
+}
+
+/** 出口统一裁剪：白名单之外的字段直接不出现 */
+export function sanitize<T extends object>(record: T, policy: FieldPolicy): Partial<T>;
+```
+
+> 运行方式：`npx tsx examples/37-05-field-masking.ts`（import 了 37-04，属跨文件示例）。
+
+### 37.5.3 应用实践
+
+- **脱敏器是纯函数集合**：`phone/idCard/hidden/bucket` 各管一种格式，新格式加函数，不改 sanitize 主流程。
+- **白名单可以由 can() 动态生成**：`fieldsOf.filter(f => ability.can('read', 'Customer', f))`——能力数据（第 35 册权限码 + 本册策略）驱动字段白名单，单一事实来源。
+- **导出接口是脱敏高危区**：页面看得到 ≠ 导出拿得到，导出网关必须独立走一遍 sanitize（很多泄露事故发生在「导出 Excel 忘了脱敏」）。
+
+---
+
+## 37.6 策略下发、缓存与前后端分工
+
+### 37.6.1 策略怎么到前端
+
+1. **登录响应携带**：`{ permissionCodes: [...], policies: [...], policyVersion: 42 }`——第 35 册的权限码（RBAC 层）+ 本册的策略 JSON（ABAC 层）一次下发；
+2. **版本号 + 全量替换**：策略条目通常几十条，不值得做增量 diff，版本号变了整包替换，逻辑最简单且不会出现「半新半旧」；
+3. **缓存位置**：Pinia/Vuex 全局 store（内存），登出即清。不放 localStorage——策略泄露面比权限码更大。
+
+### 37.6.2 前后端分工边界
+
+| 层 | 前端 | 后端 |
+| --- | --- | --- |
+| 菜单/路由 | 策略过滤 | 校验接口归属 |
+| 按钮显隐 | `can()` 判定 | 接口权限校验 |
+| 行级数据 | 列表预过滤（体验） | where 条件（真相） |
+| 字段输出 | 渲染裁剪 | **序列化出口 sanitize（真相）** |
+
+前端策略引擎的全部意义是**体验**（少发必然失败的请求、界面及时反馈），后端才是真相。前后端跑同一份策略 JSON，判定结果不一致时以后端为准，并把不一致上报（说明版本漂移）。
+
+### 37.6.3 一句话总结
+
+> 第 35 册 RBAC 管「你是谁」（静态身份 → 功能可见性），本册 ABAC 管「此刻满不满足条件」（动态属性 → 行级/字段级控制）。两册合起来：权限码驱动菜单与按钮，策略引擎驱动数据访问，`can()` 是它们共同的组件侧门面。
+
+---
+
+## 37.7 自测题
+
+1. 「用户只能编辑自己创建的工单」用 RBAC 怎么做？为什么会失控？
+
+<details><summary>查看答案</summary>
+
+RBAC 只能造一个「工单编辑者」角色，但无法表达「自己创建的」——角色与资源实例无关。硬做只能按资源枚举（工单 A 编辑者、工单 B 编辑者……）或造「本部门工单编辑」「全员工单编辑」等角色近似，维度一多角色数量相乘爆炸。ABAC 用 `subject.userId === resource.ownerId` 一条谓词解决。
+</details>
+
+2. PDP 和 PEP 的分离为什么重要？PEP 里写一行 if 会破坏什么？
+
+<details><summary>查看答案</summary>
+
+PDP 是唯一决策点，PEP（路由守卫/按钮/拦截器）只问 PDP。PEP 里写 if 意味着判定逻辑出现第二份实现：策略改动时漏改某处 PEP → 同一用户在不同入口得到不同判定；且这些 if 无法被策略审计覆盖。分离后规则只改策略库，全部执行点自动一致。
+</details>
+
+3. 策略 DSL 为什么「未知操作符一律返回 false」？返回 true 或抛异常分别有什么问题？
+
+<details><summary>查看答案</summary>
+
+默认拒绝原则要求任何「无法确定」的情况都拒绝。返回 true 会让畸形/被篡改的规则意外放行（安全漏洞）；抛异常会让单条坏规则炸掉整个鉴权管线（可用性事故），且 fail-closed 语义被异常路径打散。false 语义最保守：看不懂的规则当作不存在，走默认拒绝。
+</details>
+
+4. `cannot('delete', 'Post')` 写在 `can('manage', 'Post')` 之后为什么能生效？
+
+<details><summary>查看答案</summary>
+
+Ability 规则按声明顺序求值，后命中的规则覆盖前面的结论（allowed = !rule.inverted）。manage 是通配动作，delete 的 cannot 规则在它之后声明，匹配时后者覆盖前者。这也是为什么规则的声明顺序是契约的一部分，不能随意重排。
+</details>
+
+5. 白名单外的字段为什么输出时「直接不出现」而不是置 null？
+
+<details><summary>查看答案</summary>
+
+置 null 泄露结构信息：攻击者能确认「存在 balance 字段且此角色看不到值」，结合报错差异还能探测字段类型与存在性。不输出则序列化结果里没有该 key，配合后端对未知字段请求的静默忽略，探测面最小。
+</details>
+
+---
+
+## 37.8 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 用 RBAC 硬扛资源属性规则 | 角色数随维度相乘爆炸，审计失控 | 出现 owner/金额/时段等属性时上 ABAC 谓词 |
+| PEP 各自实现判定逻辑 | 同一用户不同入口判定不一致 | 全站只问 PDP，PEP 零规则 |
+| allow 优先于 deny 求值 | deny 规则被 allow 命中绕过 | 固定顺序：先扫 deny，再扫 allow，默认拒绝 |
+| 策略 DSL 支持 eval/任意表达式 | 规则注入 + 审计能力归零 | 封闭操作符集合，未知即 false |
+| 有 when 条件的规则在无实例时放行 | 类型级判定误报 true，按钮在列表页错误显示 | 无实例 + 有条件 → 不命中（保守拒绝） |
+| AbilityBuilder 用普通原型方法 + 解构调用 | `Cannot read properties of undefined` 运行时炸 | 方法用箭头函数字段绑定 this（casl 同款） |
+| 脱敏散落在各组件 replace | 新角色上线必漏一处，导出是重灾区 | 序列化出口统一 sanitize，规则集中 |
+| 白名单外字段输出 null | 泄露字段结构，可被探测 | 白名单外直接不输出 key |
+| 页面能看 ≠ 导出能拿 | 导出 Excel 忘脱敏，批量泄露 | 导出网关独立走一遍 sanitize |
+| 前端策略缓存放 localStorage 且登出不清 | 策略泄露面扩大 + 换账号读到旧策略 | 放内存 store，登出即清，版本号全量替换 |

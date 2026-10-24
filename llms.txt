@@ -1,0 +1,134 @@
+# frontend-advanced-guide（高级前端进阶指南）
+
+> 系统整理现代前端开发必备高级技术知识点：概念解析、典型应用场景、可运行代码示例、最佳实践与自测题五段式；另含 37 话四格漫画剧场、速查卡与知识地图。
+
+当前版本：v1.74.0；内容更新记录见 README 更新记录章节。
+
+## 教程正文
+
+- [第一部分：JavaScript 高级特性](https://yzhijie.github.io/frontend-advanced-guide-site/01-javascript-advanced)：这一部分是所有框架、工程化的地基。面试高频、日常易错的知识点集中在这里。
+- [第二部分：TypeScript 高级应用](https://yzhijie.github.io/frontend-advanced-guide-site/02-typescript)：TypeScript 已经是现代前端的默认选择。进阶的关键不是背类型体操，而是：**泛型抽象、条件类型推理、映射类型变形**三板斧，让类型系统为业务服务。
+- [第三部分：前端工程化](https://yzhijie.github.io/frontend-advanced-guide-site/03-engineering)：工程化能力是中级与高级工程师的分水岭：模块化、构建、依赖治理、性能体系、CI/CD——决定的是**团队的整体效率与产出质量**。
+- [第四部分：框架深入理解](https://yzhijie.github.io/frontend-advanced-guide-site/04-frameworks)：会用框架只是起点，理解**设计动机与内部机制**才能：写出框架友好（高性能）的代码、快速定位诡异 bug、在技术选型时讲清 trade-off。
+- [第五部分：状态管理方案](https://yzhijie.github.io/frontend-advanced-guide-site/05-state-management)：把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+- [第六部分：网络请求优化](https://yzhijie.github.io/frontend-advanced-guide-site/06-network)：所以本地调试看到"一个请求变两个"，第二个就是 OPTIONS 预检。
+- [第七部分：前端安全](https://yzhijie.github.io/frontend-advanced-guide-site/07-security)：把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+- [第八部分：跨端开发](https://yzhijie.github.io/frontend-advanced-guide-site/08-cross-platform)：把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+- [第九部分：测试策略](https://yzhijie.github.io/frontend-advanced-guide-site/09-testing)：决策口诀：**能写单测的不写集成，能写集成的不写 E2E**。E2E 是兜底保险，不是主力。
+- [第十部分：浏览器原理与渲染性能](https://yzhijie.github.io/frontend-advanced-guide-site/10-browser-rendering)：把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+- [第十一部分：设计模式与架构](https://yzhijie.github.io/frontend-advanced-guide-site/11-patterns-architecture)：INP 取的是**整个会话中最差（或接近最差）的交互延迟**，不是平均值——优化目标是"最差的那次点击别卡"。LCP/CLS 关注 10.1 渲染链路。
+- [第十二部分：CSS 工程化与现代 CSS](https://yzhijie.github.io/frontend-advanced-guide-site/12-css-engineering)：CSS 在很多团队的"进阶清单"里被严重低估。现代 CSS 已经拥有布局、逻辑、性能三个维度的原生能力，工程化选型（原子化 / 零运行时 / CSS Modules）也直接受 SSR/RSC 架构影响。
+- [第十三部分：SSR 与元框架](https://yzhijie.github.io/frontend-advanced-guide-site/13-ssr-meta-frameworks)：2026 年的前端招聘与架构讨论中，SSR/RSC/元框架是绝对主场。这一部分讲清三件事：渲染模式怎么选、Hydration 到底发生了什么、Next.js App Router 的正确心智模型。
+- [第十四部分：前端 AI 工程](https://yzhijie.github.io/frontend-advanced-guide-site/14-frontend-ai)：AI 功能正在成为业务前端的标配：对话流、智能表单、内容生成。前端工程师在 AI 应用中的核心职责是：**流式渲染、交互编排、成本与体验的平衡**——模型能力是服务端的事，把"生成过程"优雅地呈现出来是我们的主场。
+- [第十五部分：可访问性与国际化](https://yzhijie.github.io/frontend-advanced-guide-site/15-accessibility-i18n)：a11y（可访问性）与 i18n（国际化）是高级工程师的分内事：欧盟 EN 301 549、中国适老化改造政策都已有硬性要求，而出海产品从第一天就要面对多语言与 RTL。更现实的好处是——**可访问的组件往往就是工程质量更高的组件**。
+- [第十六部分：Node.js 与服务端基础](https://yzhijie.github.io/frontend-advanced-guide-site/16-node-server)：现代前端工程师的"服务端半径"至少要覆盖：能读懂 Node 运行时行为、能写 BFF 层、能把应用部署上去。这一部分补齐这三块——不追求成为后端专家，但求**独立完成前端工程师需要的服务端工作**。
+- [第十七部分：Web 新能力与可视化](https://yzhijie.github.io/frontend-advanced-guide-site/17-web-platform)：平台能力在快速进化：很多以前要引库、写几十行代码的事，现在一行声明式 API 就够了。这一部分做两件事：**更新你的"浏览器能力地图"**，以及给出可视化的选型决策框架。
+- [第十八部分：Worker 家族与跨标签页通信](https://yzhijie.github.io/frontend-advanced-guide-site/18-worker-messaging)：一份围绕"**多线程 / 多上下文 / 多标签页通信**"主题的 JavaScript 高级知识点系统文档。
+- [第十九部分：常用业务功能代码片段](https://yzhijie.github.io/frontend-advanced-guide-site/19-business-snippets)：前十八部分按**技术机制**组织（闭包怎么形成、Fiber 怎么调度），本部分换一个视角：按**业务场景**组织——把中后台与 C 端业务里反复出现的功能沉淀成"复制即可用"的片段。
+- [第二十一部分：前端 AI 技术与面试通关](https://yzhijie.github.io/frontend-advanced-guide-site/21-frontend-ai-interview)：大模型时代，前端的主战场从「请求 JSON → 渲染表单」变成了「**消费一条持续生长的流，并把生成过程优雅地呈现出来**」。这条主线串起了六个高频面试主题：SSE 负责传输、打字机负责呈现节奏、Markdown 增量渲染负责富文本、Web
+- [第二十二部分：前端常用数据结构与算法](https://yzhijie.github.io/frontend-advanced-guide-site/22-frontend-data-structures)：📦 专用资源目录：data-structures/（可运行示例 · 面试专项 · 静态资源）
+- [第二十三部分：JavaScript 高频面试题通关](https://yzhijie.github.io/frontend-advanced-guide-site/23-js-high-frequency-interview)：🎯 本章是从通用前端面试 JS 题库中提炼的高频题集，与《生强科技-面试题集》配套使用。**标 ⭐ 的为高频手写/口述题，需练到不假思索**；标 ⭐⭐ 为极高频，⭐⭐⭐ 为必考题。
+- [第二十四部分：AI 协作工程化](https://yzhijie.github.io/frontend-advanced-guide-site/24-ai-collaboration)：AI Vibe Coding 不是"跟 AI 聊天写代码"，而是**把 AI 当成一个速度极快、但没有上下文记忆、偶尔会一本正经胡说的初级工程师来管理**：你定契约、它出实现、门禁做验收。本部分给出一套经过实战验证的四阶段流程与三级质量门禁
+- [第二十五部分：生产可用 Web API 手册](https://yzhijie.github.io/frontend-advanced-guide-site/25-prod-ready-web-apis)：**本册定位**：不是 API 大全，而是一本经过两道筛选的「口袋书」——**兼容性筛**（Baseline 已达成、两大引擎以上稳定支持、无需 flag）与**踩坑筛**（日常业务真的会踩的才收）。每节五段式：概念 → 场景 → 可运行示
+- [第二十六部分 · 手写网络栈](https://yzhijie.github.io/frontend-advanced-guide-site/26-mini-network-stack)：技术基线：TypeScript 5.x + Node 24 原生模块（`http`, `https`, `net`, `crypto`, `stream`），**零第三方依赖**。所有代码在 `examples/` 下以 `node --e
+- [第二十七部分 · 手写前端框架](https://yzhijie.github.io/frontend-advanced-guide-site/27-mini-framework)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。
+- [第二十八部分 · 手写浏览器内核](https://yzhijie.github.io/frontend-advanced-guide-site/28-mini-browser-engine)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。配套工程见 case 12：手写浏览器渲染引擎（70 个测试用例）。
+- [第二十九部分：RxJS 响应式编程——从入门到精通](https://yzhijie.github.io/frontend-advanced-guide-site/29-rxjs)：🧪 实验室：`libraries/packages/rxjs-lab/`｜技术基线（RxJS 7.8 + TypeScript 5.x + Node 24）
+- [第三十部分：Lodash 工具库实战——从 API 到工程治理](https://yzhijie.github.io/frontend-advanced-guide-site/30-lodash)：**导航**：返回总目录 · 上一篇：RxJS · 下一篇：XLSX · 学习路线
+- [第三十一部分：XLSX 表格工程——导入、导出与大数据量处理](https://yzhijie.github.io/frontend-advanced-guide-site/31-xlsx)：**导航**：返回总目录 · 上一篇：第三十部分 Lodash · 下一篇：第三十二部分 Day.js · 学习路线 · 实验室：`libraries/packages/xlsx-lab/` · 技术基线：SheetJS 0.18 + Ty
+- [第三十二部分：Day.js 日期工程——从格式化到跨时区](https://yzhijie.github.io/frontend-advanced-guide-site/32-dayjs)：🧪 实验室：`libraries/packages/dayjs-lab/`｜🛠 技术基线：Day.js 1.11 + TypeScript 5.x + Node 24
+- [第三十三部分：Zod 运行时校验——类型安全的边界](https://yzhijie.github.io/frontend-advanced-guide-site/33-zod)：- 上一篇：Day.js
+- [第三十四部分：架构师成长路线——从高级工程师到技术决策者](https://yzhijie.github.io/frontend-advanced-guide-site/34-architect-roadmap)：- 上一篇：Zod 运行时校验
+- [第三十五部分 · 后台管理系统权限方案](https://yzhijie.github.io/frontend-advanced-guide-site/35-admin-system-auth)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。本章回答「后台系统如何按角色做鉴权」——从 RBAC 数据模型、动态菜单、动态路由、按钮级指令，到超级管理
+- [第三十六部分 · 认证体系全景](https://yzhijie.github.io/frontend-advanced-guide-site/36-auth-system)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。第 35 册解决的是「登录之后能干什么」（授权），本册解决「如何证明你是谁」（认证）——从 Session
+- [第三十七部分 · ABAC 与策略引擎](https://yzhijie.github.io/frontend-advanced-guide-site/37-abac-policy-engine)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。第 35 册的 RBAC 回答「你是什么角色」，本册的 ABAC 回答「你此刻的属性满不满足规则」——从角
+- [第三十八部分 · 低代码表单引擎](https://yzhijie.github.io/frontend-advanced-guide-site/38-lowcode-form-engine)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。中后台系统 60% 以上的页面是表单，表单引擎因此成为低代码平台的第一块拼图——从 Schema 协议设计
+- [第三十九部分 · IM 实时通信系统](https://yzhijie.github.io/frontend-advanced-guide-site/39-im-messaging)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。IM 是把「网络不可靠」当作第一前提来设计的系统——从消息状态机、ACK 重发与幂等去重、会话列表与未读数
+- [第四十部分 · 文件网盘系统](https://yzhijie.github.io/frontend-advanced-guide-site/40-file-drive)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。网盘是「大文件 × 弱网络」的极致场景——分片上传、秒传、断点续传、并发队列、Range 下载，每个机制都
+- [第四十一部分 · 数据可视化大屏](https://yzhijie.github.io/frontend-advanced-guide-site/41-dashboard-visualization)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。大屏是可视化的「极限工况」——分辨率千奇百怪、数据十万点、7×24 小时轮巡不崩溃。本章用 5 个可运行示
+- [第四十二部分 · 工作流与审批引擎](https://yzhijie.github.io/frontend-advanced-guide-site/42-workflow-approval)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。审批系统看起来是「增删改查」，真正的难度藏在四件事里：**状态机**（审批单绝不出现非法状态）、**多人节
+- [第四十三部分 · 高频业务场景集](https://yzhijie.github.io/frontend-advanced-guide-site/43-business-scenes)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。前面各册按「系统类型」纵向展开，这一册横向收网：把电商（SKU/购物车/秒杀）、增长（曝光埋点/A/B 实
+- [第四十四部分 · 多系统统一账号中心](https://yzhijie.github.io/frontend-advanced-guide-site/44-account-center)：💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。一个公司有 OA、CRM、工单、数据平台四套系统，如果每套都自建注册/登录/改密页，就会出现四份密码策略、
+- [第四十五部分 · 前端高级实用技巧](https://yzhijie.github.io/frontend-advanced-guide-site/45-frontend-advanced-tips)：💡 阅读方式：本册刻意避开 01/10/17/25 册已经讲透的原理，只保留能直接搬进项目的写法；遇到需要展开的背景，正文会给对应分册链接，不重复造轮子。
+- [第四十六部分 · 前端错误捕获处理方案](https://yzhijie.github.io/frontend-advanced-guide-site/46-error-handling)：💡 **本章特色**：把「错误捕获」从一句 `try/catch` 讲成一套可落地的体系——先分清五类错误来源各自走哪条捕获通道，再按同步、单异步、多异步任务编排逐层展开，最后落到框架边界与工程治理（归一化、分级、指纹聚合、批量上报）。4
+- [第四十七部分 · 企业级密钥管理与零泄漏方案](https://yzhijie.github.io/frontend-advanced-guide-site/47-secrets-management)：💡 **本章特色**：密钥泄漏事故 80% 来自「误提交进仓库」和「打进了日志/产物」。本章把密钥生命周期从「分级」→「开发注入」→「构建/运行时隔离」→「泄漏扫描」→「应急响应」完整串成一条管线，4 个示例可 `npx tsx` 直跑（
+- [第四十八部分 · Flutter 跨平台实战——从 Widget 树到平台能力](https://yzhijie.github.io/frontend-advanced-guide-site/48-flutter)：💡 **本章特色**：Flutter 不是「另一套 React」，它的核心是**三棵树 + 一次布局 + 平台通道**。本章把「选型 → 渲染模型 → 状态与平台能力 → 构建发布」串成一条线，并用两个可运行示例把选型打分和 key 协调
+- [第四十九部分 · 组件库工程——Ant Design 存量维护、二次封装与设计令牌](https://yzhijie.github.io/frontend-advanced-guide-site/49-component-library)：💡 **本章特色**：企业项目里真正难的不是「学会 Ant Design」，而是**在 Ant Design 3 的存量系统上安全演进**，同时把业务组件封装成团队可复用的资产。本章给出「版本基线 → 迁移适配层 → 二次封装契约 → 组
+- [第五十部分 · Web 蓝牙与硬件通信——从 GATT 到协议解析](https://yzhijie.github.io/frontend-advanced-guide-site/50-bluetooth-hardware)：💡 **本章特色**：硬件对接的难点不在「调一个 API」，而在**连接生命周期、字节流分帧、错误恢复与浏览器边界**。本章从 BLE 协议栈讲到 GATT 读写，再落到帧编解码与重连状态机，两个示例都可以直接运行验证。
+- [第五十一部分 · 直播弹幕与实时互动——消息流、渲染治理与交易链路](https://yzhijie.github.io/frontend-advanced-guide-site/51-live-danmaku)：💡 **本章特色**：直播前端不是一个页面，而是**消息流 + 渲染调度 + 交易状态**三条链路的叠加。本章从直播间全景讲到弹幕调度器、消息管线与高并发渲染治理，两个示例分别验证「按帧预算渲染」和「幂等/限流/合并」。
+- [第五十二部分 · 数据库与 BFF 数据层——前端也要懂的数据建模](https://yzhijie.github.io/frontend-advanced-guide-site/52-database-bff)：💡 **本章特色**：前端不需要会 DBA，但必须能看懂「一次接口背后查了几次库、走的什么索引、缓存什么时候失效」。本章从关系模型讲到 N+1、BFF 聚合与缓存一致性，两个示例分别量化 N+1 的查询次数、验证缓存单飞。
+- [第五十三部分 · Nginx 部署与反向代理——从静态站点到生产网关](https://yzhijie.github.io/frontend-advanced-guide-site/53-nginx-deploy)：💡 **本章特色**：前端部署的最后一公里几乎都落在 Nginx 上：路径、缓存、跨域、WebSocket、HTTPS、灰度。本章按「静态托管 → 反向代理 → 安全与缓存 → 排障」四段展开，两个示例分别做配置静态检查和缓存策略计算。
+- [第五十四部分 · 动画与工具库——framer-motion、GSAP、jwt-decode、qs、uuid](https://yzhijie.github.io/frontend-advanced-guide-site/54-animation-tooling)：💡 **本章特色**：这五个库分别解决「动效、时间线、身份解析、查询串、唯一标识」。本章不只列 API，而是讲清**每个库的边界**：framer-motion 的声明式生命周期、GSAP 的可 seek 时间线、jwt-decode 的
+- [第五十五部分 · 构建与样式库——Vite、Webpack、PostCSS](https://yzhijie.github.io/frontend-advanced-guide-site/55-build-style-tooling)：💡 **本章特色**：Vite、Webpack、PostCSS 分别对应「开发体验、存量构建、样式管线」。本章不做 API 大全，而是讲清**它们各自的边界与组合方式**：Vite 为什么快、Webpack 什么时候仍然必要、PostCS
+- [第五十六部分 · 离线与本地缓存全景——PWA、React Native 与内嵌 H5](https://yzhijie.github.io/frontend-advanced-guide-site/56-offline-cache)：💡 **本章特色**：离线能力不是单一技术，而是**三条技术线 × 一个共同内核**。Web 线靠 Service Worker + IndexedDB（PWA），React Native 线靠 AsyncStorage/MMKV/SQL
+
+## 附录与速查
+
+- [附录](https://yzhijie.github.io/frontend-advanced-guide-site/20-appendix)：学习路线与推荐资源
+- [速查卡 Cheatsheet](https://yzhijie.github.io/frontend-advanced-guide-site/cheatsheet)：全部知识点的代码片段速查
+- [知识地图](https://yzhijie.github.io/frontend-advanced-guide-site/knowledge-map)：22 个分册 / 233 小节 / 132 道自测题 / 151 个示例的结构化索引
+- [知识地图 JSON](https://yzhijie.github.io/frontend-advanced-guide-site/knowledge-map.json)：机器可读版，适合程序化检索
+
+## 漫画剧场
+
+- [进阶漫画剧场（37 话）](https://yzhijie.github.io/frontend-advanced-guide-site/comics/index.html)：每话一幅 1200×840 四格 SVG 原画 + 讲解 MD（剧情回顾 / 知识点拆解 / 坑点清单 / 自测题）
+
+## 分册全文（按册切分，适合按需抓取）
+
+- [第一部分：JavaScript 高级特性 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/01-javascript-advanced.txt)
+- [第二部分：TypeScript 高级应用 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/02-typescript.txt)
+- [第三部分：前端工程化 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/03-engineering.txt)
+- [第四部分：框架深入理解 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/04-frameworks.txt)
+- [第五部分：状态管理方案 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/05-state-management.txt)
+- [第六部分：网络请求优化 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/06-network.txt)
+- [第七部分：前端安全 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/07-security.txt)
+- [第八部分：跨端开发 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/08-cross-platform.txt)
+- [第九部分：测试策略 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/09-testing.txt)
+- [第十部分：浏览器原理与渲染性能 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/10-browser-rendering.txt)
+- [第十一部分：设计模式与架构 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/11-patterns-architecture.txt)
+- [第十二部分：CSS 工程化与现代 CSS 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/12-css-engineering.txt)
+- [第十三部分：SSR 与元框架 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/13-ssr-meta-frameworks.txt)
+- [第十四部分：前端 AI 工程 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/14-frontend-ai.txt)
+- [第十五部分：可访问性与国际化 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/15-accessibility-i18n.txt)
+- [第十六部分：Node.js 与服务端基础 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/16-node-server.txt)
+- [第十七部分：Web 新能力与可视化 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/17-web-platform.txt)
+- [第十八部分：Worker 家族与跨标签页通信 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/18-worker-messaging.txt)
+- [第十九部分：常用业务功能代码片段 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/19-business-snippets.txt)
+- [附录 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/20-appendix.txt)
+- [第二十一部分：前端 AI 技术与面试通关 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/21-frontend-ai-interview.txt)
+- [第二十二部分：前端常用数据结构与算法 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/22-frontend-data-structures.txt)
+- [第二十三部分：JavaScript 高频面试题通关 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/23-js-high-frequency-interview.txt)
+- [第二十四部分：AI 协作工程化 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/24-ai-collaboration.txt)
+- [第二十五部分：生产可用 Web API 手册 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/25-prod-ready-web-apis.txt)
+- [第二十六部分 · 手写网络栈 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/26-mini-network-stack.txt)
+- [第二十七部分 · 手写前端框架 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/27-mini-framework.txt)
+- [第二十八部分 · 手写浏览器内核 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/28-mini-browser-engine.txt)
+- [第二十九部分：RxJS 响应式编程——从入门到精通 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/29-rxjs.txt)
+- [第三十部分：Lodash 工具库实战——从 API 到工程治理 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/30-lodash.txt)
+- [第三十一部分：XLSX 表格工程——导入、导出与大数据量处理 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/31-xlsx.txt)
+- [第三十二部分：Day.js 日期工程——从格式化到跨时区 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/32-dayjs.txt)
+- [第三十三部分：Zod 运行时校验——类型安全的边界 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/33-zod.txt)
+- [第三十四部分：架构师成长路线——从高级工程师到技术决策者 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/34-architect-roadmap.txt)
+- [第三十五部分 · 后台管理系统权限方案 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/35-admin-system-auth.txt)
+- [第三十六部分 · 认证体系全景 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/36-auth-system.txt)
+- [第三十七部分 · ABAC 与策略引擎 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/37-abac-policy-engine.txt)
+- [第三十八部分 · 低代码表单引擎 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/38-lowcode-form-engine.txt)
+- [第三十九部分 · IM 实时通信系统 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/39-im-messaging.txt)
+- [第四十部分 · 文件网盘系统 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/40-file-drive.txt)
+- [第四十一部分 · 数据可视化大屏 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/41-dashboard-visualization.txt)
+- [第四十二部分 · 工作流与审批引擎 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/42-workflow-approval.txt)
+- [第四十三部分 · 高频业务场景集 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/43-business-scenes.txt)
+- [第四十四部分 · 多系统统一账号中心 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/44-account-center.txt)
+- [第四十五部分 · 前端高级实用技巧 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/45-frontend-advanced-tips.txt)
+- [第四十六部分 · 前端错误捕获处理方案 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/46-error-handling.txt)
+- [第四十七部分 · 企业级密钥管理与零泄漏方案 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/47-secrets-management.txt)
+- [第四十八部分 · Flutter 跨平台实战——从 Widget 树到平台能力 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/48-flutter.txt)
+- [第四十九部分 · 组件库工程——Ant Design 存量维护、二次封装与设计令牌 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/49-component-library.txt)
+- [第五十部分 · Web 蓝牙与硬件通信——从 GATT 到协议解析 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/50-bluetooth-hardware.txt)
+- [第五十一部分 · 直播弹幕与实时互动——消息流、渲染治理与交易链路 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/51-live-danmaku.txt)
+- [第五十二部分 · 数据库与 BFF 数据层——前端也要懂的数据建模 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/52-database-bff.txt)
+- [第五十三部分 · Nginx 部署与反向代理——从静态站点到生产网关 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/53-nginx-deploy.txt)
+- [第五十四部分 · 动画与工具库——framer-motion、GSAP、jwt-decode、qs、uuid 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/54-animation-tooling.txt)
+- [第五十五部分 · 构建与样式库——Vite、Webpack、PostCSS 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/55-build-style-tooling.txt)
+- [第五十六部分 · 离线与本地缓存全景——PWA、React Native 与内嵌 H5 全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/56-offline-cache.txt)
+- [速查卡全文](https://yzhijie.github.io/frontend-advanced-guide-site/llms/cheatsheet.txt)

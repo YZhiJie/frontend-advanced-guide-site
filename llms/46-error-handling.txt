@@ -1,0 +1,443 @@
+# 第四十六部分 · 前端错误捕获处理方案（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/46-error-handling
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第四十六部分 · 前端错误捕获处理方案
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第四部分 · 框架深入理解](./04-frameworks.md) · [第六部分 · 网络请求优化](./06-network.md) · [第十一部分 · 设计模式与架构](./11-patterns-architecture.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-59" target="_blank" rel="noopener">EP.59《错误捕获四张网》</a>
+
+> 💡 **本章特色**：把「错误捕获」从一句 `try/catch` 讲成一套可落地的体系——先分清五类错误来源各自走哪条捕获通道，再按同步、单异步、多异步任务编排逐层展开，最后落到框架边界与工程治理（归一化、分级、指纹聚合、批量上报）。4 个示例全部可 `npx tsx` 直跑，内置硬断言，跑通即理解到位。
+
+## 本部分内容
+
+- [46.1 错误分类与捕获全景](#_46-1-错误分类与捕获全景)
+- [46.2 同步错误：try/catch 的边界与盲区](#_46-2-同步错误-try-catch-的边界与盲区)
+- [46.3 异步错误：Promise 链与 async/await 的捕获规则](#_46-3-异步错误-promise-链与-async-await-的捕获规则)
+- [46.4 多个异步任务的错误编排：短路、汇总与补偿](#_46-4-多个异步任务的错误编排-短路、汇总与补偿)
+- [46.5 框架与特殊运行时的错误边界](#_46-5-框架与特殊运行时的错误边界)
+- [46.6 工程化落地：归一化、分级与上报管线](#_46-6-工程化落地-归一化、分级与上报管线)
+- [46.7 自测题](#_46-7-自测题)
+- [46.8 本章避坑清单](#_46-8-本章避坑清单)
+
+---
+
+## 46.1 错误分类与捕获全景
+
+### 46.1.1 概念解析
+
+「捕获错误」之所以容易漏，是因为前端错误**不走同一条通道**。先建立全景图，再谈逐个击破：
+
+| 错误来源 | 典型例子 | 捕获通道 |
+| --- | --- | --- |
+| 同步运行时错误 | `JSON.parse` 失败、空指针 `TypeError` | 局部 `try/catch` → 冒泡到全局 `error` 事件 |
+| 资源加载失败 | `<img>` / `<script>` / `<link>` 404 | `window.addEventListener('error', cb, true)`（**必须捕获阶段**） |
+| Promise 未处理拒绝 | `fetch` 失败没人 `.catch` | `unhandledrejection` 事件 |
+| 异步回调内抛错 | `setTimeout` / 事件监听回调里 `throw` | 回调自己 `try/catch`，否则冒到全局 `error` 事件 |
+| 框架渲染错误 | React 渲染期抛错、Vue 组件 setup 抛错 | ErrorBoundary / `app.config.errorHandler` / `onErrorCaptured` |
+
+关键认知：**`try/catch` 只覆盖第一行那一格**。它只能捕获「同一事件循环回合、同一调用栈里同步抛出」的异常，其余四类都必须靠全局监听或框架钩子兜底。
+
+### 46.1.2 捕获通道全景图
+
+```mermaid
+graph TD
+    subgraph 错误来源
+        S1[同步 throw]
+        S2[资源 404]
+        S3[Promise 拒绝]
+        S4[异步回调 throw]
+        S5[框架渲染错误]
+    end
+    subgraph 捕获通道
+        C1[局部 try/catch]
+        C2["error 事件<br/>捕获阶段"]
+        C3[unhandledrejection]
+        C4[ErrorBoundary / errorHandler]
+    end
+    G[归一化管线<br/>分级 → 聚合 → 上报]
+    S1 --> C1
+    S1 --> C2
+    S2 --> C2
+    S3 --> C3
+    S4 --> C2
+    S5 --> C4
+    C1 --> G
+    C2 --> G
+    C3 --> G
+    C4 --> G
+```
+
+#### 全局三件套的最小骨架
+
+```typescript
+// 文件: src/monitor/global-catch.ts —— 虚拟工程文件,接入即生效
+// ---- 1. JS 运行时错误 + 资源错误(第三个参数 true:捕获阶段才拿得到资源错误)----
+window.addEventListener('error', (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target && ['IMG', 'SCRIPT', 'LINK'].includes(target.tagName)) {
+        report({ kind: 'resource', url: (target as HTMLImageElement).src });
+    } else {
+        report({ kind: 'js', message: event.message, stack: event.error?.stack });
+    }
+}, true);
+
+// ---- 2. Promise 没人接的拒绝 ----
+window.addEventListener('unhandledrejection', (event) => {
+    report({ kind: 'promise', message: String(event.reason) });
+    event.preventDefault(); // 阻止浏览器把错误再打一遍到控制台(可选)
+});
+
+// ---- 3. 框架钩子:React ErrorBoundary / Vue app.config.errorHandler,见 46.5 ----
+```
+
+> ⚠️ 跨域脚本里的错误，全局监听只能拿到一句没有信息的 `Script error.`——需要给 `<script>` 加 `crossorigin="anonymous"` 且脚本 CDN 返回 `Access-Control-Allow-Origin`，才能拿到完整堆栈。
+
+### 46.1.3 最佳实践
+
+- ✅ 全局三件套在应用入口**最先**执行——监控代码挂了，后面所有错误都是瞎子；
+- ✅ 资源错误监听必须用捕获阶段（第三个参数 `true`），资源错误不冒泡；
+- ⚠️ 全局兜底是「最后一道网」，不是「唯一一道网」——能在局部处理的错误就在局部处理，全局只收漏网之鱼；
+- 📖 监控上报链路的完整设计（采样、批量、sourcemap）见 [11.2 前端监控与错误上报](./11-patterns-architecture.md#_11-2-前端监控与错误上报)，本章 46.6 聚焦错误的归一化与分级处置。
+
+---
+
+## 46.2 同步错误：try/catch 的边界与盲区
+
+### 46.2.1 概念解析
+
+`try/catch` 的本质是**捕获同一调用栈上同步抛出的异常**。记住这句话，三个推论自然成立：
+
+1. `setTimeout` 回调、事件监听回调里的 `throw`，执行时外层 `try` 早已出栈——**永远抓不到**；
+2. `Promise` 构造器（executor）里的同步 `throw` 是唯一特例——会被 Promise 构造函数接住，转成 rejection；
+3. 语法错误在解析期就失败了，连执行的机会都没有，`try/catch` 无从谈起（只能构建期拦）。
+
+#### 典型应用场景
+
+- 反序列化边界：`JSON.parse`、`new URL()`、`new RegExp(用户输入)`、Base64 解码——这些「输入不可信」的解析点必须包 `try/catch`；
+- 错误包装与因果链：底层 `SyntaxError` 包装成业务可读的 `ConfigError`，用 `cause` 保留原始现场；
+- `finally` 做收尾：关闭弹窗 loading、释放锁、断开连接——不管成不成功都要执行。
+
+### 46.2.2 完整代码示例
+
+```typescript
+// 文件: examples/46-01-sync-capture.ts（此处为核心节选,完整版含全部断言）
+// ---- 盲区实证:setTimeout 回调里的 throw 外层抓不到 ----
+try {
+    setTimeout(() => { throw new Error('延迟爆炸'); }, 0);
+} catch {
+    // ❌ 永远到不了这里:回调执行时,外层 try 已经出栈
+}
+// ✅ 正确姿势:回调内部自己 try/catch,或交给全局 error 事件兜底
+
+// ---- 错误包装:cause 保留因果链 ----
+class ConfigError extends Error {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, { cause: options?.cause });
+        this.name = 'ConfigError';
+    }
+}
+function loadConfig(raw: string) {
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        throw new ConfigError('配置文件解析失败', { cause: e }); // 两层信息都在
+    }
+}
+```
+
+> 运行方式：`npx tsx examples/46-01-sync-capture.ts`（自建微型事件队列实证「异步回调的错误与外层 try/catch 不在同一调用栈」，全部断言通过）。
+
+### 46.2.3 最佳实践
+
+- ✅ 错误包装一律带 `cause`——日志里能看到「业务语义 + 原始堆栈」两层，排查时不用猜；
+- ✅ 自定义错误类必须设 `this.name`——否则压缩后 `constructor.name` 丢失，聚合全乱；
+- ⚠️ 不要 `catch` 了之后什么都不做（空 catch 块）——吞掉的错误等于埋雷，至少记一条日志；
+- ❌ 不要用 `catch (e) { alert(e.message) }` 当全局策略——用户看不懂，错误也没进监控。
+
+---
+
+## 46.3 异步错误：Promise 链与 async/await 的捕获规则
+
+### 46.3.1 概念解析
+
+Promise 的错误处理只有一条核心规则：**拒绝沿链向下冒泡，直到遇到第一个 `.catch`（或 `await` 处的 `try/catch`）**。围绕它有四个高频考点：
+
+1. **冒泡**：中间环节的 `.then` 不处理错误就透传，链尾 `.catch` 一把接；
+2. **rethrow**：`.catch` 里再 `throw` 会生成一条新的拒绝链——用于「请求层转成业务错误，业务层再兜底」的分层处理；
+3. **盲区**：`.then(onFulfilled, onRejected)` 的第二个参数**只接上游**，接不住同层 `onFulfilled` 回调里抛的错——所以链尾永远要补一个 `.catch`；
+4. **兜底时机**：一个 Promise 拒绝后，当前轮微任务清空时还没有任何拒绝处理器，才触发 `unhandledrejection`——同一 tick 内补上 `.catch` 就不算未处理。
+
+`async/await` 是语法糖：`await` 的 reject 等价于同步 `throw`，可以被外层 `try/catch` 捕获——这也是推荐 `async/await` 写业务代码的原因：错误处理回归同步心智。
+
+### 46.3.2 完整代码示例
+
+```typescript
+// 文件: examples/46-02-async-capture.ts（此处为核心节选,完整版含 unhandledrejection 时机实证）
+// ---- 分层处理:请求层转业务错误,上层统一兜底 ----
+await Promise.reject(new Error('接口 500'))
+    .catch((e) => {
+        throw new Error(`BusinessError: ${e.message}`); // ✅ rethrow 携带新语义
+    })
+    .catch((e) => report({ kind: 'business', message: e.message }));
+
+// ---- 盲区实证:onRejected 接不住同层回调里的抛错 ----
+await Promise.resolve('data').then(
+    () => { throw new Error('回调内部抛错'); },
+    (e) => { /* ❌ 接不到上面那行的错 */ },
+).catch((e) => { /* ✅ 只有链尾 catch 接得到 */ });
+```
+
+> 运行方式：`npx tsx examples/46-02-async-capture.ts`（用 Node 的 `process.on('unhandledRejection')` 等价演示浏览器的 `unhandledrejection` 事件时机，含「迟到的 catch」正反两例）。
+
+### 46.3.3 最佳实践
+
+- ✅ 一个 Promise 只在**一个层级**兜底——中间层要么 rethrow、要么透传，每层都 `.catch` 会造成重复上报；
+- ✅ `setTimeout` / 事件回调 / `requestAnimationFrame` 里的 `await` 逻辑，整个回调体包一层 `try/catch`；
+- ⚠️ `for...of` 里 `await` 是串行；并发任务里的错误编排见下一节，不要在循环里裸 `await` 不带任何保护；
+- 📖 请求层的统一错误归一化（401 续期、幂等重试）见 [6.4 请求层封装实战](./06-network.md#_6-4-请求层封装实战)。
+
+---
+
+## 46.4 多个异步任务的错误编排：短路、汇总与补偿
+
+### 46.4.1 概念解析
+
+多个异步任务一起跑，错误语义比单个任务复杂得多——先选编排策略，再谈错误处理：
+
+| 编排 API | 错误语义 | 典型场景 |
+| --- | --- | --- |
+| `Promise.all` | **短路**：第一个拒绝即整体失败 | 首屏聚合接口，缺一不可 |
+| `Promise.allSettled` | 永不短路，全部落定后分开记账 | 仪表盘多卡片，部分失败也要展示 |
+| `Promise.race` | 第一个落定（无论成败） | 超时控制：`race([请求, 超时器])` |
+| `Promise.any` | 第一个成功；全败才抛 `AggregateError` | 多 CDN 择优、多镜像容灾 |
+
+两个最容易被忽略的事实：
+
+1. **`Promise.all` 短路 ≠ 取消**。整体已经失败了，其余任务仍在后台继续执行（请求照样打到服务端）——想真正取消在途请求必须配合 `AbortController`（见 [6.5 竞态处理与请求取消](./06-network.md#_6-5-竞态处理与请求取消)）；
+2. **并发池要自己定错误策略**：收集模式（失败记账、其余跑完，适合批量上报/批处理）与熔断模式（第一个错就停，适合「一条坏数据 = 整批作废」的导入场景）是两种业务决策，不是实现细节。
+
+### 46.4.2 多步骤流程的失败补偿
+
+电商下单、审批流转这类**多步骤流程**，某一步失败时不能只抛错——已完成的步骤要反向撤销（Saga 模式的简化版）：每前进一步，登记一个补偿动作；失败时按**逆序**回放补偿动作。
+
+```typescript
+// 文件: examples/46-03-multi-task-errors.ts（此处为核心节选,完整版含并发池与熔断对照）
+class Saga {
+    private compensations: Array<() => Promise<void>> = [];
+    async step<T>(action: () => Promise<T>, compensate: () => Promise<void>): Promise<T> {
+        const result = await action();               // 失败由外层统一处理
+        this.compensations.unshift(compensate);      // ✅ 逆序:后做的先撤销
+        return result;
+    }
+    async runCompensations() {
+        for (const c of this.compensations) {
+            await c().catch((e) => console.error('补偿自身失败(需告警):', e.message));
+        }
+    }
+}
+// 用法:saga.step(创建订单, 撤销订单) → saga.step(扣库存, 回补库存) →
+//      saga.step(支付, 退款) 支付失败 → runCompensations() 回放:回补库存 → 撤销订单
+```
+
+> 运行方式：`npx tsx examples/46-03-multi-task-errors.ts`（实证 all 短路后在途任务仍继续、allSettled 汇总报告、并发池收集模式、串行熔断、Saga 逆序补偿五件事）。
+
+### 46.4.3 最佳实践
+
+- ✅ 批量任务先问「部分失败算失败吗」——算，用 `all` + AbortController；不算，用 `allSettled` 或并发池收集模式；
+- ✅ 补偿动作必须**幂等**（重复执行不产生副作用）且本身失败要告警——补偿链断了比原始故障更难查；
+- ⚠️ `Promise.all` 失败信息后，其余任务的拒绝如果没人接，会逐个触发 `unhandledrejection`——`.all` 的数组元素不要在别处再单独消费却不接错误；
+- ❌ 不要把「重试」当补偿——重试对抗瞬时故障（网络抖动），补偿对冲已完成的业务动作（已扣款要退款），两者解决不同问题。
+
+---
+
+## 46.5 框架与特殊运行时的错误边界
+
+### 46.5.1 React 错误边界：能抓什么、抓不到什么
+
+React 的 ErrorBoundary 只捕获**渲染期、生命周期、构造函数**里的错误。四类错误它抓不到：**事件处理器**（用 `try/catch`）、**异步代码**（`setTimeout`/请求回调，用全局兜底）、**SSR 渲染期**（服务端另算）、**边界自身**（冒泡到父级边界）。
+
+```tsx
+// 文件: src/components/ErrorBoundary.tsx —— 虚拟工程文件,复制进项目即用
+import { Component, type ReactNode } from 'react';
+
+export class ErrorBoundary extends Component<
+    { fallback: ReactNode; onError?: (e: Error) => void; children: ReactNode },
+    { hasError: boolean }
+> {
+    state = { hasError: false };
+    static getDerivedStateFromError() {
+        return { hasError: true };          // 渲染期触发,切到兜底 UI
+    }
+    componentDidCatch(error: Error) {
+        this.props.onError?.(error);        // 提交期触发,在这里上报
+    }
+    render() {
+        return this.state.hasError ? this.props.fallback : this.props.children;
+    }
+}
+```
+
+React 19 起 `createRoot` 还支持 `onCaughtError` / `onUncaughtError` 根级钩子，可以把「未被任何边界接住」的错误统一接进监控，不必手写一个包全站的 class 边界。完整对照见 [4.7 React 与 Vue 原理对照](./04-frameworks.md)。
+
+### 46.5.2 Vue 的错误通道
+
+Vue 有两层：`app.config.errorHandler` 是全局兜底（组件渲染、watch、生命周期里的错误都会进），`onErrorCaptured` 是组件级捕获钩子，返回 `false` 可阻止继续冒泡。两者与全局 `error` 事件是**叠加关系**不是替代关系——框架处理不了的（异步回调、资源错误）仍会冒到 `window`。
+
+### 46.5.3 特殊运行时
+
+- **Worker**：`self.addEventListener('error')` 与 `unhandledrejection` 在 Worker 内部独立存在，**不会冒泡到主线程**——必须 Worker 内自行捕获后 `postMessage` 上报（详见 [18 Worker 家族与跨标签页通信](./18-worker-messaging.md)）；
+- **异步组件 / 动态 import**：`import()` 失败（chunk 404、网络抖动）走 Promise 拒绝通道，需要用 `.catch` 或 Vue 的 `defineAsyncComponent` 的 `errorComponent` 接住，配合 45.2 的「chunk 失败自动刷新」策略；
+- **小程序 / 跨端**：微信小程序有 `App.onError` / `App.onUnhandledRejection` / `App.onPageNotFound`，语义与浏览器三件套一一对应，接 SDK 时优先用框架入口而非 hack 全局。
+
+### 46.5.4 最佳实践
+
+- ✅ 按**业务区块**放边界（图表卡片、富文本、第三方挂件各自一个边界），避免单点错误白屏整站；
+- ✅ 边界的兜底 UI 本身必须极简——兜底 UI 再报错就是死循环；
+- ⚠️ React 事件处理器里的错误 ErrorBoundary 抓不到：按钮 `onClick` 里的逻辑要自己 `try/catch` 或依赖全局兜底；
+- ❌ 不要在 `componentDidCatch` / `errorHandler` 里做重渲染之类的重操作——此时渲染树可能处于不一致状态。
+
+---
+
+## 46.6 工程化落地：归一化、分级与上报管线
+
+### 46.6.1 概念解析
+
+捕获只是上半场，下半场是**治理**。生产级错误处理管线四步：
+
+1. **归一化**：不管错误来自 try/catch、全局监听还是框架钩子，先进 `normalizeError()` 变成统一的 `AppError` 结构（name / message / level / fingerprint / context / cause）；
+2. **分级**：`fatal`（支付 SDK 加载失败）立即上报并阻断流程；`error`（接口 500、空指针）进上报队列；`warning`（库存不足等业务提示）进队列但告警阈值不同；`info` 只留本地日志；
+3. **指纹聚合**：`name + message + 堆栈第一帧` 做指纹，同一故障聚合成一个 issue 计数——一次发布事故不该刷出十万条独立告警；
+4. **批量上报**：队列攒批、定时 flush、页面隐藏时 `sendBeacon` 兜底，别让监控本身成为性能问题。
+
+```mermaid
+graph LR
+    A[各捕获通道] --> B[normalizeError 归一化]
+    B --> C{分级 level}
+    C -->|fatal| D[立即上报 + 阻断]
+    C -->|error/warning| E[批量队列 + 指纹聚合]
+    C -->|info| F[本地日志]
+    E --> G[sendBeacon / fetch keepalive]
+    D --> G
+    G --> H[监控平台:sourcemap 还原 → 告警]
+```
+
+### 46.6.2 完整代码示例
+
+```typescript
+// 文件: examples/46-04-error-pipeline.ts（此处为核心节选,完整版含演示与断言）
+/** 指纹:name + message + 堆栈第一帧——同一故障聚成同一 issue */
+function fingerprintOf(err: Error): string {
+    const topFrame = (err.stack?.split('\n')[1] ?? '').trim();
+    return `${err.name}:${err.message}@${topFrame}`.slice(0, 200);
+}
+// ReportQueue 核心逻辑:
+//   push() 时同指纹只保留一条、计数累加;
+//   fatal 不等批量立即 drain();普通错误攒到 maxSize 或 intervalMs 后批量发;
+//   页面隐藏时 drain() 兜底(浏览器里挂 visibilitychange,传输走 sendBeacon)。
+```
+
+> 运行方式：`npx tsx examples/46-04-error-pipeline.ts`（演示同一故障连发 5 次被聚合成 `count=5` 的一条，fatal 错误即时上报）。
+
+### 46.6.3 sourcemap 与 CI 集成
+
+打包产物是压缩混淆过的，堆栈里的 `app.8f3c.js:1:18327` 必须还原成源码位置才有用：
+
+1. 构建时生成 hidden sourcemap（Vite: `build.sourcemap: 'hidden'`——产出 `.map` 但产物里不引用它）；
+2. CI 里把 `.map` 上传到监控平台（Sentry 用 `sentry-cli sourcemaps upload`，自建平台走接口），**上传完从产物目录删除**；
+3. ⚠️ `.map` 文件绝不能部署到公网——等于把源码和内部接口路径免费送人；
+4. 上传时带 `release` 版本号，错误事件与 release 绑定才能还原到对应版本的代码。
+
+### 46.6.4 最佳实践
+
+- ✅ 上报前 `beforeSend` 脱敏：URL 里的 token、表单里的手机号身份证、Authorization 头必须抹掉；
+- ✅ 采样与限流：同指纹超阈值后降采样，fatal 永不采样；
+- ✅ 上下文（面包屑）比堆栈更值钱：用户点了什么、路由怎么跳的、最后一个接口是什么——Sentry 的 breadcrumbs 或自建行为轨迹栈（见 11.2）；
+- ❌ 不要把监控上报请求做进业务请求层拦截器的重试逻辑里——监控挂了不该触发重试风暴，静默失败即可；
+- 📖 生产选型：直接用 Sentry（自建版 GlitchTip）或阿里 ARMS；自建的最小骨架见 11.2 与示例 46-04。
+
+---
+
+## 46.7 自测题
+
+1. 为什么外层 `try/catch` 抓不到 `setTimeout` 回调里的 `throw`？Promise executor 里的同步 `throw` 为什么又是特例？
+
+<details><summary>查看答案</summary>
+
+`try/catch` 只能捕获同一事件循环回合、同一调用栈里同步抛出的异常。`setTimeout` 回调在一个全新的宏任务里执行，调用栈是全新的，外层 `try` 早已出栈。Promise executor 是特例：Promise 构造函数在**同步执行** executor 时自己包了一层 try/catch，把抛出的错误转成该 Promise 的 rejection——所以能进 `.catch` 通道。实证见示例 46-01。
+</details>
+
+2. `.then(onFulfilled, onRejected)` 的 `onRejected` 接不住哪类错误？正确写法是什么？
+
+<details><summary>查看答案</summary>
+
+接不住**同层 `onFulfilled` 回调里抛出的错误**——`onRejected` 只处理上游 Promise 的拒绝，同层回调的抛错会变成下游 Promise 的拒绝，绕过同层的 `onRejected`。正确写法是链尾再补一个 `.catch`（或统一用 `.then(...).catch(...)` 风格）。实证见示例 46-02 第 4 段。
+</details>
+
+3. `Promise.all` 中一个任务失败后，其余任务会怎样？如果业务要求「一个失败就全部取消」该怎么做？
+
+<details><summary>查看答案</summary>
+
+其余任务**继续执行**——`all` 的短路只是「整体 Promise 提前落定」，没有任何取消语义，请求照样打满。要真正取消必须给所有任务传入同一个 `AbortController` 的 `signal`，在失败回调里 `abort()`，且任务内部（fetch/自定义逻辑）要响应 signal。示例 46-03 第 1 段用 `finally` 实证了在途任务继续执行。
+</details>
+
+4. `Promise.allSettled` 与 `Promise.all` + 各自 `.catch` 收集，效果有什么区别？
+
+<details><summary>查看答案</summary>
+
+结果等价（都能拿到全部任务的成功/失败明细），但语义与写法不同：`allSettled` 返回结构化结果数组（status/value/reason），顺序与输入一一对应；「各自 `.catch` 后再 `all`」是把错误映射成占位值，类型上成功失败混在一个数组里，需要额外判别字段。注意 `allSettled` 的 `reason` 是 `unknown`，要收窄后才能读 message。
+</details>
+
+5. React 的 ErrorBoundary 抓不到哪些错误？分别该怎么办？
+
+<details><summary>查看答案</summary>
+
+四类：①事件处理器（onClick 等）——局部 `try/catch`；②异步代码（setTimeout、请求回调）——`try/catch` 或全局 `error`/`unhandledrejection`；③SSR 服务端渲染期——服务端自行捕获；④边界自身渲染的抛错——冒泡到父级边界。React 19 可额外用 `createRoot` 的 `onUncaughtError` 做根级收口。
+</details>
+
+6. 错误指纹聚合为什么不能只拿 `message` 做指纹？
+
+<details><summary>查看答案</summary>
+
+不同位置的代码可能抛出完全相同的 message（如 `Cannot read properties of undefined`），只按 message 聚合会把几十个不相关的 bug 聚成一个 issue，无法定位；反之带动态内容的 message（如包含用户 id）又会让同一故障拆成几千条。实用做法是 `name + message(可做模板化清洗) + 堆栈第一帧`，既区分位置又抑制动态字段。
+</details>
+
+7. 多步骤流程（创建订单 → 扣库存 → 支付）在支付失败时，前端编排上要注意哪三点？
+
+<details><summary>查看答案</summary>
+
+①**逆序补偿**：按与执行相反的顺序回放撤销动作（回补库存 → 撤销订单），因为后面的步骤可能依赖前面步骤产生的中间状态；②**补偿幂等**：网络重试可能让同一个补偿动作执行多次，重复执行不能产生副作用；③**补偿失败要告警**：补偿链本身断了（退款接口也挂了）必须升级为人工介入，不能静默吞掉。简化实现见示例 46-03 第 5 段。
+</details>
+
+8. 为什么 `.map` sourcemap 文件不能部署到公网？正确流程是什么？
+
+<details><summary>查看答案</summary>
+
+`.map` 包含完整的源码映射（含原始源码内容），公网可下载等于开源整个前端工程，还暴露内部接口路径与注释。正确流程：构建产出 hidden sourcemap（产物不引用）→ CI 上传监控平台并绑定 release → 上传后从产物目录删除 → 部署产物。监控平台收到错误堆栈后用对应 release 的 map 还原成源码位置。
+</details>
+
+---
+
+## 46.8 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 用 `try/catch` 包 `setTimeout` 回调 | 错误静默漏到全局，误以为已捕获 | 回调内部自包，或全局 `error` 事件兜底 |
+| 资源错误监听忘开捕获阶段 | script/img 404 一条都收不到 | `addEventListener('error', cb, true)` |
+| 只挂 `error` 不挂 `unhandledrejection` | Promise 失败完全无感知 | 全局三件套成对挂在入口最前面 |
+| `.then(f, onRejected)` 当链尾 | 同层回调抛错漏接 | 链尾永远补一个 `.catch` |
+| 每层都 `.catch` 又 rethrow | 同一错误重复上报刷屏 | 只在一个层级兜底，其余透传或 rethrow |
+| `catch` 后静默吞掉 | 故障现场消失，排查无门 | 至少记日志；业务可恢复才不升级 |
+| 以为 `Promise.all` 短路会取消在途请求 | 失败请求打满服务端，还触发多个 unhandledrejection | 配合 `AbortController` 联动取消 |
+| 并发池裸写无错误策略 | 一个任务挂掉整个池子或错误全丢 | 明确收集模式或熔断模式，失败记账 |
+| 补偿动作非幂等 | 重试补偿造成重复退款/重复撤销 | 补偿接口幂等键 + 失败告警 |
+| 错误边界包全站只包一层 | 单点错误白屏整站 | 按业务区块放边界，根级钩子收口 |
+| ErrorBoundary 里指望捕获 onClick 错误 | 事件错误漏网 | 事件处理器自己 try/catch |
+| Worker 内错误等主线程兜底 | Worker 内错误彻底丢失 | Worker 内自挂 error/unhandledrejection 后 postMessage 上报 |
+| 自定义错误类不设 `this.name` | 压缩后名字丢失，聚合失真 | 构造器里显式赋值 name |
+| 上报不打指纹不聚合 | 一次事故刷出十万条告警 | `name+message+首帧` 指纹 + 计数合并 |
+| 监控上报走业务重试通道 | 监控故障引发重试风暴 | 上报静默失败，sendBeacon 兜底 |
+| sourcemap 部署到公网 | 源码与接口路径泄露 | hidden sourcemap，CI 上传后删除 |
+| 上报前不脱敏 | token/手机号进日志平台，合规事故 | beforeSend 统一脱敏白名单 |
+| 跨域脚本未配 crossorigin | 只能拿到 `Script error.`，无法定位 | `crossorigin="anonymous"` + CDN 配 CORS 头 |

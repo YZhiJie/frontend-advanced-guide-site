@@ -1,0 +1,378 @@
+# 第五十三部分 · Nginx 部署与反向代理——从静态站点到生产网关（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/53-nginx-deploy
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第五十三部分 · Nginx 部署与反向代理——从静态站点到生产网关
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第五十二部分 · 数据库与 BFF 数据层](./52-database-bff.md)｜下一篇：[第五十四部分 · 动画与工具库](./54-animation-tooling.md)｜关联章节：[第三部分 · 前端工程化](./03-engineering.md) · [第六部分 · 网络请求优化](./06-network.md)
+
+> 💡 **本章特色**：前端部署的最后一公里几乎都落在 Nginx 上：路径、缓存、跨域、WebSocket、HTTPS、灰度。本章按「静态托管 → 反向代理 → 安全与缓存 → 排障」四段展开，两个示例分别做配置静态检查和缓存策略计算。
+
+## 本部分内容
+
+- [53.1 静态站点托管与路径](#_53-1-静态站点托管与路径)
+- [53.2 反向代理与跨域](#_53-2-反向代理与跨域)
+- [53.3 HTTPS、安全头与缓存](#_53-3-https、安全头与缓存)
+- [53.4 灰度、限流与排障](#_53-4-灰度、限流与排障)
+- [53.5 自测题](#_53-5-自测题)
+- [53.6 本章避坑清单](#_53-6-本章避坑清单)
+
+---
+
+## 53.1 静态站点托管与路径
+
+### 概念解析
+
+一个 SPA 的 Nginx 配置通常只做三件事：**找文件、回退入口、设置缓存**。
+
+```nginx
+server {
+  listen 80;
+  server_name example.com;
+  root /var/www/site;
+  index index.html;
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
+```
+
+三个细节决定成败：
+
+| 配置 | 作用 | 常见错误 |
+| --- | --- | --- |
+| `root` / `alias` | 指定文件根目录 | `alias` 与 `location` 尾斜杠不匹配，路径拼接错位 |
+| `try_files $uri $uri/ /index.html` | 找不到文件时回退入口 | 漏写导致刷新子路由 404 |
+| `base` / 子路径 | 站点部署在 `/app/` 下 | 前端 `base` 未配置，资源 404 |
+
+**子路径部署**（如 GitHub Pages 项目页、`https://example.com/app/`）要前后端一起改：
+
+- 构建工具设置 `base: '/app/'`（Vite 的 `base`、Webpack 的 `publicPath`）；
+- 路由使用 history 模式时，`try_files` 回退到 `/app/index.html`；
+- 静态资源引用走构建产物，不要写死 `/assets/...`。
+
+**压缩**：`gzip on` 只默认压缩 `text/html`，必须显式 `gzip_types`；更现代的方案是 `brotli`（需模块），对 JS/CSS 压缩率更高。压缩要在「文本类资源」上开，图片/视频已经压缩过，再压收益极低。
+
+### 典型应用场景
+
+- 纯静态站（文档、官网、VitePress）：`root` + `try_files`；
+- 子路径部署：`base` + 回退路径；
+- 多环境：同一份产物通过环境变量注入不同 API 地址；
+- 对象存储 + CDN：Nginx 只做回源与缓存头。
+
+### 可运行代码示例
+
+示例 53-01 用轻量规则扫描配置，能发现「SPA 缺少 try_files」这类上线必踩的问题。
+
+```typescript
+// 文件: examples/53-01-nginx-config-linter.ts（核心节选）
+if (block.header.includes("/") && /root|alias/.test(text) && !/try_files/.test(text)) {
+  issues.push({
+    rule: "spa-fallback",
+    severity: "warn",
+    line: block.startLine,
+    message: "静态站点 location 未配置 try_files,刷新子路由会 404",
+    fix: "try_files $uri $uri/ /index.html;",
+  });
+}
+```
+
+> 运行方式：`npx tsx examples/53-01-nginx-config-linter.ts`（问题配置 5 类告警，正确配置零告警）。
+
+### 最佳实践
+
+- ✅ 先在本地用 `nginx -t` 校验语法，再用 `curl -I` 验证缓存头；
+- ✅ 子路径部署时，构建产物的资源 URL 必须带同一前缀；
+- ⚠️ `alias` 的尾斜杠要与 `location` 一致，否则会拼出错误路径；
+- ❌ 不要给 `index.html` 设置长缓存——用户会长期停留在旧版本。
+
+---
+
+## 53.2 反向代理与跨域
+
+### 概念解析
+
+`proxy_pass` 最容易出错的是**尾斜杠语义**：
+
+| location | proxy_pass | 请求 `/api/users` 转发到 |
+| --- | --- | --- |
+| `/api/` | `http://backend`（无 URI） | `http://backend/api/users` |
+| `/api/` | `http://backend/`（有 `/`） | `http://backend/users` |
+| `/api` | `http://backend/` | `http://backend//users`（注意双斜杠） |
+
+记忆方法：**proxy_pass 带 URI（哪怕只有一个 `/`）就会替换掉 location 匹配的前缀**；不带 URI 则原样透传。
+
+**跨域**有两种解法：
+
+1. 开发/同源部署：前端与 API 同域名，Nginx 反代 `/api`，不涉及 CORS；
+2. 跨域直连：后端返回 `Access-Control-Allow-Origin` 等头，Nginx 只做透传，不要在 Nginx 与后端重复添加（会变成两个值，浏览器直接拒绝）。
+
+需要携带 Cookie 时：`Access-Control-Allow-Credentials: true` 且 `Allow-Origin` 不能是 `*`，必须是具体域名。
+
+**WebSocket** 必须显式升级头：
+
+```nginx
+location /ws {
+  proxy_pass http://backend;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 3600s;
+}
+```
+
+**SSE** 要关闭缓冲，否则消息会被 Nginx 攒批：
+
+```nginx
+location /events {
+  proxy_pass http://backend;
+  proxy_buffering off;
+  proxy_cache off;
+  proxy_read_timeout 3600s;
+  add_header X-Accel-Buffering no;
+}
+```
+
+### 典型应用场景
+
+- 前后端分离：`/api` 反代到 Node/Java 服务；
+- 实时能力：`/ws` 升级 WebSocket，`/events` 走 SSE；
+- 多服务聚合：按路径前缀分发到不同 upstream；
+- 第三方回调：只暴露必要路径，隐藏内网服务。
+
+### 可运行代码示例
+
+示例 53-01 会检查「WebSocket 缺 Upgrade 头」「SSE 未关闭 buffering」「proxy_pass 尾斜杠不匹配」等高频问题。
+
+```typescript
+// 文件: examples/53-01-nginx-config-linter.ts（核心节选）
+if (/upgrade|websocket|socket/i.test(block.header + text) && !/Upgrade\s+\$http_upgrade/.test(text)) {
+  issues.push({
+    rule: "websocket-headers",
+    severity: "error",
+    line: block.startLine,
+    message: "疑似 WebSocket 代理,但缺少 Upgrade/Connection 头,握手会失败",
+    fix: 'proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";',
+  });
+}
+```
+
+> 运行方式：`npx tsx examples/53-01-nginx-config-linter.ts`（含 proxy_pass 尾斜杠、WebSocket、SSE 规则）。
+
+### 最佳实践
+
+- ✅ 用 `upstream` 定义后端集群，配合 `keepalive` 复用连接；
+- ✅ 代理时透传 `Host`、`X-Real-IP`、`X-Forwarded-For`、`X-Forwarded-Proto`；
+- ⚠️ CORS 头只在一层添加，Nginx 与后端同时加会产生重复头；
+- ❌ 不要在 `if` 块里写 `proxy_pass`——部分版本直接报错，行为不可预期。
+
+---
+
+## 53.3 HTTPS、安全头与缓存
+
+### 概念解析
+
+HTTPS 不只是「装个证书」，还包括协议版本、跳转、HSTS 与安全头。
+
+| 配置 | 作用 | 建议 |
+| --- | --- | --- |
+| `listen 443 ssl http2` | 启用 TLS 与 HTTP/2 | 现代 Nginx 用 `http2 on` 指令 |
+| `ssl_certificate` / `ssl_certificate_key` | 证书与私钥 | 私钥权限 600，禁止入库 |
+| `return 301 https://...` | HTTP 跳 HTTPS | 80 端口只做跳转 |
+| `Strict-Transport-Security` | 强制后续走 HTTPS | 先短 `max-age` 验证，再逐步加长 |
+| `Content-Security-Policy` | 限制脚本/资源来源 | 从 `report-only` 开始 |
+| `X-Content-Type-Options: nosniff` | 禁止 MIME 嗅探 | 全站开启 |
+| `Referrer-Policy` | 控制 Referer 泄漏 | `strict-origin-when-cross-origin` |
+
+**缓存策略**要与构建产物配合：
+
+- HTML：`no-cache`（每次协商，保证拿到新版本入口）；
+- 带内容哈希的 JS/CSS/字体：`public, max-age=31536000, immutable`；
+- 无哈希图片：短缓存（如 7 天）；
+- Service Worker / manifest：`no-cache`；
+- API：默认 `no-store`，除非业务明确可缓存。
+
+**为什么 HTML 不能长缓存**：HTML 里引用的是带哈希的资源。如果 HTML 被缓存一年，即使你发布了新版本，用户仍会加载旧 HTML 与旧资源，更新彻底失效。
+
+### 典型应用场景
+
+- 官网/文档站：HTTPS + HSTS + 长缓存静态资源；
+- 后台系统：CSP 限制第三方脚本，`X-Frame-Options` 防点击劫持；
+- 多租户：按域名配置不同证书与安全头；
+- 灰度：HTML 不缓存，资源 immutable，天然支持「入口切换 + 资源共存」。
+
+### 可运行代码示例
+
+示例 53-02 把「路径 → Cache-Control」写成规则表，重点验证 HTML、哈希资源、Service Worker、API 四类边界。
+
+```typescript
+// 文件: examples/53-02-cache-policy.ts（核心节选）
+{
+  match: (p) => HASHED.test(p),
+  header: "public, max-age=31536000, immutable",
+  reason: "文件名含内容哈希,内容变则 URL 变",
+},
+{
+  match: (p) => /\.html?$/.test(p) || p === "/" || p.endsWith("/"),
+  header: "no-cache",
+  reason: "HTML 是版本入口,必须协商缓存",
+},
+```
+
+> 运行方式：`npx tsx examples/53-02-cache-policy.ts`（入口、哈希资源、SW、API 四类策略与边界断言）。
+
+### 最佳实践
+
+- ✅ 证书与私钥走密钥管理（见第 47 章），不要提交到仓库；
+- ✅ 先上 HSTS 的短 `max-age`，确认全站 HTTPS 可用后再加长；
+- ⚠️ CSP 先用 `Content-Security-Policy-Report-Only` 收集违规，再启用拦截；
+- ❌ 不要对 `index.html`、`sw.js` 使用 `immutable`。
+
+---
+
+## 53.4 灰度、限流与排障
+
+### 概念解析
+
+生产网关还要处理三件事：**分流、保护、可观测**。
+
+**灰度分流**：
+
+```nginx
+split_clients "$cookie_user" $bucket {
+  10%  v2;
+  *    v1;
+}
+
+upstream v1 { server 10.0.0.11:8080; }
+upstream v2 { server 10.0.0.12:8080; }
+```
+
+按用户 ID/Cookie 分桶，保证同一用户稳定落在同一版本；分流比例从 1% 逐步放大，随时可回退。
+
+**限流**：
+
+- `limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;` 按 IP 限速；
+- 对登录用户可按 `$user_id` 限流，避免 NAT 后误伤；
+- 返回 429 并带 `Retry-After`，前端才能做退避重试。
+
+**排障三板斧**：
+
+1. `nginx -t`：配置语法；
+2. `curl -I` / `curl -v`：状态码、响应头、跳转链；
+3. 日志：`access_log` 看 upstream 地址、响应时间、状态码；`error_log` 看连接被拒、上游超时。
+
+**502 vs 504**：
+
+- 502 Bad Gateway：上游返回了非法响应或连接被拒（进程挂了、端口错、协议错）；
+- 504 Gateway Timeout：上游在超时时间内没有响应（慢查询、死锁、网络不通）。
+
+前端看到 502/504 不应无限重试，应展示可恢复提示并上报 `traceId`。
+
+### 典型应用场景
+
+- 新版本灰度：1% → 10% → 50% → 100%，出问题按 Cookie 回退；
+- 秒杀/活动：按用户/IP 限流，保护后端；
+- 多机房：`upstream` 加权 + 健康检查；
+- 故障排查：按 `X-Request-Id` 串联 Nginx 与后端日志。
+
+### 可运行代码示例
+
+上线前把配置检查接进 CI，可以拦住大部分「少一行」的事故。示例 53-01 的规则集可直接扩展成团队检查清单。
+
+```bash
+# 文件: scripts/check-nginx.sh —— 虚拟工程脚本
+nginx -t -c /etc/nginx/nginx.conf
+curl -sI https://example.com/ | grep -i "cache-control\|strict-transport"
+curl -sI https://example.com/assets/index-a1b2c3d4.js | grep -i "immutable"
+curl -s -o /dev/null -w "%{http_code}\n" https://example.com/api/health
+```
+
+> 运行方式：静态检查可执行 `npx tsx examples/53-01-nginx-config-linter.ts`；上述 shell 需在服务器环境运行。
+
+### 最佳实践
+
+- ✅ 灰度按稳定维度分桶（用户 ID/Cookie），不要按随机数导致同一用户来回切版本；
+- ✅ 限流阈值要有依据（压测结果），并给前端明确的 429 + `Retry-After`；
+- ⚠️ 日志里不要记录完整 Cookie/Authorization，敏感字段脱敏；
+- ❌ 不要在故障时直接重启 Nginx 了事——先看 `error_log` 与上游健康状态。
+
+---
+
+## 53.5 自测题
+
+<details>
+<summary><b>1. 【基础】`location /api/` 配 `proxy_pass http://backend;` 与 `http://backend/;` 有什么区别？</b></summary>
+
+不带 URI（`http://backend`）时原路径透传，`/api/users` 转发为 `/api/users`；带 URI（`http://backend/`）时用 `/` 替换 location 匹配的前缀，转发为 `/users`。尾斜杠会改变后端收到的路径。
+</details>
+
+<details>
+<summary><b>2. 【基础】为什么 SPA 必须配置 `try_files $uri $uri/ /index.html`？</b></summary>
+
+前端路由是客户端路由，直接访问 `/orders/123` 时服务器上并没有对应文件。没有回退，Nginx 会返回 404；回退到 `index.html` 后由前端路由接管，页面才能正常渲染。
+</details>
+
+<details>
+<summary><b>3. 【进阶】为什么 `index.html` 不能设置长缓存？</b></summary>
+
+HTML 是资源入口，里面引用带哈希的 JS/CSS。若 HTML 被缓存一年，用户会持续加载旧 HTML 与旧资源，即使你发布了新版本也无法生效。HTML 应使用 `no-cache` 协商缓存，资源才用 `immutable`。
+</details>
+
+<details>
+<summary><b>4. 【进阶】WebSocket 反代为什么需要 `Upgrade` 与 `Connection` 头？</b></summary>
+
+WebSocket 握手是一次 HTTP Upgrade 请求。Nginx 默认按普通 HTTP 代理，不会转发 `Upgrade`/`Connection`，后端收不到升级请求，握手失败。需要 `proxy_http_version 1.1` 并显式设置这两个头。
+</details>
+
+<details>
+<summary><b>5. 【进阶】SSE 为什么要关闭 `proxy_buffering`？</b></summary>
+
+Nginx 默认会缓冲上游响应，攒够一定大小才发给客户端，导致 SSE 消息延迟甚至「看起来没反应」。关闭 `proxy_buffering` 并设置 `X-Accel-Buffering: no`，事件才能实时下发。
+</details>
+
+<details>
+<summary><b>6. 【挑战】线上出现大面积 502，你会按什么顺序排查？</b></summary>
+
+先看 Nginx `error_log` 是否有 connection refused / upstream prematurely closed；再看后端进程与端口是否存活、健康检查是否通过；随后确认 `proxy_pass` 地址、协议（HTTP/HTTPS）、DNS 解析；再查连接数/文件描述符是否耗尽；最后看是否刚发布导致配置或上游变更。502 是「上游不可用/响应非法」，与 504 的「超时」要分开处理。
+</details>
+
+<details>
+<summary><b>7. 【挑战】如何设计一个可回退的灰度发布？</b></summary>
+
+用 `split_clients` 按用户 Cookie/ID 分桶到不同 upstream，比例从 1% 开始逐步放大；同一用户哈希稳定，避免来回切版本；监控错误率、耗时、业务指标，异常时把比例调回 0；HTML 不缓存保证入口即时切换，静态资源带哈希可共存；保留上一版本 upstream 一段时间以便快速回滚。
+</details>
+
+<details>
+<summary><b>8. 【挑战】前端资源部署在 `/app/` 子路径下，刷新页面 404，可能有哪些原因？</b></summary>
+
+① 构建工具 `base`/`publicPath` 未设为 `/app/`，资源请求到根路径；② `try_files` 回退到 `/index.html` 而不是 `/app/index.html`；③ 路由 base 未配置，前端路由跳到了根路径；④ 反向代理把 `/app/` 前缀剥掉，静态文件找不到。四处要一起对齐。
+</details>
+
+---
+
+## 53.6 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 忘记 `try_files` 回退 | 刷新子路由 404 | 回退到入口 HTML |
+| `proxy_pass` 尾斜杠写错 | 后端收到的路径多/少前缀 | 按「带 URI 即替换前缀」核对 |
+| `alias` 与 location 尾斜杠不一致 | 文件路径拼接错位 | 两边斜杠保持一致 |
+| 子路径部署未设 `base` | 资源 404、路由错位 | 构建 base 与回退路径一起改 |
+| `index.html` 长缓存 | 用户永远拿不到新版本 | `no-cache` |
+| `sw.js` 长缓存 | Service Worker 更新不生效 | `no-cache` |
+| 哈希资源短缓存 | 重复下载，浪费带宽 | `immutable` 长缓存 |
+| WebSocket 缺 Upgrade 头 | 握手失败，实时功能不可用 | 补 `Upgrade`/`Connection` + HTTP/1.1 |
+| SSE 未关 buffering | 消息延迟、看似无响应 | `proxy_buffering off` |
+| Nginx 与后端重复加 CORS 头 | 响应头重复，浏览器拒绝 | 只在一层添加 |
+| `Allow-Origin: *` + 携带 Cookie | 浏览器直接拒绝 | 指定具体域名 |
+| 在 `if` 里写 `proxy_pass` | 配置报错或行为异常 | 用 map/location/upstream 分流 |
+| gzip 只开不配类型 | 只压缩 HTML，JS/CSS 无收益 | 配置 `gzip_types` |
+| 502/504 不区分 | 排查方向错误 | 502 查上游可用性，504 查超时 |
+| 灰度按随机数分桶 | 同一用户来回切版本 | 按用户 ID/Cookie 稳定分桶 |
+| 日志记录完整 Token | 敏感信息泄漏 | 脱敏后再落盘 |
+
+---
+
+> **下一篇**：[第五十四部分 · 动画与工具库](./54-animation-tooling.md) 会把 framer-motion、GSAP、jwt-decode、qs、uuid 的工程用法一次讲清。

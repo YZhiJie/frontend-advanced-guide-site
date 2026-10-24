@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg58" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#101a33"/>
+    </linearGradient>
+    <linearGradient id="titleGrad58" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg58)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#f472b6" opacity="0.04"/>
+  <polygon points="150,0 220,0 1040,840 970,840" fill="#34d399" opacity="0.03"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#7C3AED"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#ffffff">EP.58</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad58)">一个账号，全家通行</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad58)" opacity="0.6"/>
+
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#22d3ee" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：四套账号四套页</text>
+    <g transform="translate(52,120)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#1d4ed8"/>
+      <path d="M-5,18 L5,18 L3.5,27 L0,29 L-3.5,27 Z" fill="#f97316"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 L-11,-13 L-6,-4 L0,-14 L6,-4 L11,-13 L16,-2 Q0,-11 -16,-2 Z" fill="#f97316"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,110 74,116 88,122" fill="#f8fafc"/>
+    <rect x="88" y="86" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="110" font-size="15" fill="#0b1220">OA、CRM、工单、数据平台，</text>
+    <text x="102" y="132" font-size="15" fill="#0b1220">改个密码要跑三个页面！</text>
+    <rect x="24" y="162" width="524" height="110" rx="8" fill="#0a0f1c" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="38" y="184" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 每套系统各写一遍身份页面</text>
+    <text x="38" y="206" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">login.vue  register.vue  reset.vue</text>
+    <text x="38" y="228" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">× 4 套系统 = 12 个页面</text>
+    <text x="38" y="250" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">// 策略、错误码、审计各写一份</text>
+    <rect x="24" y="286" width="524" height="60" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="286" width="4" height="60" rx="2" fill="#f97316"/>
+    <text x="40" y="310" font-size="13.5" fill="#e2e8f0">密码策略 4 份 · 错误文案 4 种 · 入口 4 个</text>
+    <text x="40" y="330" font-size="13.5" fill="#f97316">账号各存一份，离职了还停不干净</text>
+  </g>
+
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#a78bfa" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：身份只在一处产生</text>
+    <g transform="translate(52,120)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,110 74,116 88,122" fill="#f8fafc"/>
+    <rect x="88" y="86" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="110" font-size="15" fill="#0b1220">身份只在一处产生，</text>
+    <text x="102" y="132" font-size="15" fill="#0b1220">会话在各处短暂存在。</text>
+    <rect x="24" y="162" width="524" height="180" rx="8" fill="#0a0f1c" stroke="#a78bfa" stroke-opacity="0.35"/>
+    <text x="38" y="184" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 业务系统只做三件事</text>
+    <text x="38" y="206" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">1. 302 → account.example.com/login</text>
+    <text x="38" y="226" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">2. 后端 POST /sso/redeem { ticket }</text>
+    <text x="38" y="246" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">3. Set-Cookie: 本地会话 30min</text>
+    <text x="38" y="272" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// 全局会话只在中心域，HttpOnly</text>
+    <text x="38" y="292" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">// ticket：60s、单次、绑定 appId</text>
+    <text x="38" y="318" font-size="12" fill="#94a3b8" font-family="'SF Mono',Consolas,monospace">中心管「你是谁」，业务管「能做什么」</text>
+  </g>
+
+  <g transform="translate(20,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#f472b6" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：回跳白名单</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#a78bfa"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-4 Q-8,-16 0,-4 Q8,-16 16,-4 Q8,-8 0,-4 Q-8,-8 -16,-4 Z" fill="#22d3ee"/>
+      <path d="M0,-16 L0,-4" stroke="#22d3ee" stroke-width="3"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+      <rect x="-14" y="12" width="28" height="18" rx="4" fill="#7C3AED"/>
+      <text x="0" y="25" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">{"}"}</text>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="50" rx="10" fill="#f8fafc"/>
+    <text x="102" y="98" font-size="15" fill="#0b1220">回跳地址不能信任请求参数，</text>
+    <text x="102" y="118" font-size="15" fill="#0b1220">必须解析 URL 后逐项校验。</text>
+    <rect x="24" y="142" width="524" height="190" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="164" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">const u = new URL(redirect)</text>
+    <text x="38" y="184" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">if (u.protocol != 'https:') reject</text>
+    <text x="38" y="204" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">if (u.origin != app.origin) reject</text>
+    <text x="38" y="224" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">if (!pathOk(u.pathname)) reject</text>
+    <text x="38" y="250" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">// oa.example.com.evil.com → 拦</text>
+    <text x="38" y="270" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">// oa.example.com@evil.com → 拦</text>
+    <text x="38" y="290" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// state 必须与发起时原样一致</text>
+    <text x="38" y="316" font-size="12" fill="#94a3b8" font-family="'SF Mono',Consolas,monospace">八种攻击形态全拦，回调时再验一次</text>
+  </g>
+
+  <g transform="translate(608,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#f97316" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f97316"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：改密即止损</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="50" rx="10" fill="#f8fafc"/>
+    <text x="102" y="98" font-size="15" fill="#0b1220">改密撤其它端，重置撤全部；</text>
+    <text x="102" y="118" font-size="15" fill="#0b1220">找回入口永远返回「已发送」。</text>
+    <rect x="24" y="142" width="524" height="86" rx="8" fill="#0a0f1c" stroke="#f97316" stroke-opacity="0.35"/>
+    <text x="38" y="166" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">changePassword → revoke all but current</text>
+    <text x="38" y="188" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">resetPassword  → revoke ALL sessions</text>
+    <text x="38" y="210" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">requestReset   → 假成功，防账号枚举</text>
+    <rect x="24" y="238" width="524" height="58" rx="8" fill="#0a0f1c" stroke="#f97316" stroke-opacity="0.35"/>
+    <rect x="24" y="238" width="4" height="58" rx="2" fill="#f97316"/>
+    <text x="38" y="262" font-size="13.5" font-weight="bold" fill="#f97316">⚠ 坑点：提示「该手机号未注册」</text>
+    <text x="38" y="282" font-size="12.5" fill="#e2e8f0">等于免费提供账号枚举接口</text>
+    <rect x="24" y="306" width="524" height="46" rx="8" fill="#111a30" stroke="#34d399" stroke-opacity="0.3"/>
+    <text x="40" y="328" font-size="13" font-weight="bold" fill="#34d399">✓ 一条边界</text>
+    <text x="40" y="346" font-size="12.5" fill="#e2e8f0">中心管身份，业务管授权，密码只在一处收</text>
+  </g>
+</svg>

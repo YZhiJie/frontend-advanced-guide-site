@@ -1,0 +1,326 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>高级前端进阶指南</title>
+    <link>https://yzhijie.github.io/frontend-advanced-guide-site/</link>
+    <atom:link href="https://yzhijie.github.io/frontend-advanced-guide-site/rss.xml" rel="self" type="application/rss+xml"/>
+    <description>系统整理现代前端开发必备高级技术知识点：概念解析、应用场景、可运行示例、最佳实践与自测题五段式，另含 37 话四格漫画剧场。</description>
+    <language>zh-CN</language>
+    <lastBuildDate>Thu, 22 Oct 2026 05:20:42 GMT</lastBuildDate>
+    <item>
+      <title>第四十五部分 · 前端高级实用技巧</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/45-frontend-advanced-tips</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/45-frontend-advanced-tips</guid>
+      <pubDate>Thu, 22 Oct 2026 05:20:42 GMT</pubDate>
+      <description>⚠️ 最大的坑：console.log(obj) 打印的是对象引用，你在控制台展开时看到的是「展开那一刻」的值，不是打印那一刻的值。要留证据必须 structuredClone(obj) 或 JSON.parse(JSON.stringify(obj)) 做快照——示例 45-01 专门演示了这个差异。</description>
+    </item>
+    <item>
+      <title>第二十二部分：前端常用数据结构与算法</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/22-frontend-data-structures</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/22-frontend-data-structures</guid>
+      <pubDate>Thu, 22 Oct 2026 04:47:13 GMT</pubDate>
+      <description>前端工程师常被问「写业务还需要学数据结构吗」——答案藏在每天都在踩的坑里：数组 shift() 为什么慢、Map 为什么比 {} 更适合做缓存、React Fiber 为什么是链表、LRU 淘汰为什么要配双向链表、十万行列表怎么渲染不卡。这些问题的背后都是同一套语言：复杂度与数据结构。</description>
+    </item>
+    <item>
+      <title>第四十四部分 · 多系统统一账号中心</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/44-account-center</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/44-account-center</guid>
+      <pubDate>Thu, 22 Oct 2026 04:20:47 GMT</pubDate>
+      <description>设计目标只有一句：身份只在一处产生，会话在各处短暂存在。账号中心负责「你是谁」，业务系统负责「你能做什么」。下面每个小节都围绕这条边界展开。</description>
+    </item>
+    <item>
+      <title>第四十三部分 · 高频业务场景集</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/43-business-scenes</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/43-business-scenes</guid>
+      <pubDate>Thu, 22 Oct 2026 04:06:22 GMT</pubDate>
+      <description>这五个场景是前端业务的「公共题库」：SKU 置灰考组合判定，购物车考精度与管道，秒杀考状态机，埋点考数据可信度，A/B 考哈希与正交性。协同编辑（Yjs/CRDT）则是第 39 册实时通信思想的延伸应用。</description>
+    </item>
+    <item>
+      <title>第四十二部分 · 工作流与审批引擎</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/42-workflow-approval</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/42-workflow-approval</guid>
+      <pubDate>Thu, 22 Oct 2026 03:48:35 GMT</pubDate>
+      <description>审批引擎的前端工作量集中在三块：流程设计器（把定义 JSON 渲染成图）、审批表单（权限跟着节点走）、审批时间线（把 history 渲染成轨迹）。这三块都建立在对「状态机 + 节点语义 + 定义校验」的理解上——本章示例就是这些理解的最小可运行版。</description>
+    </item>
+    <item>
+      <title>第四十一部分 · 数据可视化大屏</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/41-dashboard-visualization</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/41-dashboard-visualization</guid>
+      <pubDate>Thu, 22 Oct 2026 03:36:28 GMT</pubDate>
+      <description>大屏项目的技术含量集中在三个「不做就会翻车」的点上：适配（投屏设备分辨率不可控，写死像素必炸）、性能（实时数据动辄十万点，DOM 与像素双上限）、实时（乱序数据覆盖 + 数字硬跳变的观感灾难）。图表库把「画」封装好了，这三点才是前端真正的战场。</description>
+    </item>
+    <item>
+      <title>第四十部分 · 文件网盘系统</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/40-file-drive</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/40-file-drive</guid>
+      <pubDate>Thu, 22 Oct 2026 03:26:07 GMT</pubDate>
+      <description>网盘系统的所有设计都围绕一个约束展开：文件太大，网络不稳。2GB 文件一次请求传完，超时、内存、断线三个问题任何都能杀死它。解法是把「文件」这个整体打散成「分片」——传输、去重、续传、下载全部以分片为单位运作，最后再拼回来。理解了这一点，网盘的前端一半就懂了。</description>
+    </item>
+    <item>
+      <title>第三十九部分 · IM 实时通信系统</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/39-im-messaging</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/39-im-messaging</guid>
+      <pubDate>Thu, 22 Oct 2026 03:17:51 GMT</pubDate>
+      <description>IM 的所有复杂度都来自一个事实：网络不可靠，而用户要求消息必达、有序、多端一致。HTTP 请求-响应模型可以「失败就重试」，IM 的长连接推送做不到——推送会丢、会乱序、会重复。所以 IM 前端的核心不是「发消息收消息」，而是围绕一条消息建立起可确认、可重发、可去重、可补拉的完整协议。</description>
+    </item>
+    <item>
+      <title>第三十八部分 · 低代码表单引擎</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/38-lowcode-form-engine</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/38-lowcode-form-engine</guid>
+      <pubDate>Thu, 22 Oct 2026 03:09:24 GMT</pubDate>
+      <description>表单引擎的本质是把表单从代码变成数据：一张表单不再是一个个手写的 &lt;el-form-item&gt;，而是一份可序列化的 JSON。渲染器、校验器、联动引擎都是这套数据的「解释器」。设计的关键取舍只有一个：Schema 表达力封顶在哪——表达力太弱覆盖不了业务，太强就变成了图灵完全的脚本语言，低代码退化回「代码」，平台化价值归零。</description>
+    </item>
+    <item>
+      <title>第三十七部分 · ABAC 与策略引擎</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/37-abac-policy-engine</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/37-abac-policy-engine</guid>
+      <pubDate>Thu, 22 Oct 2026 03:01:08 GMT</pubDate>
+      <description>RBAC 的角色是静态身份，ABAC 的策略是动态计算。「只能编辑自己部门的工单」「金额超 10 万要总监审批」「高风险账号禁止写操作」——这些规则里混着资源属性（owner、部门、金额）和环境属性（时间、IP、风险分），角色枚举永远追不上组合的数量。ABAC 的核心动作只有一个：把「判断」从 if-else 里抽出来，变成可下发、可审计的数据。</description>
+    </item>
+    <item>
+      <title>第三十六部分 · 认证体系全景</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/36-auth-system</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/36-auth-system</guid>
+      <pubDate>Thu, 22 Oct 2026 02:51:13 GMT</pubDate>
+      <description>认证（Authentication）回答「你是谁」，授权（Authorization）回答「你能干什么」。很多团队把两者搅在一起，直到出现「未登录和没权限返回同一个错误码，前端不知道该跳登录页还是弹提示」才意识到分层的重要性。本册的策略轴心是：认证方案决定「凭证长什么样、存在哪、怎么失效」，它是所有权限体系的地基。</description>
+    </item>
+    <item>
+      <title>第三十五部分 · 后台管理系统权限方案</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/35-admin-system-auth</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/35-admin-system-auth</guid>
+      <pubDate>Wed, 21 Oct 2026 16:34:17 GMT</pubDate>
+      <description>后台管理系统的权限体系本质上回答三个问题：能不能进系统（登录态）、能不能看这个页面（菜单 + 路由）、能不能点这个按钮（按钮级）、能操作哪些数据（数据范围）。前三样是「功能权限」，最后一样是「数据权限」。本章把它们串成一条闭环，核心原则只有一条：前端只识别权限码，不识别角色名——这样后端新增角色时，前端一行代码都不用改。</description>
+    </item>
+    <item>
+      <title>第二十八部分 · 手写浏览器内核</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/28-mini-browser-engine</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/28-mini-browser-engine</guid>
+      <pubDate>Wed, 21 Oct 2026 15:15:48 GMT</pubDate>
+      <description>浏览器渲染流水线里，CSSOM → Style → Layout 是从"文本"到"盒子坐标"的核心三段。本章用五个独立的 mini 模块把它手写一遍：CSS 解析、选择器匹配、层叠、盒模型、Flex 布局。每个模块只聚焦一个问题，不依赖第三方库。</description>
+    </item>
+    <item>
+      <title>第三十四部分：架构师成长路线——从高级工程师到技术决策者</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/34-architect-roadmap</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/34-architect-roadmap</guid>
+      <pubDate>Wed, 21 Oct 2026 13:27:37 GMT</pubDate>
+      <description>导航</description>
+    </item>
+    <item>
+      <title>第二十九部分：RxJS 响应式编程——从入门到精通</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/29-rxjs</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/29-rxjs</guid>
+      <pubDate>Wed, 21 Oct 2026 08:37:34 GMT</pubDate>
+      <description>🧪 实验室：libraries/packages/rxjs-lab/｜技术基线（RxJS 7.8 + TypeScript 5.x + Node 24）</description>
+    </item>
+    <item>
+      <title>第三十部分：Lodash 工具库实战——从 API 到工程治理</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/30-lodash</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/30-lodash</guid>
+      <pubDate>Wed, 21 Oct 2026 08:37:34 GMT</pubDate>
+      <description>导航：返回总目录 · 上一篇：RxJS · 下一篇：XLSX · 学习路线</description>
+    </item>
+    <item>
+      <title>第三十一部分：XLSX 表格工程——导入、导出与大数据量处理</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/31-xlsx</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/31-xlsx</guid>
+      <pubDate>Wed, 21 Oct 2026 08:37:34 GMT</pubDate>
+      <description>导航：返回总目录 · 上一篇：第三十部分 Lodash · 下一篇：第三十二部分 Day.js · 学习路线 · 实验室：libraries/packages/xlsx-lab/ · 技术基线：SheetJS 0.18 + TypeScript 5.x + Node 24</description>
+    </item>
+    <item>
+      <title>第三十二部分：Day.js 日期工程——从格式化到跨时区</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/32-dayjs</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/32-dayjs</guid>
+      <pubDate>Wed, 21 Oct 2026 08:37:34 GMT</pubDate>
+      <description>🧪 实验室：libraries/packages/dayjs-lab/｜🛠 技术基线：Day.js 1.11 + TypeScript 5.x + Node 24</description>
+    </item>
+    <item>
+      <title>第三十三部分：Zod 运行时校验——类型安全的边界</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/33-zod</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/33-zod</guid>
+      <pubDate>Wed, 21 Oct 2026 08:37:34 GMT</pubDate>
+      <description>导航</description>
+    </item>
+    <item>
+      <title>第四部分：框架深入理解</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/04-frameworks</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/04-frameworks</guid>
+      <pubDate>Wed, 21 Oct 2026 03:51:04 GMT</pubDate>
+      <description>会用框架只是起点，理解设计动机与内部机制才能：写出框架友好（高性能）的代码、快速定位诡异 bug、在技术选型时讲清 trade-off。</description>
+    </item>
+    <item>
+      <title>第十部分：浏览器原理与渲染性能</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/10-browser-rendering</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/10-browser-rendering</guid>
+      <pubDate>Wed, 21 Oct 2026 01:09:36 GMT</pubDate>
+      <description>先自己作答，再展开参考答案。</description>
+    </item>
+    <item>
+      <title>第九部分：测试策略</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/09-testing</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/09-testing</guid>
+      <pubDate>Wed, 21 Oct 2026 00:49:09 GMT</pubDate>
+      <description>决策口诀：能写单测的不写集成，能写集成的不写 E2E。E2E 是兜底保险，不是主力。</description>
+    </item>
+    <item>
+      <title>第二十五部分：生产可用 Web API 手册</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/25-prod-ready-web-apis</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/25-prod-ready-web-apis</guid>
+      <pubDate>Wed, 21 Oct 2026 00:49:09 GMT</pubDate>
+      <description>本册定位：不是 API 大全，而是一本经过两道筛选的「口袋书」——兼容性筛（Baseline 已达成、两大引擎以上稳定支持、无需 flag）与踩坑筛（日常业务真的会踩的才收）。每节五段式：概念 → 场景 → 可运行示例 → 最佳实践 → 自测题。正文行内代码里的 API 名已自动挂上 MDN 官方文档链接，点击即跳。</description>
+    </item>
+    <item>
+      <title>第一部分：JavaScript 高级特性</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/01-javascript-advanced</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/01-javascript-advanced</guid>
+      <pubDate>Tue, 20 Oct 2026 15:43:03 GMT</pubDate>
+      <description>这一部分是所有框架、工程化的地基。面试高频、日常易错的知识点集中在这里。</description>
+    </item>
+    <item>
+      <title>第二十六部分 · 手写网络栈</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/26-mini-network-stack</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/26-mini-network-stack</guid>
+      <pubDate>Tue, 20 Oct 2026 15:43:03 GMT</pubDate>
+      <description>技术基线：TypeScript 5.x + Node 24 原生模块（http, https, net, crypto, stream），零第三方依赖。所有代码在 examples/ 下以 node --experimental-strip-types 可直接执行，每个实现都经过真实 socket 往返验证。</description>
+    </item>
+    <item>
+      <title>第二十七部分 · 手写前端框架</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/27-mini-framework</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/27-mini-framework</guid>
+      <pubDate>Tue, 20 Oct 2026 12:02:09 GMT</pubDate>
+      <description>会用 React / Vue 只是起点，自己从零手写一遍才能真正吃透这些"魔法"背后的机制。本章每个小节只聚焦一个核心问题，代码规模都在 150~350 行之间，不依赖任何第三方库，纯 TypeScript + Node 原生模块。</description>
+    </item>
+    <item>
+      <title>第二部分：TypeScript 高级应用</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/02-typescript</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/02-typescript</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>TypeScript 已经是现代前端的默认选择。进阶的关键不是背类型体操，而是：泛型抽象、条件类型推理、映射类型变形三板斧，让类型系统为业务服务。</description>
+    </item>
+    <item>
+      <title>第三部分：前端工程化</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/03-engineering</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/03-engineering</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>工程化能力是中级与高级工程师的分水岭：模块化、构建、依赖治理、性能体系、CI/CD——决定的是团队的整体效率与产出质量。</description>
+    </item>
+    <item>
+      <title>第五部分：状态管理方案</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/05-state-management</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/05-state-management</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>先自己作答，再展开参考答案。</description>
+    </item>
+    <item>
+      <title>第六部分：网络请求优化</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/06-network</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/06-network</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>所以本地调试看到"一个请求变两个"，第二个就是 OPTIONS 预检。</description>
+    </item>
+    <item>
+      <title>第七部分：前端安全</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/07-security</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/07-security</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>先自己作答，再展开参考答案。</description>
+    </item>
+    <item>
+      <title>第八部分：跨端开发</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/08-cross-platform</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/08-cross-platform</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>先自己作答，再展开参考答案。</description>
+    </item>
+    <item>
+      <title>第十一部分：设计模式与架构</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/11-patterns-architecture</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/11-patterns-architecture</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>INP 取的是整个会话中最差（或接近最差）的交互延迟，不是平均值——优化目标是"最差的那次点击别卡"。LCP/CLS 关注 10.1 渲染链路。</description>
+    </item>
+    <item>
+      <title>第十二部分：CSS 工程化与现代 CSS</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/12-css-engineering</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/12-css-engineering</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>CSS 在很多团队的"进阶清单"里被严重低估。现代 CSS 已经拥有布局、逻辑、性能三个维度的原生能力，工程化选型（原子化 / 零运行时 / CSS Modules）也直接受 SSR/RSC 架构影响。</description>
+    </item>
+    <item>
+      <title>第十三部分：SSR 与元框架</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/13-ssr-meta-frameworks</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/13-ssr-meta-frameworks</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>2026 年的前端招聘与架构讨论中，SSR/RSC/元框架是绝对主场。这一部分讲清三件事：渲染模式怎么选、Hydration 到底发生了什么、Next.js App Router 的正确心智模型。</description>
+    </item>
+    <item>
+      <title>第十四部分：前端 AI 工程</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/14-frontend-ai</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/14-frontend-ai</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>AI 功能正在成为业务前端的标配：对话流、智能表单、内容生成。前端工程师在 AI 应用中的核心职责是：流式渲染、交互编排、成本与体验的平衡——模型能力是服务端的事，把"生成过程"优雅地呈现出来是我们的主场。</description>
+    </item>
+    <item>
+      <title>第十五部分：可访问性与国际化</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/15-accessibility-i18n</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/15-accessibility-i18n</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>a11y（可访问性）与 i18n（国际化）是高级工程师的分内事：欧盟 EN 301 549、中国适老化改造政策都已有硬性要求，而出海产品从第一天就要面对多语言与 RTL。更现实的好处是——可访问的组件往往就是工程质量更高的组件。</description>
+    </item>
+    <item>
+      <title>第十六部分：Node.js 与服务端基础</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/16-node-server</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/16-node-server</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>现代前端工程师的"服务端半径"至少要覆盖：能读懂 Node 运行时行为、能写 BFF 层、能把应用部署上去。这一部分补齐这三块——不追求成为后端专家，但求独立完成前端工程师需要的服务端工作。</description>
+    </item>
+    <item>
+      <title>第十七部分：Web 新能力与可视化</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/17-web-platform</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/17-web-platform</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>平台能力在快速进化：很多以前要引库、写几十行代码的事，现在一行声明式 API 就够了。这一部分做两件事：更新你的"浏览器能力地图"，以及给出可视化的选型决策框架。</description>
+    </item>
+    <item>
+      <title>第十九部分：常用业务功能代码片段</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/19-business-snippets</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/19-business-snippets</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>前十八部分按技术机制组织（闭包怎么形成、Fiber 怎么调度），本部分换一个视角：按业务场景组织——把中后台与 C 端业务里反复出现的功能沉淀成"复制即可用"的片段。</description>
+    </item>
+    <item>
+      <title>第二十一部分：前端 AI 技术与面试通关</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/21-frontend-ai-interview</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/21-frontend-ai-interview</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>大模型时代，前端的主战场从「请求 JSON → 渲染表单」变成了「消费一条持续生长的流，并把生成过程优雅地呈现出来」。这条主线串起了六个高频面试主题：SSE 负责传输、打字机负责呈现节奏、Markdown 增量渲染负责富文本、WebSocket 负责双向实时、MCP 负责工具生态、AI 客服则是把一切组装起来的系统设计题。</description>
+    </item>
+    <item>
+      <title>第二十三部分：JavaScript 高频面试题通关</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/23-js-high-frequency-interview</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/23-js-high-frequency-interview</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>🎯 本章是从通用前端面试 JS 题库中提炼的高频题集，与《生强科技-面试题集》配套使用。标 ⭐ 的为高频手写/口述题，需练到不假思索；标 ⭐⭐ 为极高频，⭐⭐⭐ 为必考题。</description>
+    </item>
+    <item>
+      <title>第二十四部分：AI 协作工程化</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/24-ai-collaboration</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/24-ai-collaboration</guid>
+      <pubDate>Tue, 20 Oct 2026 11:37:40 GMT</pubDate>
+      <description>AI Vibe Coding 不是"跟 AI 聊天写代码"，而是把 AI 当成一个速度极快、但没有上下文记忆、偶尔会一本正经胡说的初级工程师来管理：你定契约、它出实现、门禁做验收。本部分给出一套经过实战验证的四阶段流程与三级质量门禁，并用本项目自身的五道门禁作为活例子。</description>
+    </item>
+    <item>
+      <title>第十八部分：Worker 家族与跨标签页通信</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/18-worker-messaging</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/18-worker-messaging</guid>
+      <pubDate>Mon, 19 Oct 2026 14:12:55 GMT</pubDate>
+      <description>一份围绕"多线程 / 多上下文 / 多标签页通信"主题的 JavaScript 高级知识点系统文档。</description>
+    </item>
+    <item>
+      <title>附录</title>
+      <link>https://yzhijie.github.io/frontend-advanced-guide-site/20-appendix</link>
+      <guid isPermaLink="true">https://yzhijie.github.io/frontend-advanced-guide-site/20-appendix</guid>
+      <pubDate>Mon, 19 Oct 2026 14:12:55 GMT</pubDate>
+      <description>结语：进阶的本质是"把模糊的感觉变成确定的机制"。本指南的每个示例都值得亲手跑一遍、改一遍、坏一遍——调试的过程才是真正的学习。祝进阶顺利！</description>
+    </item>
+  </channel>
+</rss>

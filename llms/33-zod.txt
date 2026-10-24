@@ -1,0 +1,742 @@
+# 第三十三部分：Zod 运行时校验——类型安全的边界（分册全文）
+
+> 来源：高级前端进阶指南（v1.74.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/33-zod
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第三十三部分：Zod 运行时校验——类型安全的边界
+
+> **导航**
+> - [返回总目录](./README.md)
+> - [上一篇：Day.js](./32-dayjs.md)
+> - [下一篇：常用库学习路线](./libraries-learning-path.md)
+> - 实验室路径：`libraries/packages/zod-lab/`
+> - 技术基线：Zod 3.24 + TypeScript 5.x + Node 24
+
+> **本册定位**：TypeScript 只把关编译期，一旦数据越过边界（HTTP 响应、表单输入、环境变量、`localStorage`），类型保证就全部失效。本册以「schema 是单一事实来源」为主线：一份 schema 同时产出运行时校验、静态类型与错误信息。每节五段式：概念 → 场景 → 示例 → 最佳实践 → 自测题。示例收敛在实验室包 `libraries/packages/zod-lab/`，依赖安装后统一用 `cd libraries && pnpm --filter @fag/zod-lab test` 验证。
+
+## 33.1 为什么需要运行时校验与学习路线
+
+### 33.1.1 概念解析
+
+TypeScript 的类型只存在于编译期，`tsc` 结束后被整段擦除。所有跨越「你无法控制的生产者」的数据——后端 JSON、用户输入、URL 参数、配置文件、`process.env`——在运行时都只是普通值。`JSON.parse` 返回 `any`，一个 `as User` 就能让编译器闭嘴，但它不会核对任何字段：`id` 实际是字符串、`email` 缺失、`age` 是 `null`，这些错误都会被带到业务深处，变成 `undefined` 渲染、`NaN` 计算或悄悄写进数据库的脏数据。
+
+Zod 把「类型保证」变成「可执行检查」，一份 schema 同时承担三件事：**运行时校验**（逐字段检查并给出结构化错误）、**静态类型推导**（`z.infer` 从 schema 倒出类型，不再手写第二份）、**错误信息**（每个问题都带 `code`、`path`、`message`）。这就是「schema 作为单一事实来源」：改 schema 即同时改了校验与类型，两者不可能漂移。
+
+先对齐三个术语：**解析（parse）** 输入 `unknown`，成功返回输出类型、失败抛 `ZodError`；**安全解析（safeParse）** 返回判别联合 `{ success: true, data } | { success: false, error }`，不抛异常；**输入与输出类型** 在有 `transform`、`default`、`coerce` 时不同，`z.infer` 取输出，`z.input` 取输入。
+
+学习路线按四层推进：33.2 构造器与两种解析入口，33.3 组合、变换与错误处理，33.4 工程集成、性能与选型，33.5 在实验室包里把碎片拼成可测试模块。
+
+### 33.1.2 典型应用场景
+
+- **后端响应校验**：接口字段改名、类型变化时立刻暴露「契约破裂」，不让 `undefined` 静默传播。
+- **表单校验**：与 React Hook Form 的 resolver 对接，一份 schema 管交互校验与提交前校验。
+- **环境变量**：启动时校验 `PORT`、`DATABASE_URL`，缺失就 fail fast。
+- **持久化数据与 BFF**：读取旧 `localStorage` 结构、聚合上游接口、处理 Webhook 时先设一道闸。
+
+### 33.1.3 可运行代码示例
+
+下面的对照说明「编译期断言」与「运行时检查」的差别：`as` 不产生任何校验，而 schema 会把同一个字符串类型的 `id` 判为失败。
+
+```ts
+import { z } from 'zod';
+
+type Payload = { id: number; title: string };
+
+// 编译期：as 只是断言，类型与实际值可以完全不一致
+const asserted = JSON.parse('{"id":"42","title":"Zod"}') as Payload;
+console.log(typeof asserted.id); // string：类型在撒谎
+
+// 运行时：schema 是单一事实来源，类型由它推导
+const PayloadSchema = z.object({
+    id: z.number().int(),
+    title: z.string().min(1),
+});
+type SafePayload = z.infer<typeof PayloadSchema>;
+const parsed = PayloadSchema.safeParse(JSON.parse('{"id":"42","title":"Zod"}'));
+console.log(parsed.success); // false，id 是字符串
+```
+
+### 33.1.4 最佳实践
+
+- **只在边界校验一次**：入口 parse 之后，内部纯函数信任类型，不要层层重复校验。
+- **边界入参写 `unknown`**：`any` 会关闭后续所有检查，`unknown` 强制先解析。
+- **schema 与消费方同模块导出**：类型从 schema 推导，杜绝 `interface` 与 schema 双写。
+- **区分形状与业务规则**：唯一性、权限、库存需要查库，不属于 schema。
+- **锁定大版本**：Zod 3 与 4 在错误参数、`treeifyError` 等 API 上有破坏性差异，升级前读迁移指南。
+
+### 33.1.5 自测题
+
+<details>
+<summary><b>1. 【基础】为什么 `as User` 不能替代运行时校验？</b></summary>
+
+类型在编译后被擦除，`as` 只是编译期断言，不生成任何检查代码。`JSON.parse` 的真实返回是 `any`，断言后非法值（字符串 id、缺失字段）照样进入流程，错误会在更深的业务代码里以 `undefined`、`NaN` 或错误渲染的形式爆发。只有 `safeParse` 才真正逐字段核对。
+</details>
+
+<details>
+<summary><b>2. 【进阶】「schema 作为单一事实来源」解决了什么问题？为什么 `z.input` 与 `z.output` 会不同？</b></summary>
+
+它消除了类型声明与校验规则各写一份导致的漂移：类型由 `z.infer` 推导，改一处即两处同时生效。输入输出不同是因为存在改变值的操作：`transform` 换类型（字符串转 Date）、`default` 让输入可为 `undefined` 而输出必有值、`coerce` 允许字符串输入数字输出。表单里通常输入是 `z.input`，提交解析后拿到的是 `z.output`。
+</details>
+
+## 33.2 入门
+
+### 33.2.1 概念解析
+
+Zod schema 是普通值，不是装饰器也不是字符串 DSL。构造器分三族：**标量**（`z.string()`、`z.number()`、`z.boolean()`、`z.date()`、`z.null()`）、**容器**（`z.object()`、`z.array()`、`z.tuple()`、`z.record()`）、**字面量与枚举**（`z.literal('draft')`、`z.enum(['light', 'dark'])`）。
+
+修饰符决定「什么算合法输入」：
+
+| 修饰符 | 允许的输入 | 输出 |
+| --- | --- | --- |
+| `.optional()` | `undefined` 或原类型 | 同原类型，可能 `undefined` |
+| `.nullable()` | `null` 或原类型 | 同原类型，可能 `null` |
+| `.default(v)` | `undefined` 或原类型 | 必有值（`undefined` 替换为 `v`） |
+| `.catch(v)` | 任意值 | 解析失败时返回 `v` |
+
+`parse` 与 `safeParse` 是同一套逻辑的两种外壳。Zod 3 的 `z.object()` **默认剥离未知键**（strip），未知字段不会出现在结果里；`.strict()` 改为报错，`.passthrough()` 改为保留原样。
+
+### 33.2.2 典型应用场景
+
+表单字段的即时校验、组件 props 与工具函数入参的防御性检查、简单 DTO（列表、坐标、状态字面量、可选昵称）。
+
+### 33.2.3 可运行代码示例
+
+容器与字面量构造器（`z.array`、`z.tuple`、`z.enum`、`z.literal`）已在概念区列出，下面直接看对象组合与两种解析入口。`safeParse` 返回判别联合，`z.infer` 直接给出类型；注意 `role` 有 `default`，输出类型里它一定存在。
+
+```ts
+const UserSchema = z.object({
+    username: z.string().trim().min(3).max(20),
+    email: z.string().trim().email(),
+    age: z.number().int().min(0).max(120).optional(),
+    role: z.enum(['admin', 'editor', 'viewer']).default('viewer'),
+});
+
+type User = z.infer<typeof UserSchema>;
+const ok = UserSchema.safeParse({ username: 'alice', email: 'alice@example.com' });
+if (ok.success) {
+    console.log(ok.data.role); // "viewer"
+}
+
+const bad = UserSchema.safeParse({ username: 'al', email: 'not-an-email', age: '30' });
+if (!bad.success) {
+    console.log(bad.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`));
+}
+```
+
+### 33.2.4 最佳实践
+
+- **边界一律 `safeParse`**，只有「失败即程序 bug」的内部不变量才用 `parse` 直接抛。
+- **`optional` 与 `nullable` 不可互换**：前者是「字段可以没有」，后者是「有值且值为 null」。
+- **`default` 不处理 `null`**：接口返回 `null` 想兜底就用 `.nullable().default(...)`。
+- **`catch` 只用于有合理降级值的配置**，用它吞掉业务数据错误会掩盖 bug。
+- **记住 object 默认 strip**：保留未知字段用 `.passthrough()`，拒绝用 `.strict()`。
+
+### 33.2.5 自测题
+
+<details>
+<summary><b>3. 【基础】`parse` 与 `safeParse` 的区别是什么？各自适合什么场景？</b></summary>
+
+`parse` 成功返回输出值，失败抛 `ZodError`；`safeParse` 不抛，返回 `{ success: true, data }` 或 `{ success: false, error }` 判别联合。外部边界（HTTP、表单、存储）用 `safeParse`，因为失败是常态且需要映射到字段；内部不变量可以用 `parse`，让失败直接冒泡成异常。
+</details>
+
+<details>
+<summary><b>4. 【进阶】`optional`、`nullable`、`default`、`catch` 的输入输出语义有什么不同？</b></summary>
+
+`optional` 允许 `undefined`，输出仍可能为 `undefined`；`nullable` 允许 `null`，输出仍可能为 `null`；`default(v)` 只把 `undefined` 替换为 `v`，输出必有值，对 `null` 不生效；`catch(v)` 不限制输入，任何解析失败都返回 `v`。组合 `.nullable().default(null)` 才能同时接受 `null` 并显式兜底。`catch` 会让类型系统认为「永远不会失败」，滥用会吞掉真实数据问题。
+</details>
+
+<details>
+<summary><b>5. 【进阶】Zod 3 的 `z.object()` 默认如何处理未知键？三种模式如何选择？</b></summary>
+
+默认 strip：结果只保留 schema 声明的键，多余键被丢弃且不报错，输出类型也不含它们。需要透传后端扩展字段用 `.passthrough()`，输出类型会带索引签名；需要把多余键视为契约违规用 `.strict()`，它会生成 `unrecognized_keys` 错误。安全默认选 strip，严格的服务间契约选 strict，只有确实依赖透传才用 passthrough。
+</details>
+
+## 33.3 进阶
+
+### 33.3.1 概念解析
+
+真实业务很少只做形状检查，还要在解析过程中转换与跨字段判断。Zod 把这些能力做成可组合的管道：
+
+- **`transform`**：改变输出值，输出类型随之变化。适合规范化（trim、小写）、字符串转 Date、DTO 转领域模型。
+- **`refine`**：布尔断言，不改类型；可指定 `message` 与 `path` 把错误挂到具体字段。
+- **`superRefine`**：在回调里用 `ctx.addIssue` 一次收集多条规则，跨字段校验首选。
+- **`preprocess`**：校验前加工原始输入（字符串转 Date），输入类型变为 `unknown`。
+- **`coerce`**：内置预处理，`z.coerce.number()` 把 query string 转数字。**不要用 `z.coerce.boolean()`**：底层是 `Boolean(value)`，字符串 `"false"` 会变成 `true`。
+- **`discriminatedUnion`**：按字面量判别键分派，只试匹配分支，错误更精确也更快。
+- **`intersection`**（`.and()`）：合并两个 schema，重叠字段必须同时满足。
+- **递归**：用 `z.lazy` 延迟引用自身，处理树形分类、评论楼中楼。
+
+错误处理有三层工具：`error.issues` 是原始问题列表（`code`、`path`、`message`）；`flatten()` 只做第一层归并，嵌套对象会丢深层路径；`format()` 生成嵌套结构，Zod 4 起推荐改用 `treeifyError`（旧版本仍可用 `format`）。`treeifyError` 的思路是「按 `path` 逐段建树」，Zod 3 可以自己写递归版本，或像实验室的 `formatIssues` 一样做「路径扁平化」——把 `['data', 'email']` 拼成 `data.email` 作为键，UI 查表即可定位。
+
+### 33.3.2 典型应用场景
+
+注册表单的密码一致性、日期输入解析、按 `type` 分派的多态接口、分类树与评论树、全是字符串的 URL 查询参数。
+
+### 33.3.3 可运行代码示例
+
+`transform` 改变输出，`preprocess` 改变输入，`refine` 只加约束。`refine` 的 `path` 决定错误出现在哪个字段上。
+
+```ts
+const EventSchema = z.object({
+    at: z.preprocess(
+        (value) => (typeof value === 'string' ? new Date(value) : value),
+        z.date({ invalid_type_error: '时间格式不正确' }),
+    ),
+    name: z.string().trim().min(1).transform((value) => value.toUpperCase()),
+});
+
+const PasswordFormSchema = z
+    .object({
+        password: z.string().min(8, '密码至少 8 位'),
+        confirm: z.string().min(8, '密码至少 8 位'),
+    })
+    .refine((form) => form.password === form.confirm, {
+        message: '两次输入的密码不一致',
+        path: ['confirm'],
+    });
+```
+
+跨字段规则多于一条时，链多个 `refine` 会让错误顺序与定位变得不可预测，改用 `superRefine` 一次收集。
+
+```ts
+const SignupSchema = z
+    .object({
+        email: z.string().email(),
+        password: z.string().min(8),
+        confirm: z.string().min(8),
+    })
+    .superRefine((form, ctx) => {
+        if (form.password !== form.confirm) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, message: '两次输入的密码不一致', path: ['confirm'] });
+        }
+        if (form.password === form.email.split('@')[0]) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, message: '密码不能与邮箱前缀相同', path: ['password'] });
+        }
+    });
+```
+
+判别联合、交叉与递归各解决一类结构问题。递归 schema 必须显式标注 `z.ZodType<T>`，否则引用自身的位置会被推断成 `any`。
+
+```ts
+const ResultSchema = z.discriminatedUnion('ok', [
+    z.object({ ok: z.literal(true), data: z.string() }),
+    z.object({ ok: z.literal(false), error: z.string() }),
+]);
+
+const ArticleSchema = z.object({ id: z.number().int(), title: z.string() }).and(
+    z.object({ createdAt: z.date(), updatedAt: z.date() }),
+);
+
+interface Category {
+    name: string;
+    children: Category[];
+}
+const CategorySchema: z.ZodType<Category> = z.lazy(() =>
+    z.object({
+        name: z.string().min(1),
+        children: z.array(CategorySchema).default([]),
+    }),
+);
+```
+
+### 33.3.4 最佳实践
+
+- **跨字段规则统一放 `superRefine`**，避免多个 `refine` 叠加出重复且顺序不定的错误。
+- **`transform` 尽量放链尾**，前面的检查都作用在原始值上，语义更直观。
+- **`coerce` 只用于外部字符串输入**（query、header、env），内部对象使用会隐藏类型错误。
+- **布尔值显式转换**：`z.enum(['true', 'false']).transform((value) => value === 'true')`。
+- **`z.lazy` 必须标注类型**，并且错误结构先经 `formatIssues` 之类的小工具收口再给 UI。
+
+### 33.3.5 自测题
+
+<details>
+<summary><b>6. 【进阶】`refine` 与 `transform` 的区别是什么？为什么 `refine` 不改变输出类型？</b></summary>
+
+`refine` 只返回布尔值，决定值是否合法，不产生新值，所以输出类型不变；`transform` 返回新值，输出类型以回调返回值为准。链式顺序有影响：`transform` 之后的 `refine` 拿到变换后的值，`refine` 之后再 `transform` 则先校验后转换。既改值又加约束时，先 `transform` 再 `refine` 更符合直觉。
+</details>
+
+<details>
+<summary><b>7. 【挑战】`z.coerce.boolean()` 为什么危险？怎样正确解析字符串形式的布尔值？</b></summary>
+
+`coerce` 底层调用 `Boolean(value)`，任何非空字符串都是 `true`，包括 `"false"`、`"0"` 和 `"no"`，配置里写 `DEBUG="false"` 反而打开调试。正确做法是显式枚举：`z.enum(['true', 'false']).transform((value) => value === 'true')`，必要时再 `.catch(false)` 兜底；也可以 `z.union([z.boolean(), z.enum(['true','false']).transform(...)])` 同时接受真布尔与字符串。
+</details>
+
+<details>
+<summary><b>8. 【进阶】`discriminatedUnion` 相比普通 `union` 有什么优势？使用时有什么前提？</b></summary>
+
+它按判别键的字面量值直接选中分支，不需要逐个尝试，解析更快、错误更聚焦（会指出哪个分支的哪个字段失败），类型收窄也更干净。前提是所有分支都是 object、判别键是 `z.literal` 或 `z.enum` 这类单一字面量类型，且每个分支都声明该键；判别键写成普通 `z.string()` 会在构造时报错。
+</details>
+
+## 33.4 精通
+
+### 33.4.1 概念解析
+
+**泛型 schema 工厂**把重复结构抽象一次。例如响应信封「成功带 data、失败带 error」，写一个 `EnvelopeSchema(payload)`，每个接口只传自己的 payload schema，类型随参数自动推导，不必手写信封类型。
+
+**性能**要分开看构造与解析：schema 是对象图，构造有分配成本；解析成本随字段数与数组长度增长。真正的隐患常在框架层——在 React 渲染函数里新建 schema，每次渲染都是新引用，`useMemo`、resolver 缓存与 `React.memo` 全部失效，表单反复重建校验器。正确做法是模块级常量；解析遵守「边界一次」，大数组用 `.max()` 设上限，防止恶意大 payload 阻塞主线程。
+
+**表单集成**：React Hook Form 的 `zodResolver` 把 schema 当校验器，`useForm<z.infer<typeof Schema>>` 让字段名与类型同源，`mode: 'onBlur'` 比 `onChange` 少做大量输入期解析。**API 响应**：`response.json()` 得到 `unknown` 后交给信封 schema，失败视为契约破裂并上报字段路径。**环境变量**：入口 `EnvSchema.parse(process.env)`，缺失即崩。**OpenAPI**：`zod-to-openapi`、`zod-openapi` 一类工具可从 schema 生成文档，关键是只保留一份定义。
+
+**选型对比**：
+
+| 维度 | Zod | Valibot | io-ts |
+| --- | --- | --- | --- |
+| API 风格 | 链式 builder，可读性最好 | 函数式 `pipe`，按需引入 | codec 组合子，偏 FP |
+| 体积 | 较大，完整运行时 | 最小，模块化 tree-shaking | 中等，常配 fp-ts |
+| 类型推导 | `z.infer` 直接 | `InferOutput` | `TypeOf` |
+| 生态 | 最广：RHF、tRPC、OpenAPI | 成长中 | 稳定但活跃度下降 |
+| 适合场景 | 业务应用默认选择 | 体积敏感的边缘运行时 | 已有 fp-ts 技术栈 |
+
+### 33.4.2 典型应用场景
+
+tRPC / Server Action 的入参校验；BFF 聚合多个上游接口后逐层校验再拼装；配置中心与 CI 环境变量的启动自检；由 schema 生成 OpenAPI 文档与前端请求类型。
+
+### 33.4.3 可运行代码示例
+
+泛型工厂 + API 边界校验。返回类型完全由 `payload` 推导，调用方拿到的 `data` 已经是 `User`。
+
+```ts
+function EnvelopeSchema<T extends z.ZodTypeAny>(payload: T) {
+    return z.discriminatedUnion('ok', [
+        z.object({ ok: z.literal(true), data: payload }),
+        z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) }),
+    ]);
+}
+
+const UserEnvelopeSchema = EnvelopeSchema(UserSchema);
+
+async function fetchUser(id: number) {
+    const response = await fetch(`/api/users/${id}`);
+    const json: unknown = await response.json();
+    return UserEnvelopeSchema.parse(json); // 失败即抛 ZodError，契约破裂不静默
+}
+```
+
+性能与表单集成：坏例子每次渲染重建 schema，好例子只在模块加载时构造一次。
+
+```ts
+// 坏做法：在渲染函数里 z.object(...)，每次渲染都是新引用，resolver 缓存与 memo 失效
+// 好：模块级建一次，渲染只做绑定
+const SignupSchema = z.object({ email: z.string().trim().email(), password: z.string().min(8) });
+type SignupValues = z.infer<typeof SignupSchema>;
+
+function GoodForm() {
+    const form = useForm<SignupValues>({ resolver: zodResolver(SignupSchema), mode: 'onBlur' });
+}
+```
+
+环境变量：字符串 coerce 成数字，枚举限制取值，启动即校验。
+
+```ts
+const EnvSchema = z.object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+    DATABASE_URL: z.string().url(),
+});
+
+export const env = EnvSchema.parse(process.env);
+```
+
+### 33.4.4 最佳实践
+
+- **泛型工厂不要标 `any`**：`T extends z.ZodTypeAny` 交给 TS 推导，调用方才能获得精确类型。
+- **schema 与类型同模块导出**，消费方只 import schema 与 `z.infer` 出来的类型。
+- **把解析放在数据入口**（请求、路由 loader、事件回调），不要放在渲染路径或大循环里。
+- **契约失败要上报**：带接口标识、`code`、`path`，否则线上只能看到「页面空白」。
+- **env 校验放最顶部**：`NODE_ENV` 也纳入 schema；OpenAPI 只在构建期生成，不进浏览器产物。
+
+### 33.4.5 自测题
+
+<details>
+<summary><b>9. 【进阶】为什么不能在 React 渲染函数里新建 schema？会带来哪些连锁影响？</b></summary>
+
+每次渲染都会创建新的 schema 对象图：引用变化使 `useMemo`/`useCallback` 的依赖失效，`zodResolver` 无法复用内部缓存，校验器被反复重建；同时增加分配与 GC 压力。更隐蔽的是把 schema 放进 `useEffect` 依赖数组，会触发无限重跑。正确做法是模块级常量，组件内只引用。
+</details>
+
+<details>
+<summary><b>10. 【挑战】设计 API 响应校验策略：哪些失败应该抛错，哪些应该降级？如何上报？</b></summary>
+
+原则是「结构失败抛错，可选字段失败降级」。信封本身不合法（不是对象、缺 `ok`）说明契约严重破坏，应抛自定义错误并中断流程；`ok: false` 是业务失败，按错误码走业务分支而非异常；`data` 内可选字段（如头像）可以用 `.optional().catch(undefined)` 降级，保证页面可用。上报统一带接口标识、HTTP 状态、`issues` 的 `path` 与 `code`，并对同一接口采样聚合。
+</details>
+
+<details>
+<summary><b>11. 【进阶】Zod、Valibot、io-ts 应该怎么选？给出三条决策依据。</b></summary>
+
+一看体积约束：边缘运行时、冷启动敏感、包体积是硬指标时选 Valibot，它只打包用到的校验器。二看生态：需要 RHF、tRPC、OpenAPI、NestJS 集成时 Zod 的现成适配最多。三看团队技术栈：已在 fp-ts 体系、偏好 codec 组合子可选 io-ts，否则链式 API 的学习与维护成本更低。三者都能覆盖业务校验，差异主要在体积、生态与风格。
+</details>
+
+## 33.5 实战
+
+### 33.5.1 概念解析
+
+实验室包 `libraries/packages/zod-lab/` 把本章的碎片收成一个无副作用模块：`src/index.ts` 只导出 schema、推导类型与纯函数，顶层不读写环境、不发请求；`test/index.test.ts` 用 `node:test` + `node:assert/strict` 覆盖成功、失败、规范化、默认值、跨字段与类型层面；依赖只有 `zod`。
+
+四个业务对象对应四类边界：`UserSchema`（实体规范化）、`PageQuerySchema`（字符串 query）、`EnvelopeSchema`（API 响应）、`SignupFormSchema`（表单跨字段）；`parseUser` 与 `formatIssues` 是给 UI 的适配层。
+
+### 33.5.2 典型应用场景
+
+把导出直接接到真实项目：用户资料页用 `parseUser` 解析接口数据，列表页用 `PageQuerySchema` 解析路由 query，登录注册用 `SignupFormSchema` 做 resolver，所有接口响应套 `EnvelopeSchema`。
+
+### 33.5.3 可运行代码示例
+
+`UserSchema` 的关键是「校验在前、规范化在后」：先 trim 再校验长度与邮箱，最后 `transform` 小写。
+
+```ts
+export const UserSchema = z.object({
+    username: z.string().trim().min(3, '用户名至少 3 个字符').max(20, '用户名最多 20 个字符').transform((value) => value.toLowerCase()),
+    email: z.string().trim().email('邮箱格式不正确').transform((value) => value.toLowerCase()),
+    age: z.number().int('年龄必须是整数').min(0, '年龄不能为负数').max(120, '年龄超出合理范围').optional(),
+    role: UserRoleSchema.default('viewer'),
+});
+```
+
+`parseUser` 不抛异常，`formatIssues` 把 `issues` 收口成「字段 → 消息列表」，顶层错误归入 `_root`；同一字段的多条消息合并到同一数组。
+
+```ts
+export function formatIssues(error: z.ZodError): FieldIssues {
+    const issues: FieldIssues = {};
+    for (const issue of error.issues) {
+        const key = issue.path.length > 0 ? issue.path.map(String).join('.') : '_root';
+        const messages = issues[key] ?? [];
+        messages.push(issue.message);
+        issues[key] = messages;
+    }
+    return issues;
+}
+
+export function parseUser(input: unknown): ParseResult<User> {
+    const result = UserSchema.safeParse(input);
+    if (result.success) {
+        return { success: true, data: result.data };
+    }
+    return { success: false, issues: formatIssues(result.error) };
+}
+```
+
+表单 schema 用 `refine` 表达「两次密码一致」，错误路径指向 `confirmPassword`，前端可直接渲染到确认框下方。
+
+```ts
+export const SignupFormSchema = z
+    .object({
+        email: z.string().trim().email('邮箱格式不正确').transform((value) => value.toLowerCase()),
+        password: z.string().min(8, '密码至少 8 位'),
+        confirmPassword: z.string().min(8, '密码至少 8 位'),
+    })
+    .refine((form) => form.password === form.confirmPassword, {
+        message: '两次输入的密码不一致',
+        path: ['confirmPassword'],
+    });
+```
+
+测试断言的是行为而不是实现：规范化结果、字段错误、默认值、coerce、跨字段路径，以及 `satisfies` / `@ts-expect-error` 守住的类型约束。运行方式：`cd libraries && pnpm --filter @fag/zod-lab test`。
+
+### 33.5.4 最佳实践
+
+- **纯函数模块零副作用**：schema 与解析函数不依赖时钟、环境与网络，测试才稳定。
+- **错误出口统一**：调用方只消费 `FieldIssues`，不直接摸 `ZodError`，换库时改动面最小。
+- **测试覆盖六类行为**：成功、失败、错误路径与消息、默认值/coerce、transform、跨字段 refine。
+- **类型断言也要测**：把「类型不能漂移」纳入回归。
+- **未知键显式决策**：默认 strip 是有意选择，依赖透传字段就在 schema 上写明 `.passthrough()`。
+
+### 33.5.5 自测题
+
+<details>
+<summary><b>12. 【基础】`parseUser` 为什么返回判别联合而不是直接抛异常？</b></summary>
+
+它面向不可信输入（接口、表单），失败是预期内的情况。判别联合强制调用方用 `if (result.success)` 分支处理，不会因漏写 `try/catch` 让错误冒到渲染层；错误已整理成字段映射，UI 可直接展示。抛异常只适合内部不变量被破坏这类程序 bug。
+</details>
+
+<details>
+<summary><b>13. 【进阶】`formatIssues` 如何统一处理嵌套路径与顶层错误？这样设计对 UI 有什么好处？</b></summary>
+
+它遍历 `error.issues`，把 `path` 用点号拼成字符串作为键（数组下标也会变成 `tags.1`），`path` 为空时用 `_root`；同一字段的多条消息追加到同一数组。UI 只需按字段名查表，就能兼容实体字段、`data.email` 这类信封内层路径与整表单错误，不必理解 `ZodError` 结构，也便于替换校验库。
+</details>
+
+<details>
+<summary><b>14. 【挑战】如果要给 `UserSchema` 增加「邮箱全局唯一」校验，应该放进 schema 吗？为什么？</b></summary>
+
+不应该。schema 是同步纯函数，唯一性需要查库或调服务，放进去会变成有副作用的异步校验，难复用难测试，前端未登录时还会误判。正确分层是 schema 只保证格式与长度，唯一性放在提交接口或独立的异步校验器里（如 RHF 的异步 `validate`），错误再按相同字段路径回填。权限、库存、优惠券可用性同理。
+</details>
+
+### 实战案例：分页列表接口的三类失败与端到端校验
+
+列表页是后台系统出现频率最高的接口形态：外层沿用 33.4 的信封结构，信封内再嵌一层「分页元信息 + 泛型 items」。相比单实体接口，分页多出两个麻烦：`meta` 里的数字字段后端经常直接序列化成字符串，items 里任何一个元素的任何字段坏掉都可能拖垮整页。更关键的是，`safeParse` 失败只是「知道坏了」，上线后必须能区分三类失败——网络层异常、业务失败、数据形状错误——三者的处理方式与上报渠道完全不同。
+
+```ts
+type PageFailure = { kind: 'network' } | { kind: 'business'; message: string } | { kind: 'contract'; paths: string[] };
+
+function PageSchema<T extends z.ZodTypeAny>(item: T) {
+    return z.object({
+        list: z.array(item).max(200),
+        meta: z.object({ page: z.coerce.number().int().min(1), total: z.coerce.number().int().min(0) }),
+    });
+}
+
+async function fetchPage<T>(item: z.ZodType<T>, url: string): Promise<{ items: T[]; failure?: PageFailure }> {
+    let json: unknown;
+    try {
+        json = await (await fetch(url)).json();
+    } catch {
+        return { items: [], failure: { kind: 'network' } };
+    }
+    const result = EnvelopeSchema(PageSchema(item)).safeParse(json);
+    if (!result.success) {
+        const paths = result.error.issues.map((issue) => issue.path.map(String).join('.'));
+        return { items: [], failure: { kind: 'contract', paths } };
+    }
+    if (!result.data.ok) {
+        return { items: [], failure: { kind: 'business', message: result.data.error.message } };
+    }
+    return { items: result.data.data.list };
+}
+```
+
+- 三类失败用 `kind` 判别后各走各路：`network` 提示重试并打埋点；`business` 按错误码走业务分支（如登录过期跳登录页）；`contract` 是契约破裂，上报时带 `paths`（形如 `data.list.3.email`），告警能直接定位到第几个元素的哪个字段。
+- 泛型只传「元素 schema」，分页外壳一次编写全站复用；`.max(200)` 顺手把大 payload 挡在解析层，呼应 33.4 的性能防护。
+- 踩坑点一：`meta` 的数字字段必须 `z.coerce.number()`——不少后端框架把分页字段序列化成字符串 `"120"`，写成 `z.number()` 就是整页白屏。
+- 踩坑点二：`response.json()` 在后端返回空 body 或网关 HTML 错误页时会直接抛错，必须放进 `try` 里，否则「网关 502」会被误判成 `contract` 错误，把排障方向完全带偏。
+
+### 实战案例：CSV 批量导入的行级校验与错误行定位
+
+后台的「上传 CSV 批量导入」是另一类典型边界：文件内容是字符串矩阵，没有任何类型可言。整表一次 `parse` 的体验极差——任何一行坏数据都会让全部导入失败，用户只知道「失败了」，不知道哪一行坏。正确做法是行级校验：逐行 `safeParse`，把「第几行、哪个字段、什么问题」收集成列表一次性反馈，合法行照常处理。
+
+```ts
+const RowSchema = z.object({
+    name: z.string().trim().min(1, '姓名不能为空'),
+    email: z.string().trim().email('邮箱格式不正确'),
+    dept: z.enum(['研发', '产品', '设计']),
+});
+
+type RowIssue = { rowIndex: number; field: string; message: string };
+
+function importCsv(text: string) {
+    const lines = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/).map((line) => line.split(','));
+    const [header, ...rows] = lines;
+    const keys = header.map((name) => name.trim().toLowerCase());
+    if (keys.join(',') !== 'name,email,dept') {
+        return { valid: [] as z.infer<typeof RowSchema>[], issues: [{ rowIndex: 1, field: 'header', message: '表头应为 name、email、dept' }] };
+    }
+    const valid: z.infer<typeof RowSchema>[] = [];
+    const issues: RowIssue[] = [];
+    rows.forEach((cells, index) => {
+        const row = Object.fromEntries(keys.map((key, i) => [key, (cells[i] ?? '').trim()]));
+        const result = RowSchema.safeParse(row);
+        if (result.success) {
+            valid.push(result.data);
+        } else {
+            for (const issue of result.error.issues) {
+                issues.push({ rowIndex: index + 2, field: issue.path.join('.'), message: issue.message });
+            }
+        }
+    });
+    return { valid, issues };
+}
+```
+
+- 错误行号用 `index + 2`：文件第 1 行是表头、数据从第 2 行起，且给用户看的行号要与 Excel 一致（从 1 数起），差一行用户就找不到坏行。
+- 列名先归一化（trim、小写）再 parse，容掉大小写与多余空格这类手工编辑痕迹；表头不合法直接整体返回，不进入逐行解析。
+- `valid` 与 `issues` 同时返回：产品上可以「合法行照常导入 + 错误行列表给用户改完重传」，这是行级校验相对整表 `parse` 的核心价值。
+- 踩坑点一：Excel 导出的 CSV 带 BOM（`\uFEFF`），不 strip 的话第一列名永远带着隐形前缀，表头校验必挂且肉眼极难发现；Windows 换行 `\r\n` 同理，要按 `\r?\n` 拆行。
+- 踩坑点二：CSV 里没有类型，数字列要用 `z.coerce` 或 `preprocess`；空行会解析出全空字段而误报「姓名不能为空」，拆行后先把空行过滤掉。
+
+### 实战案例：路由参数与本地存储的容错读取
+
+URL query 与 `localStorage` 是最「脏」的两类输入：前者全是字符串，后者可能来自半年前的旧版本结构、被插件改写、甚至被用户手动编辑坏。它们与 env 校验的态度恰好相反——env 缺失是开发者错误，要 fail fast；这里是用户输入，读坏了应该回退默认值继续跑，绝不能因为读个偏好设置把启动搞崩。
+
+```ts
+const FilterQuerySchema = z.object({
+    keyword: z.string().trim().default(''),
+    page: z.coerce.number().int().min(1).catch(1),
+    sort: z.enum(['price', 'sales', 'newest']).catch('newest'),
+    tags: z.string().transform((value) => value.split(',').filter(Boolean)).catch([]),
+});
+
+export function readFilterFromQuery(search: string) {
+    return FilterQuerySchema.parse(Object.fromEntries(new URLSearchParams(search)));
+}
+
+const PreferencesSchema = z.object({
+    theme: z.enum(['light', 'dark', 'system']).catch('system'),
+    density: z.enum(['compact', 'comfortable']).catch('comfortable'),
+    recentSearches: z.array(z.string().max(30)).max(20).catch([]),
+});
+
+export function readPreferences(storageKey: string): z.infer<typeof PreferencesSchema> {
+    const fallback = PreferencesSchema.parse({});
+    const raw = localStorage.getItem(storageKey);
+    if (raw === null) return fallback;
+    try {
+        return PreferencesSchema.parse(JSON.parse(raw));
+    } catch {
+        return fallback;
+    }
+}
+```
+
+- `catch` 放在字段级而不是整个 object 级：只丢坏掉的那个字段，其余偏好照常恢复；整体 catch 会因为一个字段坏而把全部设置重置。
+- `catch` 之外仍保留一层 `try/catch` 兜 `JSON.parse`：schema 的 catch 管「值不合法」，管不了「根本不是 JSON」（截断、手改坏）。
+- 翻页场景里 `page=0`、`page=abc`、`page` 缺失全部归位 1，业务代码不用再写防御性 if；`URLSearchParams` 已自动 decode，不要自己再 `decodeURIComponent`，双重解码会把含 `%` 的搜索词解坏。
+- 踩坑点：`catch` 是「任何失败都吞」，只适合偏好、筛选这类有合理默认值的输入（呼应 33.2 的提醒）；业务数据误用它，契约 bug 会被静默掉。
+
+### 实战案例：文件上传的前置校验
+
+上传头像与附件是前端少有的「持有对象本身」的边界：用户选完文件那一刻，前端就拿到 `File` 实例，`size`、`type`、文件名全部可查。等接口返回 413/415 才提示，用户白等一次大文件上传；把检查散落在提交回调里，又进不了表单的统一错误体系。用 schema 把「什么文件合法」声明出来，Zod 3 借助 `z.custom` 把 `File` 本体也纳入校验。
+
+```ts
+const MAX_SIZE = 5 * 1024 * 1024;
+const MIME_WHITELIST = ['image/jpeg', 'image/png', 'image/webp'];
+const EXT_WHITELIST = ['.jpg', '.jpeg', '.png', '.webp'];
+
+const UploadSchema = z
+    .custom<File>((value) => value instanceof File, { message: '请选择有效的文件' })
+    .superRefine((file, ctx) => {
+        if (file.size > MAX_SIZE) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `文件不能超过 5MB，当前 ${(file.size / 1024 / 1024).toFixed(1)}MB`,
+            });
+        }
+        const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+        const typeOk = MIME_WHITELIST.includes(file.type);
+        const extOk = EXT_WHITELIST.includes(ext);
+        if (!typeOk || !extOk) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `仅支持 JPG / PNG / WebP，实际类型是 ${file.type || '未知'}（${file.name}）`,
+            });
+        }
+    });
+
+function checkUpload(file: unknown): string[] {
+    const result = UploadSchema.safeParse(file);
+    return result.success ? [] : result.error.issues.map((issue) => issue.message);
+}
+```
+
+- Zod 3 没有 `z.instanceof`（那是 Zod 4 的 API），用 `z.custom<File>` 加 `instanceof` 判别；「是 File」成为 schema 的一部分后，RHF 的 `zodResolver` 可以直接接管上传字段。
+- `size` 与类型检查集中在一次 `superRefine`，用户一次看到全部问题；拆成多个 `refine` 会出现「改一处冒出新错误」的补作业体验。
+- MIME 与扩展名双白名单：只查 `type` 会漏掉 webview 里 type 为空的文件，只查扩展名挡不住把 exe 改名成 jpg 的文件；双查加服务端复验才是完整闭环，前端校验只是体验优化。
+- 踩坑点：部分安卓 webview 对某些图片返回空字符串 `type`，错误消息里要用 `file.type || '未知'` 兜底，否则用户看到「实际类型是 」后面一片空白，连报障截图都看不懂。
+
+### 进阶技巧：Schema 版本演进与向后兼容迁移
+
+payload 里带 `version` 字段，旧版本分支解析成功后立即迁移成新形状，业务层永远只消费最新类型：
+
+```ts
+const V1PayloadSchema = z.object({ version: z.literal(1), name: z.string() });
+const V2PayloadSchema = z.object({ version: z.literal(2), firstName: z.string(), lastName: z.string() });
+
+// 旧版本分支在解析边界被升级成 v2 形状，业务层不写任何版本判断
+const PayloadSchema = z.union([
+    V2PayloadSchema,
+    V1PayloadSchema.transform((v1) => ({ version: 2 as const, firstName: v1.name, lastName: '' })),
+]);
+
+export type Payload = z.infer<typeof PayloadSchema>; // 恒为 v2 形状
+```
+
+- payload 自带 `version` 字段，读取端按版本分派；v2 上线后 v1 schema 冻结不再改动，新字段只进新版本——schema 要像 API 一样有变更纪律：向后兼容、废弃先标记再删除。
+- 迁移发生在解析边界，`z.infer` 出来的类型恒为最新版，业务层不需要 `if (payload.version === 1)` 这类分支。
+- 踩坑点：Zod 3 的 `discriminatedUnion` 会直接读取分支的 `shape` 来提取判别键，分支挂上 `transform` 后构造时就会报错；「分支要先变形」的迁移场景改用普通 `union`（按序尝试），并把高频的新版本分支放前面。
+- 版本号写 `z.literal(2)` 而不是 `z.number()`：传错版本会在解析层立刻失败，而不是静默走错分支。
+
+### 进阶技巧：类型提取三板斧（z.infer、z.input、z.output）
+
+`transform` 与 `default` 会让输入输出类型分叉，三个工具各取所需：
+
+```ts
+const OrderQuerySchema = z.object({
+    date: z.string().transform((value) => new Date(value)),
+    page: z.number().int().min(1).default(1),
+});
+
+type OrderQueryInput = z.input<typeof OrderQuerySchema>; // { date: string; page?: number | undefined }
+type OrderQueryOutput = z.output<typeof OrderQuerySchema>; // { date: Date; page: number }
+```
+
+- `z.infer` 与 `z.output` 完全等价；schema 里没有 `transform`、`default`、`coerce` 时三者长得一样，日常默认 `z.infer` 即可。
+- 一旦有变换就分叉：`date` 输入是 `string`、输出是 `Date`；`page` 输入可省略、输出必有。用错方向编译器会报错，但前提是团队先有约定。
+- 约定一：对外导出的领域类型一律从 schema 推导，禁止手写 `interface` 复刻 schema 形状——双写的漂移编译器查不出来，改 schema 忘改 interface 就是埋雷。
+- 约定二：表单带 `transform`、`coerce`、`preprocess` 时，RHF 的 `useForm` 泛型填 `z.input`（用户正在敲的原始值），提交 `safeParse` 之后拿到的才是 `z.output`；无变换的表单两者相同。
+- 约定三：函数入参标 `z.input`、返回值标 `z.output`，CR 时一眼看出该函数期望原始值还是解析值。
+
+### 进阶技巧：错误消息的 i18n
+
+schema 只声明规则不写文案，文案进 `errorMap` 按语言查表：
+
+```ts
+const messages = {
+    'zh-CN': { tooSmall: '长度至少 {min} 个字符', invalidEmail: '邮箱格式不正确' },
+    'en-US': { tooSmall: 'Must be at least {min} characters', invalidEmail: 'Invalid email address' },
+} as const;
+
+type Locale = keyof typeof messages;
+
+function makeErrorMap(locale: Locale): z.ZodErrorMap {
+    return (issue, ctx) => {
+        if (issue.code === 'too_small') {
+            return { message: messages[locale].tooSmall.replace('{min}', String(issue.minimum)) };
+        }
+        if (issue.code === 'invalid_string' && issue.validation === 'email') {
+            return { message: messages[locale].invalidEmail };
+        }
+        return { message: ctx.defaultError };
+    };
+}
+
+const UsernameSchema = z.string().min(3).max(20);
+
+function parseUsername(value: unknown, locale: Locale) {
+    return UsernameSchema.safeParse(value, { errorMap: makeErrorMap(locale) });
+}
+```
+
+- 新增语言只加词条、不改 schema，同一份 schema 服务所有语言，不会出现「中文 schema + 英文 schema」两份维护。
+- 优先级要心里有数：`safeParse` 传入的 `errorMap` > 构造参数（`required_error`、`invalid_type_error`、`message`）> Zod 默认文案；不要在两处同时定制同一字段，否则排查时不知道哪份生效。
+- `errorMap` 按 `issue.code` 分派（`too_small`、`invalid_string`、`invalid_enum_value` 等），覆盖十来个 code 就能接管绝大多数默认英文文案；没覆盖的一律回退 `ctx.defaultError`，不要强行翻译。
+- 「两次密码不一致」这类业务文案是产品文案而不是校验词典，继续写在 `superRefine` 的 `message` 里、交给翻译流程管理，别全塞进 `errorMap`。
+- 踩坑点：不配 `errorMap` 时 `z.enum` 的 `Invalid enum value...`、`z.string().email()` 的 `Invalid email` 都是英文，会原样漏给中文用户——上文 CSV 案例里的 `dept` 字段就会中招。
+
+## 33.6 综合自测题
+
+<details>
+<summary><b>15. 【挑战】设计「后端 DTO → 前端领域模型」的分层：接口返回 `created_at` 字符串，领域模型需要 `createdAt: Date`，如何组织并避免类型重复？</b></summary>
+
+分两层：`UserDtoSchema` 忠实描述接口（`created_at: z.string().datetime()`、可空字段、默认 strip），再用 `.transform` 得到领域模型 `UserSchema`（`createdAt: new Date(...)`），类型分别用 `z.infer` 导出。消费方只 import 领域 schema 与类型，DTO 只在请求层出现；接口变更只改 DTO，业务层稳定。非法时间要显式抛错或降级，别静默得到 `Invalid Date`。
+</details>
+
+<details>
+<summary><b>16. 【挑战】注册表单要求：邮箱格式正确、密码至少 8 位且含数字、两次一致、密码不等于邮箱前缀。给出 schema 与 RHF 集成方案，并说明错误如何定位到字段。</b></summary>
+
+用 `z.object` 声明三个字段，再 `.superRefine` 一次检查「一致」「含数字」「不等于邮箱前缀」，每条 `ctx.addIssue` 带 `path`（分别指向 `confirmPassword`、`password`、`password`）。RHF 侧用模块级 schema 与 `zodResolver`，`useForm<z.infer<typeof Schema>>`，`mode: 'onBlur'` 降低解析频率，错误通过 `formState.errors.password?.message` 渲染。密码强度也可用 `refine`，但多条跨字段规则集中在 `superRefine` 更利于控制错误顺序与文案。
+</details>
+
+<details>
+<summary><b>17. 【进阶】环境变量与 API 响应两处都要校验，如何复用同一套 schema 又不互相污染？</b></summary>
+
+按「来源」拆 schema 而不是按字段拆：env 用只含配置项的 `EnvSchema`（必填项 `z.string()`、数字 `coerce`、枚举限制环境名），API 用按接口划分的响应 schema；共享的原子规则（`UrlSchema`、`PortSchema`）抽到公共模块组合。不要把 `process.env` 整个对象丢进 API 信封 schema，也不要用 `.passthrough()` 让无关字段流入。共享原子规则、隔离顶层对象。
+</details>
+
+<details>
+<summary><b>18. 【挑战】用 Zod 描述评论树（每条评论有 id、content、可选 children），写出 schema 并说明两个易错点。</b></summary>
+
+先声明 `interface Comment { id: string; content: string; children: Comment[] }`，再写 `const CommentSchema: z.ZodType<Comment> = z.lazy(() => z.object({ id: z.string().min(1), content: z.string().min(1), children: z.array(CommentSchema).default([]) }))`。易错点一：不标注 `z.ZodType<T>` 时递归引用推断为 `any`，整棵树失去类型保护。易错点二：`children` 用 `default([])` 会与「可选」混淆，若要求必须显式返回空数组应去掉 default；另外超深递归有栈深风险，应限制层数。
+</details>
+
+## 33.7 本章避坑清单
+
+> 按踩中频率排序，每条都能在实验室或真实项目里复现。
+
+| 坑 | 后果 | 避法 |
+| --- | --- | --- |
+| 用 `as User` 断言接口数据 | 类型撒谎，非法值流入深层业务 | 边界用 `safeParse`，入参声明为 `unknown` |
+| 忘记 object 默认剥离未知键 | 依赖透传字段时数据莫名丢失 | 需要保留用 `.passthrough()`，需要拒绝用 `.strict()` |
+| 使用 `z.coerce.boolean()` | 字符串 `"false"` 被转成 `true` | 用 `z.enum(['true','false']).transform(...)` 显式转换 |
+| 在组件渲染函数里新建 schema | 引用每次变化，resolver 与 memo 缓存失效 | schema 提到模块级，只建一次 |
+| 期望 `default` 处理 `null` | 接口返回 null 时默认值不生效 | 改 `.nullable().default(v)` |
+| 链多个 `refine` 做跨字段校验 | 错误重复、顺序与定位不可控 | 集中在一次 `superRefine` 里 `addIssue` |
+| `z.lazy` 不标注 `z.ZodType<T>` | 递归节点退化为 `any`，类型保护失效 | 显式标注递归 schema 的输出类型 |
+| 混淆 `z.input` 与 `z.output` | transform 后仍按输入类型使用，运行时报错 | 表单值用输入类型，解析结果用输出类型 |
+| 把唯一性/权限塞进 schema | 同步校验被迫做异步 I/O，难测且易误判 | schema 只管形状，业务规则放接口或独立校验器 |
+| 环境变量不做启动校验 | 缺 `DATABASE_URL` 到首个请求才崩 | 入口 `EnvSchema.parse(process.env)`，fail fast |
+
+> **学习建议**：每引入一个外部数据源，先问「它有没有 schema」。把校验放在边界、把错误收口成字段映射、把 schema 提到模块级，这三件事能挡住绝大多数「类型看起来对、运行时全错」的问题。

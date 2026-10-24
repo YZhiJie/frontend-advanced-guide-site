@@ -1,0 +1,42 @@
+<!-- 文件: examples/17-05-web-component.html —— [浏览器] 手写一个 <count-up> 自定义元素 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /></head>
+<body>
+    <!-- 使用方式与原生标签无异:属性传参,任意框架可用 -->
+    <count-up to="2026" duration="1500"></count-up>
+
+    <script>
+        class CountUp extends HTMLElement {
+            // observedAttributes:声明需要监听的属性变化
+            static get observedAttributes() { return ['to', 'duration']; }
+
+            connectedCallback() {
+                // Shadow DOM:内部样式与 DOM 完全隔离,不污染页面,不被页面污染
+                const root = this.attachShadow({ mode: 'open' });
+                root.innerHTML = `
+                    <style>
+                        span { font: 700 2em/1 monospace; color: #1890ff; }
+                    </style>
+                    <span>0</span>
+                `;
+                this.display = root.querySelector('span');
+
+                const to = Number(this.getAttribute('to') ?? 0);
+                const duration = Number(this.getAttribute('duration') ?? 1000);
+                const start = performance.now();
+
+                const tick = (now: number) => {
+                    const progress = Math.min((now - start) / duration, 1);
+                    // easeOutCubic 缓动
+                    const eased = 1 - (1 - progress) ** 3;
+                    this.display!.textContent = String(Math.round(to * eased));
+                    if (progress < 1) requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            }
+        }
+        customElements.define('count-up', CountUp);
+    </script>
+</body>
+</html>
