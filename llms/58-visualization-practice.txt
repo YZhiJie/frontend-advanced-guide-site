@@ -1,0 +1,1332 @@
+# 第五十八部分 · 可视化实战：ECharts / AntV / D3（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/58-visualization-practice
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第五十八部分 · 可视化实战：ECharts / AntV / D3
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第四十一部分 · 数据可视化大屏](./41-dashboard-visualization.md) · [第十七部分 · Web 平台与可视化](./17-web-platform.md) · [第十部分 · 浏览器渲染性能](./10-browser-rendering.md)
+
+> 💡 **本章特色**：JD 明写"熟练使用 ECharts、AntV、D3 可视化图表库，能独立开发交互式风控看板、大数据可视化大屏"。本章不重复 41/17 已讲的大屏工程和大数据优化，聚焦**API 实战选型决策 + 风控看板组合模式**。
+
+## 本部分内容
+
+- [58.1 选型决策树](#_58-1-选型决策树)
+- [58.2 ECharts 核心 API 速通](#_58-2-echarts-核心-api-速通)
+- [58.3 AntV G2 / G6 实战](#_58-3-antv-g2-g6-实战)
+- [58.4 风控看板组合模式](#_58-4-风控看板组合模式)
+- [58.5 图表联动与钻取](#_58-5-图表联动与钻取)
+- [58.6 自测题](#_58-6-自测题)
+- [58.7 本章避坑清单](#_58-7-本章避坑清单)
+
+```mermaid
+flowchart TB
+    A{什么数据?} --> B{"常规统计图表<br/>(折线/柱状/饼图)"}
+    B -- 是 --> C[✅ ECharts]
+    B -- 否 --> D{定制化<br/>数据驱动图表}
+    D -- 是 --> E[✅ AntV G2]
+    D -- 否 --> F{"关系/图谱<br/>(网络/力导向)"}
+    F -- 是 --> G[✅ AntV G6]
+    F -- 否 --> H{"完全自定义<br/>(日历热力/桑基)"}
+    H -- 是 --> I[✅ D3]
+```
+
+---
+
+## 58.1 选型决策树
+
+### 58.1.1 概念解析
+
+JD 要求"能独立开发交互式风控看板"——第一步是**选对图表库**。三者不是"谁取代谁"的关系，而是各有专精：
+
+| 维度 | **ECharts** | **AntV G2** | **AntV G6** | **D3** |
+| --- | --- | --- | --- | --- |
+| **定位** | 开箱即用的图表库 | 数据驱动的图表语法 | 图可视化引擎 | 数据驱动的底层库 |
+| **覆盖图表类型** | 30+（折线/柱/饼/雷达/地图/桑基） | 20+（统计图表） | 专注关系图/力导向图 | 无内置图表，自己画 |
+| **上手难度** | 低（options 对象配置） | 中（图表语法 DSL） | 中（图数据结构） | 高（要自己写渲染） |
+| **定制能力** | 中（rich text 富文本、自定义 series） | 高（markPoint/markLine、自定义 Geometry） | 高（自定义节点/边/布局） | 极高（想画什么画什么） |
+| **性能** | Canvas 为主，大数据有增量渲染 | Canvas/SVG 可切换 | Canvas/WebGL | Canvas/SVG 自己控制 |
+| **典型场景** | 监控大盘、报表、大屏常规图表 | 需要精细控制 mark 点/线的分析图表 | 风控关系网络、社交图谱、架构图 | 完全自定义的特殊图表 |
+| **License** | Apache 2.0 | MIT | MIT | ISC |
+
+### 58.1.2 选型决策流程
+
+```
+第 1 步:我有什么数据类型?
+  ├─ 时间序列 → ECharts（折线/面积图）
+  ├─ 分类统计 → ECharts（柱状/饼图）
+  ├─ 关系网络 → AntV G6（力导向图）
+  ├─ 地理分布 → ECharts 地图 / D3 GeoJSON
+  └─ 自定义结构（日历热力/桑基/雷达多指标）→ 进入第 2 步
+
+第 2 步:定制化程度?
+  ├─ 基本形态够了，改改颜色字体 → ECharts
+  ├─ 需要精细 markPoint/markLine → AntV G2
+  └─ 图表库里没有，要自己画 → D3
+
+第 3 步:性能要求?
+  ├─ 万级数据 → 三者都可以
+  ├─ 十万级 → ECharts + large 模式（见 17.2）
+  ├─ 百万级 → ECharts 增量渲染 / G6 WebGL
+  └─ 节点密集（万级节点图）→ G6 WebGL 模式
+```
+
+### 58.1.3 完整代码示例
+
+```ts
+// 文件: examples/58-01-selection.ts —— 选型决策函数（纯逻辑验证）
+
+type ChartType = "echarts" | "g2" | "g6" | "d3";
+
+interface ChartRequirement {
+  dataKind: "time-series" | "category" | "relation" | "geo" | "custom";
+  customization: "basic" | "mark" | "full-custom";
+  dataSize: number; // 数据点数量
+  interactive: boolean;
+}
+
+function decideChart(req: ChartRequirement): ChartType {
+  // 第 1 步:按数据类型初步筛选
+  if (req.dataKind === "relation") {
+    // 关系图优先 G6
+    if (req.dataSize > 5000) return "g6"; // 大图走 G6
+    return "g6";
+  }
+
+  if (req.dataKind === "geo") {
+    // 地理:常规用 ECharts 地图,深度定制用 D3
+    return req.customization === "full-custom" ? "d3" : "echarts";
+  }
+
+  if (req.dataKind === "custom") {
+    // 自定义结构:D3 兜底
+    return "d3";
+  }
+
+  // 时间序列/分类统计
+  // 第 2 步:定制化决策
+  if (req.customization === "full-custom") {
+    return "d3";
+  }
+  if (req.customization === "mark") {
+    // 需要 markPoint/markLine 精细控制 → G2
+    return "g2";
+  }
+
+  // 第 3 步:性能兜底（ECharts 大数据优化成熟）
+  if (req.dataSize > 100000) {
+    return "echarts"; // ECharts large 模式见 17.2
+  }
+
+  return "echarts";
+}
+
+function main() {
+  // 测试用例矩阵
+  const testCases: Array<[ChartRequirement, ChartType]> = [
+    [
+      { dataKind: "time-series", customization: "basic", dataSize: 1000, interactive: true },
+      "echarts",
+    ],
+    [
+      { dataKind: "time-series", customization: "basic", dataSize: 500000, interactive: true },
+      "echarts", // 大数据量优先 ECharts
+    ],
+    [
+      { dataKind: "category", customization: "mark", dataSize: 500, interactive: false },
+      "g2", // 需要 markPoint → G2
+    ],
+    [
+      { dataKind: "relation", customization: "basic", dataSize: 50, interactive: true },
+      "g6",
+    ],
+    [
+      { dataKind: "relation", customization: "basic", dataSize: 10000, interactive: true },
+      "g6",
+    ],
+    [
+      { dataKind: "custom", customization: "full-custom", dataSize: 200, interactive: false },
+      "d3",
+    ],
+    [
+      { dataKind: "geo", customization: "basic", dataSize: 100, interactive: true },
+      "echarts",
+    ],
+    [
+      { dataKind: "geo", customization: "full-custom", dataSize: 100, interactive: true },
+      "d3",
+    ],
+  ];
+
+  for (const [req, expected] of testCases) {
+    const actual = decideChart(req);
+    console.assert(
+      actual === expected,
+      `选型错误:${JSON.stringify(req)} → 预期 ${expected}, 实际 ${actual}`
+    );
+  }
+  console.log("✅ 选型决策函数全部断言通过");
+}
+
+main();
+```
+
+> 运行方式：`npx tsx examples/58-01-selection.ts`。
+
+### 58.1.4 最佳实践
+
+1. **不要为了"逼格"选 D3**：D3 是底层工具，自己画一个柱状图要写二三十行比例尺代码，ECharts 一个 options 对象就搞定。只有当 ECharts/G2 的内置图表覆盖不了你的形状时才上 D3（比如自定义日历热力图、桑基图变体）。
+2. **G2 的 mark 能力是杀手锏**：运维看板常见需求"在峰值处画一条虚线 + 注释"、"在 95 分位数画一个圆点"——G2 的 `markPoint`/`markLine`/`markArea` 用声明式 DSL 就能搞定，ECharts 的 graphic 组件要手写 SVG path。
+3. **G6 不是 ECharts 能替代的**：风控"账号关联关系图"、"IP 网络拓扑"、"调用链架构图"——这些是 G6 的主场，ECharts graph 组件能做但定制能力差远了。
+4. **大屏项目优先 ECharts**：运维看板、监控大盘的主流图表形态 ECharts 全齐，而且它的 `animationDurationUpdate` / `renderer: 'canvas'` / `large: true` / `progressive` 等大数据优化参数非常成熟（17.2 已详解）。
+
+---
+
+## 58.2 ECharts 核心 API 速通
+
+### 58.2.1 概念解析
+
+JD 要求"熟练使用 ECharts"——**熟练**意味着你不需要查文档就能写出一个完整的 options 对象，并且知道每个系列（series）的配置项、事件绑定、主题切换的正确姿势。
+
+**ECharts API 三层结构**：
+
+```mermaid
+flowchart TB
+    subgraph ECharts API 三层
+        A[底层:echarts.init] --> B[中层:chart.setOption<br/>核心配置对象]
+        B --> C[顶层:chart.on / chart.resize<br/>事件 & 生命周期]
+    end
+    subgraph setOption 核心结构
+        B --> D[title / legend / tooltip / grid<br/>基础框架]
+        B --> E[xAxis / yAxis / polar / geo<br/>坐标系]
+        B --> F["series[]<br/>数据系列数组"]
+        B --> G[color / animation / darkMode<br/>全局配置]
+    end
+```
+
+### 58.2.2 常用 series 类型速记
+
+| series.type | 适用场景 | 关键配置项 |
+| --- | --- | --- |
+| `'line'` | 时间序列趋势 | `smooth`（平滑曲线）、`areaStyle`（面积）、`markPoint`/`markLine` |
+| `'bar'` | 分类数据对比 | `barWidth`、`stack`（堆叠）、`label`（显示数值） |
+| `'pie'` | 占比分布 | `radius`（内外半径做环形）、`roseType`（南丁格尔玫瑰图） |
+| `'scatter'` | 散点分布 / 气泡图 | `symbolSize`、`itemStyle.color`（按维度着色） |
+| `'radar'` | 多指标对比 | `indicator[]`（各维度）、`shape: 'polygon'` |
+| `'gauge'` | 仪表盘 / KPI | `max`、`progress.show`、`axisLine.roundCap` |
+| `'graph'` | 关系网络 | `layout: 'force'`、`roam: true`、`force.repulsion` |
+| `'heatmap'` | 热力图 | `xAxis.data`、`yAxis.data`、`visualMap` |
+| `'geo'` / `'map'` | 地理分布 | `map: 'china'`（需注册地图 JSON）、`roam: true` |
+| `'funnel'` | 漏斗图 | `sort`、`gap`、`label.position` |
+| `'tree'` / `'treemap'` | 层级结构 | `data`（树形）、`roam: true`（treemap） |
+| `'sankey'` | 流向关系 | `data` / `links`、`nodeAlign` |
+
+### 58.2.3 完整代码示例
+
+```ts
+// 文件: examples/58-02-echarts-options.ts —— ECharts options 构建器（类型安全，Node 环境验证）
+
+/**
+ * 用 TypeScript 类型约束构建 ECharts options —— 避免运行时拼写错误
+ * 完整的 ECharts Option 类型来自 echarts 包:echarts.EChartsOption
+ * 这里手写简化类型用于概念验证
+ */
+
+interface SeriesLine {
+  type: "line";
+  name: string;
+  data: number[];
+  smooth?: boolean;
+  areaStyle?: unknown;
+  markPoint?: { data: Array<{ coord: [number, number]; value: string }> };
+  markLine?: { data: Array<{ yAxis: number; label: { formatter: string } }> };
+}
+
+interface SeriesBar {
+  type: "bar";
+  name: string;
+  data: number[];
+  stack?: string;
+  barWidth?: string;
+}
+
+interface EChartsOption {
+  title?: { text: string; subtext?: string };
+  tooltip?: { trigger: "axis" | "item"; axisPointer?: { type: "cross" | "line" } };
+  legend?: { data: string[]; top?: number | string };
+  grid?: { left: string; right: string; top: string; bottom: string; containLabel?: boolean };
+  xAxis?: { type: "category" | "value"; data?: string[]; boundaryGap?: boolean };
+  yAxis?: { type: "value" | "category"; name?: string };
+  series: Array<SeriesLine | SeriesBar | { type: string; [k: string]: unknown }>;
+  color?: string[];
+  animation?: boolean;
+}
+
+/** 风控看板通用配色（暗色大屏） */
+const DARK_PALETTE = [
+  "#00d4ff", // 主青色
+  "#ff6b6b", // 告警红
+  "#ffd93d", // 警告黄
+  "#6bcb77", // 安全绿
+  "#c792ea", // 紫色（次要）
+  "#ff9f43", // 橙色
+];
+
+/** 构建标准折线图 options */
+export function buildLineChart(
+  title: string,
+  categories: string[],
+  series: Array<{ name: string; data: number[]; smooth?: boolean }>,
+  opts?: {
+    thresholdLine?: number; // 告警阈值 markLine
+    peakMark?: boolean; // 是否标记峰值
+    area?: boolean;
+  }
+): EChartsOption {
+  const lineSeries: SeriesLine[] = series.map((s) => {
+    const item: SeriesLine = {
+      type: "line",
+      name: s.name,
+      data: s.data,
+      smooth: s.smooth ?? true,
+    };
+    if (opts?.area) {
+      item.areaStyle = { opacity: 0.15 };
+    }
+    if (opts?.peakMark) {
+      const maxIdx = s.data.indexOf(Math.max(...s.data));
+      item.markPoint = {
+        data: [
+          {
+            coord: [maxIdx, s.data[maxIdx]],
+            value: "峰值",
+          },
+        ],
+      };
+    }
+    if (opts?.thresholdLine !== undefined) {
+      item.markLine = {
+        data: [
+          {
+            yAxis: opts.thresholdLine,
+            label: { formatter: "告警阈值: {c}" },
+          },
+        ],
+      };
+    }
+    return item;
+  });
+
+  return {
+    title: { text: title },
+    tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
+    legend: { data: series.map((s) => s.name), top: 30 },
+    grid: { left: "3%", right: "4%", top: 80, bottom: "3%", containLabel: true },
+    xAxis: { type: "category", data: categories, boundaryGap: false },
+    yAxis: { type: "value" },
+    series: lineSeries,
+    color: DARK_PALETTE,
+  };
+}
+
+/** 构建堆叠柱状图 options */
+export function buildStackedBarChart(
+  title: string,
+  categories: string[],
+  series: Array<{ name: string; data: number[] }>
+): EChartsOption {
+  return {
+    title: { text: title },
+    tooltip: { trigger: "axis" },
+    legend: { data: series.map((s) => s.name), top: 30 },
+    grid: { left: "3%", right: "4%", top: 80, bottom: "3%", containLabel: true },
+    xAxis: { type: "category", data: categories },
+    yAxis: { type: "value" },
+    series: series.map(
+      (s): SeriesBar => ({
+        type: "bar",
+        name: s.name,
+        data: s.data,
+        stack: "total",
+        barWidth: "50%",
+      })
+    ),
+    color: DARK_PALETTE,
+  };
+}
+
+/** ============ 断言验证 ============ */
+export function runEChartsOptionTests() {
+  const opts = buildLineChart(
+    "QPS 监控",
+    ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"],
+    [
+      { name: "API-1", data: [120, 80, 450, 520, 610, 380] },
+      { name: "API-2", data: [60, 40, 230, 260, 310, 190] },
+    ],
+    { thresholdLine: 500, peakMark: true, area: true }
+  );
+
+  // 结构断言
+  console.assert(opts.series.length === 2, "应生成 2 个 series");
+  console.assert(
+    (opts.series[0] as SeriesLine).type === "line",
+    "series.type 应为 line"
+  );
+  console.assert(
+    (opts.series[0] as SeriesLine).markLine !== undefined,
+    "应包含 markLine（阈值）"
+  );
+  console.assert(
+    (opts.series[0] as SeriesLine).areaStyle !== undefined,
+    "应包含 areaStyle"
+  );
+  console.assert(
+    opts.color?.length === 6,
+    "应配置 6 色暗色大屏配色"
+  );
+
+  // 堆叠柱状图
+  const barOpts = buildStackedBarChart(
+    "攻击类型分布",
+    ["周一", "周二", "周三", "周四", "周五"],
+    [
+      { name: "SQL 注入", data: [30, 45, 20, 60, 55] },
+      { name: "XSS", data: [15, 25, 18, 30, 40] },
+      { name: "暴力破解", data: [5, 8, 12, 6, 3] },
+    ]
+  );
+  console.assert(
+    (barOpts.series[0] as SeriesBar).stack === "total",
+    "堆叠柱状图应配置 stack"
+  );
+
+  console.log("✅ ECharts options 构建器全部断言通过");
+}
+
+// 自动执行
+runEChartsOptionTests();
+```
+
+> 运行方式：`npx tsx examples/58-02-echarts-options.ts`。
+
+### 58.2.4 最佳实践
+
+1. **theme vs 全局 color 数组**：ECharts 有内置的 `dark` 主题（`echarts.init(el, 'dark')`），但运维大屏通常需要更定制化的配色——直接在 options 顶层写 `color: [...]` 覆盖主题色即可，比自己注册 theme 更灵活。
+2. **markPoint/markLine 是运维看板的杀手锏**：`markLine` 画告警阈值、`markPoint` 标注峰值/异常值——这些纯配置就能实现的辅助元素能让图表信息密度提升一个量级，而且不需要额外 DOM 或 D3。
+3. **setOption 合并行为**：`chart.setOption(partialOpts)` 默认是**合并**而非覆盖——相同 key 会被新值替换，数组会按索引 merge。需要完全重置时用 `chart.setOption(newOpts, true)` 或先 `chart.clear()`。
+4. **resize 时机**：窗口 resize 时 `chart.resize()` 必须防抖（200ms），否则高频 resize 事件会让图表反复重绘掉帧。而且 **Tab 切换回来时也要 resize**——浏览器可能把隐藏 Tab 的 canvas 缩放搞乱。
+5. **ECharts 事件 vs DOM 事件**：`chart.on('click', {...})` 监听的是**图表内部元素**（柱、折线点、饼块），返回的 `params` 包含 `name`、`value`、`seriesName` 等结构化信息。这是实现钻取和联动的核心机制（58.5 详解）。
+6. **rich text 解决定制化标签**：axis 的 `axisLabel.formatter` 默认是字符串，但用 rich text 可以写 `<span style="color:red">高</span><span style="color:green">低</span>` ——运维看板里"高/中/低"三态标签常这么做。
+
+---
+
+## 58.3 AntV G2 / G6 实战
+
+### 58.3.1 AntV G2：数据驱动的图表语法
+
+G2 把图表渲染抽象成**声明式语法**——你告诉它"数据是什么"、"x 用什么字段"、"y 用什么字段"、"颜色按什么分"，它自动帮你画好：
+
+```ts
+// G2 v5 典型 API（浏览器环境）
+import { Chart } from '@antv/g2';
+
+const chart = new Chart({ container: '#container', autoFit: true, height: 400 });
+
+chart.data([
+  { category: '周一', attacks: 150, type: 'SQL 注入' },
+  { category: '周一', attacks: 80, type: 'XSS' },
+  { category: '周二', attacks: 200, type: 'SQL 注入' },
+  // ...
+]);
+
+chart
+  .interval() // interval = 柱状图
+  .encode('x', 'category')
+  .encode('y', 'attacks')
+  .encode('color', 'type')
+  .stackY() // 堆叠
+  .label({ position: 'top' });
+
+chart.render();
+```
+
+### 58.3.2 G2 vs ECharts 对比场景
+
+| 场景 | 推荐库 | 为什么 |
+| --- | --- | --- |
+| 常规监控折线 / 柱状 / 饼图 | **ECharts** | 开箱即用，配置更直觉，社区案例多 |
+| 需要 markPoint/markLine/markArea 精细标注 | **G2** | 声明式 DSL 一行搞定，ECharts 要写 graphic 组件 |
+| 需要分面（按某字段自动拆成多图） | **G2** | `chart.facetRow('type')` 自动生成多图，ECharts 要手写 grid |
+| 需要自定义 Geometry（如圆角柱） | **G2** | 自定义 Geometry 比 ECharts graphic 灵活 |
+| 大屏综合看板（常规 + 特殊混合） | **ECharts 为主 + G2 补特殊图** | 主流用 ECharts，G2 负责 ECharts 画不了的定制图 |
+
+### 58.3.3 AntV G6：关系图谱引擎
+
+JD 要求的"风控看板"里经常有**账号关联图**、**IP 拓扑图**、**调用链**——这些是 G6 的主场：
+
+```ts
+// G6 v5 典型 API（浏览器环境）
+import { Graph } from '@antv/g6';
+
+const graph = new Graph({
+  container: '#graph-container',
+  width: 800,
+  height: 600,
+  autoFit: 'view',
+  data: {
+    nodes: [
+      { id: 'user-001', data: { label: '用户 A', risk: 'high' } },
+      { id: 'device-003', data: { label: '设备 X', risk: 'medium' } },
+      { id: 'ip-192.168.1.5', data: { label: 'IP .5', risk: 'low' } },
+    ],
+    edges: [
+      { source: 'user-001', target: 'device-003' },
+      { source: 'device-003', target: 'ip-192.168.1.5' },
+    ],
+  },
+  layout: { type: 'force' }, // 力导向布局
+  node: {
+    style: {
+      // 按 risk 字段动态着色
+      fill: (d) => ({ high: '#ff6b6b', medium: '#ffd93d', low: '#6bcb77' })[d.data.risk],
+    },
+  },
+  edge: { style: { stroke: '#555', lineWidth: 2 } },
+  behaviors: ['drag-element', 'zoom-canvas', 'click-select'],
+});
+
+graph.render();
+```
+
+### 58.3.4 完整代码示例
+
+```ts
+// 文件: examples/58-03-g2-g6-patterns.ts —— G2/G6 数据管道逻辑验证（Node 环境）
+
+/**
+ * G2 encode 管道:data → encode x/y/color → geometry → render
+ * G6 data 管道:nodes[] + edges[] → layout → node.style → render
+ *
+ * 这两个管道都是"声明式"的——开发者只管描述，不管渲染细节
+ */
+
+/** G2 风格:声明式图表构建器（简化版） */
+interface G2Spec {
+  type: "interval" | "line" | "point";
+  data: Array<Record<string, unknown>>;
+  x?: string;
+  y?: string;
+  color?: string;
+  stack?: boolean;
+  label?: boolean;
+  mark?: { point?: Array<Record<string, unknown>>; line?: Array<Record<string, unknown>> };
+}
+
+function buildG2Spec(
+  data: Array<Record<string, unknown>>,
+  opts: {
+    geom: "interval" | "line" | "point";
+    x?: string;
+    y?: string;
+    color?: string;
+    stack?: boolean;
+    label?: boolean;
+    threshold?: number;
+  }
+): G2Spec {
+  const spec: G2Spec = {
+    type: opts.geom,
+    data,
+    x: opts.x,
+    y: opts.y,
+    color: opts.color,
+    stack: opts.stack,
+    label: opts.label,
+  };
+  if (opts.threshold !== undefined) {
+    spec.mark = {
+      line: [{ y: opts.threshold, label: { text: `阈值 ${opts.threshold}` } }],
+    };
+  }
+  return spec;
+}
+
+/** G6 风格:图数据构建器 */
+interface G6Node {
+  id: string;
+  label: string;
+  risk: "high" | "medium" | "low";
+}
+interface G6Edge {
+  source: string;
+  target: string;
+}
+interface G6GraphData {
+  nodes: G6Node[];
+  edges: G6Edge[];
+}
+
+function buildG6RiskGraph(
+  suspiciousNodes: Array<{ id: string; label: string; risk: "high" | "medium" | "low" }>,
+  relationships: Array<[string, string]>
+): G6GraphData {
+  return {
+    nodes: suspiciousNodes.map((n) => ({ id: n.id, label: n.label, risk: n.risk })),
+    edges: relationships.map(([s, t]) => ({ source: s, target: t })),
+  };
+}
+
+/** ============ 断言验证 ============ */
+export function runAntVTests() {
+  // G2 风格 spec 构建
+  const data = [
+    { category: "周一", qps: 150, api: "A" },
+    { category: "周二", qps: 200, api: "A" },
+    { category: "周一", qps: 80, api: "B" },
+    { category: "周二", qps: 120, api: "B" },
+  ];
+  const spec = buildG2Spec(data, {
+    geom: "interval",
+    x: "category",
+    y: "qps",
+    color: "api",
+    stack: true,
+    label: true,
+    threshold: 180,
+  });
+  console.assert(spec.type === "interval", "G2:geom 应为 interval");
+  console.assert(spec.mark?.line?.length === 1, "G2:threshold 应生成 markLine");
+  console.assert(spec.data.length === 4, "G2:data 应完整传入");
+
+  // G6 风格图数据构建
+  const graph = buildG6RiskGraph(
+    [
+      { id: "u1", label: "用户 A", risk: "high" },
+      { id: "d1", label: "设备 X", risk: "medium" },
+      { id: "ip1", label: "IP .5", risk: "low" },
+    ],
+    [
+      ["u1", "d1"],
+      ["d1", "ip1"],
+      ["u1", "ip1"],
+    ]
+  );
+  console.assert(graph.nodes.length === 3, "G6:应生成 3 个节点");
+  console.assert(graph.edges.length === 3, "G6:应生成 3 条边");
+  console.assert(
+    graph.edges[0].source === "u1" && graph.edges[0].target === "d1",
+    "G6:edge 应保留 source/target 顺序"
+  );
+
+  console.log("✅ AntV G2/G6 数据管道验证通过");
+}
+
+runAntVTests();
+```
+
+> 运行方式：`npx tsx examples/58-03-g2-g6-patterns.ts`。
+
+### 58.3.5 最佳实践
+
+1. **G2 的 encode 管道是"数据驱动"的核心**：G2 图表不像 ECharts 那样每个 series 是独立对象，而是**同一份数据**通过不同 encode 映射到不同视觉通道。这意味着换一个维度分组只要改 `.encode('color', 'newField')` 一行，不用重写整个 series。
+2. **G6 的布局选择**：风控场景常用三种布局：
+   - `force`（力导向）：节点自动排斥 + 边吸引，适合中小型关系图（< 500 节点）
+   - `dagre`（层级）：适合调用链、架构图这种有向无环图
+   - `grid`：适合节点量大（> 1000）时的规整展示
+3. **G6 节点按 risk 动态着色**：`node.style.fill` 支持函数，接收 `d.data` 返回颜色——把 risk 字段直接映射到 fill，不用额外循环。
+4. **G6 WebGL 模式**：`graph.setOptions({ renderer: 'webgl' })` 启用 WebGL 渲染——万级节点图只有 WebGL 才能流畅。代价是 WebGL 不支持部分 CSS 动画，节点样式用 Canvas 2D 风格简化。
+5. **G2/Facet 分面是"小多图"的利器**：风控看板常见需求"按风险等级各画一张折线图"——`chart.facetRow('risk_level')` 一行声明，自动拆成 3 张小图，每张共享 x/y 轴。
+
+---
+
+## 58.4 风控看板组合模式
+
+### 58.4.1 概念解析
+
+JD 要求的"交互式风控看板"不是一张单独的大图表，而是**一个有机组合**——不同形态的图表各自承担不同信息密度：
+
+```mermaid
+flowchart TB
+    A[风控看板布局] --> B[顶部 KPI 卡片<br/>ECharts gauge / stat]
+    A --> C[中部核心图表<br/>ECharts line / bar]
+    A --> D[右侧实时数据列表<br/>虚拟滚动 table]
+    A --> E[底部趋势/分布<br/>ECharts heatmap / pie]
+    A --> F[关联关系图<br/>AntV G6 graph]
+    B & C & D & E & F --> G[统一数据源<br/>WebSocket / 轮询]
+    G --> H[版本守卫<br/>防竞态覆盖]
+```
+
+### 58.4.2 六大核心组件职责
+
+| 组件 | 推荐库 | 数据形态 | 职责 |
+| --- | --- | --- | --- |
+| **KPI 仪表盘 / 数字卡片** | ECharts gauge / stat + Canvas 自绘 | 单值（当前 QPS、今日攻击数） | 第一眼冲击——3 秒内让访客知道系统状态 |
+| **核心趋势折线** | ECharts line（多 series + markLine 阈值） | 时间序列（每分钟/每小时采样点） | 展示"变化"——趋势走向、峰值、是否超阈值 |
+| **分类柱状 / 堆叠** | ECharts bar（stack + markPoint） | 分类统计（攻击类型、区域分布） | 展示"构成"——哪类多、按什么堆叠 |
+| **实时告警列表** | 虚拟滚动 Table（自己实现 / Element Plus） | 高频率事件流 | 展示"细节"——谁、什么时候、什么类型、处理状态 |
+| **热力图 / 分布** | ECharts heatmap / treemap | 多维矩阵（攻击类型 × 时间槽） | 展示"密度"——什么时候最忙、哪里最集中 |
+| **关联关系图** | AntV G6 graph（force layout） | 网络结构（节点 + 边） | 展示"关系"——哪些账号/设备/IP 相互关联 |
+
+### 58.4.3 统一数据源 + 版本守卫
+
+```ts
+// 文件: examples/58-04-dashboard-data-pipeline.ts —— 风控看板数据管道
+
+/**
+ * 统一数据源管道:
+ *  WebSocket / 轮询 → 版本守卫(丢弃过期包) → 归一化 → 分发到各组件
+ *
+ * 关键:所有图表组件都不自己拉数据,全部订阅同一个 DataBus
+ *       好处:① 数据竞态集中在一处解决 ② 一个数据源驱动所有组件
+ */
+
+import { EventEmitter } from "node:events";
+
+interface KPIData {
+  qps: number;
+  attackCount: number;
+  activeUsers: number;
+  timestamp: number;
+  version: number;
+}
+
+interface TrendPoint {
+  time: number;
+  value: number;
+  series: string;
+  version: number;
+}
+
+interface DashboardState {
+  kpi: KPIData | null;
+  trend: TrendPoint[]; // 保留最近 N 个点
+  categories: Array<{ name: string; count: number; version: number }>;
+}
+
+class DashboardDataBus extends EventEmitter {
+  private version = 0;
+  private state: DashboardState = { kpi: null, trend: [], categories: [] };
+  private readonly MAX_TREND_POINTS = 60; // 保留最近 60 个点（1 分钟 × 60 秒）
+
+  /**
+   * 版本守卫核心逻辑:
+   * ① 服务端下发的包都带递增 version
+   * ② 客户端只处理 version > 当前版本的包
+   * ③ version <= 当前版本 → 直接丢弃（乱序到达的包、重连时的旧包）
+   *
+   * 这解决了 WebSocket 重连后"新旧包交错"的竞态问题
+   */
+  handleIncomingPackage<T extends { version: number }>(pkg: T): T | null {
+    if (pkg.version <= this.version) {
+      console.warn(`[DataBus] 丢弃过期包 version=${pkg.version}, 当前=${this.version}`);
+      return null;
+    }
+    this.version = pkg.version;
+    return pkg;
+  }
+
+  /** 更新 KPI */
+  updateKpi(raw: Omit<KPIData, "version"> & { version: number }) {
+    const pkg = this.handleIncomingPackage(raw);
+    if (!pkg) return;
+    this.state.kpi = pkg;
+    this.emit("kpi:update", pkg);
+  }
+
+  /** 追加趋势点 */
+  appendTrend(raw: Omit<TrendPoint, "version"> & { version: number }) {
+    const pkg = this.handleIncomingPackage(raw);
+    if (!pkg) return;
+    this.state.trend.push(pkg);
+    if (this.state.trend.length > this.MAX_TREND_POINTS) {
+      this.state.trend = this.state.trend.slice(-this.MAX_TREND_POINTS);
+    }
+    this.emit("trend:append", pkg);
+  }
+
+  /** 更新分类统计（全量替换） */
+  updateCategories(raw: Array<{ name: string; count: number; version: number }>) {
+    // 找最高 version 作为包的版本
+    const pkgVersion = Math.max(...raw.map((r) => r.version));
+    const verified = this.handleIncomingPackage({ version: pkgVersion });
+    if (!verified) return;
+    this.state.categories = raw;
+    this.emit("categories:update", raw);
+  }
+
+  getState(): Readonly<DashboardState> {
+    return this.state;
+  }
+
+  getVersion(): number {
+    return this.version;
+  }
+}
+
+/** ============ 断言验证 ============ */
+export function runDataBusTests() {
+  const bus = new DashboardDataBus();
+
+  // 正常流:version 递增
+  bus.appendTrend({ time: 1000, value: 10, series: "A", version: 1 });
+  bus.appendTrend({ time: 2000, value: 20, series: "A", version: 2 });
+  bus.appendTrend({ time: 3000, value: 30, series: "A", version: 3 });
+  console.assert(bus.getState().trend.length === 3, "应追加 3 个趋势点");
+  console.assert(bus.getVersion() === 3, "版本应递增到 3");
+
+  // 乱序到达:低 version 包被丢弃
+  let updated = false;
+  bus.once("trend:append", () => (updated = true));
+  bus.appendTrend({ time: 1500, value: 15, series: "A", version: 2 }); // 过期
+  console.assert(!updated, "过期包不应触发事件");
+  console.assert(bus.getState().trend.length === 3, "过期包不应进入 state");
+
+  // KPI 更新 + 过期丢弃
+  let kpiEmitted = 0;
+  bus.on("kpi:update", () => kpiEmitted++);
+  bus.updateKpi({ qps: 500, attackCount: 3, activeUsers: 100, timestamp: Date.now(), version: 4 });
+  bus.updateKpi({ qps: 600, attackCount: 2, activeUsers: 110, timestamp: Date.now(), version: 3 }); // 过期
+  console.assert(kpiEmitted === 1, "KPI 事件应只触发 1 次（过期包丢弃）");
+  console.assert(bus.getState().kpi?.qps === 500, "过期包不应覆盖新值");
+
+  // 趋势点窗口裁剪
+  for (let i = 10; i < 70; i++) {
+    bus.appendTrend({ time: i * 1000, value: i, series: "A", version: i });
+  }
+  console.assert(
+    bus.getState().trend.length <= 60,
+    `趋势点应限制在 60 内, 实际 ${bus.getState().trend.length}`
+  );
+
+  console.log("✅ Dashboard DataBus 版本守卫全部断言通过");
+}
+
+runDataBusTests();
+```
+
+> 运行方式：`npx tsx examples/58-04-dashboard-data-pipeline.ts`。
+
+### 58.4.4 最佳实践
+
+1. **版本守卫是实时看板的第一道防线**：WebSocket 重连时会收到"重连前的旧包 + 重连后的新包"混杂，如果不做版本校验，图表会闪回旧数据再跳回来。41.5 节已有详细说明——本章节把它做成可复用的 DataBus 模式。
+2. **统一数据源原则**：看板上的所有组件（KPI、折线、柱状、告警列表）都只订阅 DataBus，不自己发请求。否则会出现"折线和 KPI 的时间戳差 5 秒"这种数据不一致的问题。
+3. **KPI 数字用自绘 Canvas**：ECharts gauge 做 KPI 数字有点重——一个 `<div class="kpi">` + requestAnimationFrame 的数字动画（每帧 diff 目标值）比 gauge 更轻、更灵活、数字变化更顺滑。
+4. **实时告警列表用虚拟滚动**：告警事件每秒可能几十条，DOM 直塞很快卡死。实现一个简单的虚拟滚动容器（只渲染可视区内的 DOM），就能流畅处理万级告警。
+5. **大数据量时 SVG vs Canvas 决策**：图表元素 < 500 用 SVG（可以点击单个元素、样式好）；> 500 强制 Canvas（渲染性能差一个量级）。ECharts 可以在 options 里用 `renderer: 'canvas'` 强制 Canvas，也可以默认自动切换。
+
+---
+
+## 58.5 图表联动与钻取
+
+### 58.5.1 概念解析
+
+JD 要求的"交互式"风控看板——**交互**不是"可以 tooltip hover"，而是：
+- **联动**：点折线图上的某一天，柱状图自动过滤成那一天的数据
+- **钻取**：点饼图上的"SQL 注入"扇区，跳转到 SQL 注入告警列表详情页
+
+这两件事的底层机制相同：**图表事件 → 提取 params → 过滤/更新其它数据源**。
+
+### 58.5.2 ECharts 事件驱动联动
+
+```ts
+// 在浏览器环境里（伪代码，演示事件管道）
+import * as echarts from 'echarts';
+
+const lineChart = echarts.init(document.getElementById('line'));
+const barChart = echarts.init(document.getElementById('bar'));
+
+// 折线图点击 → 柱状图联动
+lineChart.on('click', (params) => {
+  // params 里包含:seriesName, name（x 轴值）, value, dataIndex 等
+  const clickedDate = params.name; // 如 "2026-10-23"
+  // 从 DataBus 拿这一天的分类数据
+  const dayData = dataBus.getState().categories.filter(
+    (c) => c.date === clickedDate
+  );
+  // 更新柱状图
+  barChart.setOption({
+    xAxis: { data: dayData.map((d) => d.name) },
+    series: [{ data: dayData.map((d) => d.count) }],
+  });
+});
+
+// 饼图点击 → 路由钻取
+pieChart.on('click', (params) => {
+  const attackType = params.name; // 如 "SQL 注入"
+  // Vue Router 跳转
+  router.push({
+    path: '/alerts',
+    query: { type: attackType },
+  });
+});
+```
+
+### 58.5.3 完整代码示例
+
+```ts
+// 文件: examples/58-05-chart-linkage.ts —— 图表联动事件管道逻辑（Node 环境）
+
+type FilterCriteria = Record<string, string | number>;
+
+interface LinkageEvent {
+  source: "line" | "bar" | "pie" | "gauge";
+  action: "click" | "legendselectchanged" | "datazoom";
+  params: {
+    name?: string;
+    value?: unknown;
+    seriesName?: string;
+    dataIndex?: number;
+  };
+  timestamp: number;
+}
+
+/** 联动事件总线 —— 所有图表组件通过它交换过滤条件 */
+class LinkageBus {
+  private filters: Map<string, FilterCriteria> = new Map();
+  private lastEvent: LinkageEvent | null = null;
+
+  /** 图表触发事件 → 更新过滤器 */
+  publish(event: LinkageEvent) {
+    this.lastEvent = event;
+    const filter = this.eventToFilter(event);
+    this.filters.set(event.source, filter);
+    console.log(`[LinkageBus] ${event.source}.${event.action} → filter:`, filter);
+    return this.getMergedFilter();
+  }
+
+  /** 合并所有过滤器 */
+  getMergedFilter(): FilterCriteria {
+    const merged: FilterCriteria = {};
+    for (const f of this.filters.values()) {
+      Object.assign(merged, f);
+    }
+    return merged;
+  }
+
+  /** 事件 → 过滤器的映射规则（按业务定义） */
+  private eventToFilter(event: LinkageEvent): FilterCriteria {
+    switch (event.source) {
+      case "line":
+        if (event.action === "click" && event.params.name) {
+          return { date: event.params.name }; // "2026-10-23"
+        }
+        if (event.action === "legendselectchanged" && event.params.name) {
+          return { series: event.params.name }; // "API-1"
+        }
+        break;
+      case "pie":
+        if (event.action === "click" && event.params.name) {
+          return { attackType: event.params.name }; // "SQL 注入"
+        }
+        break;
+      case "bar":
+        if (event.action === "click" && event.params.name) {
+          return { region: event.params.name }; // "华东"
+        }
+        break;
+    }
+    return {};
+  }
+
+  clearFilter(source: string) {
+    this.filters.delete(source);
+    console.log(`[LinkageBus] 清除 ${source} 的过滤器`);
+  }
+}
+
+/** 模拟:折线图点击日期 → 柱状图联动 */
+function runLinkageDemo() {
+  const bus = new LinkageBus();
+
+  // 1.折线图点击了 "2026-10-23"
+  bus.publish({
+    source: "line",
+    action: "click",
+    params: { name: "2026-10-23", value: 450, seriesName: "API-1", dataIndex: 3 },
+    timestamp: Date.now(),
+  });
+  console.assert(
+    bus.getMergedFilter().date === "2026-10-23",
+    "应包含 date 过滤器"
+  );
+
+  // 2.饼图点击了 "SQL 注入"
+  bus.publish({
+    source: "pie",
+    action: "click",
+    params: { name: "SQL 注入", value: 30 },
+    timestamp: Date.now(),
+  });
+  const merged = bus.getMergedFilter();
+  console.assert(merged.date === "2026-10-23", "应保留 date 过滤器");
+  console.assert(merged.attackType === "SQL 注入", "应包含 attackType 过滤器");
+
+  // 3.柱状图点击了 "华东"
+  bus.publish({
+    source: "bar",
+    action: "click",
+    params: { name: "华东" },
+    timestamp: Date.now(),
+  });
+  const fullFilter = bus.getMergedFilter();
+  console.log("完整过滤条件:", fullFilter);
+  console.assert(
+    Object.keys(fullFilter).length === 3,
+    `应包含 3 个过滤条件, 实际 ${Object.keys(fullFilter).length}`
+  );
+
+  // 4.清除折线的过滤器（用户取消了折线的选择）
+  bus.clearFilter("line");
+  const afterClear = bus.getMergedFilter();
+  console.assert(afterClear.date === undefined, "清除后不应有 date");
+  console.assert(afterClear.attackType === "SQL 注入", "应保留 attackType");
+
+  console.log("✅ 图表联动事件管道验证通过");
+}
+
+runLinkageDemo();
+```
+
+> 运行方式：`npx tsx examples/58-05-chart-linkage.ts`。
+
+### 58.5.4 最佳实践
+
+1. **联动用事件总线，不要直接引用图表实例**：折线图组件不应该持有柱状图的引用——这会造成紧耦合。用一个共享的 LinkageBus（或 Pinia store），各图表 publish 自己的事件，订阅者自己决定要不要响应。
+2. **过滤器要可清除**：点击一次过滤，再点击一次应该恢复——给每个过滤器加个清除按钮或 toggle 逻辑。用户在看板上"连点几下想取消过滤结果发现做不到"是很差的体验。
+3. **钻取用路由 query 参数**：点击饼图"SQL 注入"→ 跳到 `/alerts?type=SQL+注入`。这样刷新页面不丢过滤条件、可以分享带过滤条件的链接——比组件内部状态强很多。
+4. **图例切换也是联动信号**：`chart.on('legendselectchanged')` 监听图例点击——用户隐藏了"API-2"这条线，柱状图也应该隐藏对应的分类。别让 legend 只是装饰。
+5. **datazoom 事件**：ECharts 的 `datazoom` 组件（区域缩放）也会触发事件——用户在折线图上框选了某个时间段，柱状图和告警列表也应该只显示这个时间段的数据。这是高级运维看板才有的体验。
+
+---
+
+## 58.6 自测题
+
+<details>
+<summary><b>1. 【基础】ECharts、AntV G2、AntV G6、D3 分别适合什么场景？各说一个典型项目。</b></summary>
+
+**答案**：
+
+| 库 | 定位 | 典型场景 |
+| --- | --- | --- |
+| **ECharts** | 开箱即用图表库 | 运维监控大盘、报表系统、大屏常规图表（折线/柱/饼/雷达/仪表盘） |
+| **AntV G2** | 数据驱动图表语法 | 需要精细 markPoint/markLine 标注的分析图表、Facet 分面多图 |
+| **AntV G6** | 关系图谱引擎 | 风控账号关联图、网络拓扑图、调用链架构图、组织架构图 |
+| **D3** | 数据驱动底层工具 | 完全自定义图表（日历热力图变体、桑基图自定义）、复杂 GeoJSON 地图可视化 |
+
+</details>
+
+<details>
+<summary><b>2. 【进阶】ECharts 的 markPoint 和 markLine 是用来干嘛的？各写一个运维看板的使用场景。</b></summary>
+
+**答案**：
+
+`markPoint` —— 在图表上标注**点**（位置 + 文本）。运维看板场景：在 QPS 折线图的峰值处标 `{ coord: [maxIdx, maxValue], value: "峰值: 612" }`，让运维一眼看到最高点在哪里。
+
+`markLine` —— 在图表上画**线**（水平线或垂直线）。运维看板场景：在 QPS 折线图上画 `{ yAxis: 500, label: { formatter: "告警阈值" } }`——水平线 y=500 贯穿整个图表，超过红线就是异常。
+
+**完整示例**：
+
+```ts
+series: [{
+  type: 'line',
+  data: [120, 450, 610, 520, 380],
+  markPoint: {
+    data: [{ type: 'max', name: '峰值' }, { type: 'min', name: '谷值' }],
+  },
+  markLine: {
+    data: [{ yAxis: 500, label: { formatter: '⚠️ 告警阈值 500 QPS' } }],
+  },
+}]
+```
+
+ECharts 还支持 `markArea` —— 在一个区间内画半透明区域。运维场景可以用 `{ xAxis: ['02:00', '06:00'], label: { formatter: '夜间低峰' } }` 标出低峰时段。
+
+</details>
+
+<details>
+<summary><b>3. 【进阶】风控看板上的 KPI 卡片（当前 QPS / 今日攻击数）为什么推荐自绘 Canvas 而不是用 ECharts gauge？</b></summary>
+
+**答案**：三个原因：
+
+1. **重量**：一个 KPI 卡片可能 50×300 像素，ECharts gauge 要初始化整个 chart 实例（包含 tooltip/legend/grid 等）——杀鸡用牛刀。
+2. **数字动画**：KPI 卡片的核心是**数字从旧值平滑过渡到新值**（旧值 450 → 新值 520，每帧 +7）。自绘 Canvas 用 requestAnimationFrame 就能实现，ECharts gauge 的 animation 对单个数字做插值非常别扭。
+3. **样式自由度**：KPI 卡片通常有"告警态变红"、"安全态变绿"、"同比箭头涨跌"、"小趋势 sparkline"——Canvas 想画什么画什么，ECharts gauge 的 axisLine/progress 配置能做但很受限。
+
+**实现骨架**：
+
+```ts
+function animateNumber(el: HTMLElement, target: number, duration = 600) {
+  const start = parseFloat(el.textContent || '0');
+  const startTime = performance.now();
+  function step(now: number) {
+    const t = Math.min(1, (now - startTime) / duration);
+    const ease = 1 - Math.pow(1 - t, 3); // easeOutCubic
+    el.textContent = Math.round(start + (target - start) * ease);
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+```
+
+</details>
+
+<details>
+<summary><b>4. 【进阶】实时数据管道为什么需要版本守卫？不用会出什么问题？</b></summary>
+
+**答案**：
+
+**核心问题**：WebSocket / SSE 重连时，服务端可能会"补推"重连期间漏掉的数据——这些数据版本号旧。如果客户端收到包就直接用，新旧包交错会让图表闪回旧数据再跳回来。
+
+**三种竞态场景**：
+1. **重连乱序**：包 version 100 → 103 正常到达，重连后服务端补发 version 101/102/104，客户端可能先收到 104 再收到 101——101 不该覆盖 104。
+2. **历史回放**：有些服务端重连时会推送最近 5 分钟的全量快照，如果客户端不分版本地处理，折线图会回退几分钟再跳回来。
+3. **多 Tab 同步**：不同 Tab 都在拉同一份数据，WebSocket 的 close/reopen 时机不同，可能互相覆盖。
+
+**版本守卫逻辑**（一句话）：维护一个 `maxVersion`，收到包时如果 `pkg.version <= maxVersion` 直接丢弃。
+
+</details>
+
+<details>
+<summary><b>5. 【挑战】写一个联动示例：饼图显示攻击类型分布，点击饼图上的"SQL 注入"→ 右侧告警列表只显示 SQL 注入的告警。</b></summary>
+
+**答案**：
+
+```ts
+// 饼图事件 → 联动告警列表（Vue 3 Composition API + Pinia）
+
+// stores/dashboard.ts
+import { defineStore } from 'pinia';
+
+interface AlertRow {
+  id: string;
+  type: 'SQL 注入' | 'XSS' | '暴力破解' | '其他';
+  time: number;
+  ip: string;
+  userAgent: string;
+}
+
+export const useDashboardStore = defineStore('dashboard', {
+  state: () => ({
+    alerts: [] as AlertRow[],
+    attackTypeFilter: null as string | null, // null = 全部
+  }),
+  getters: {
+    filteredAlerts: (s) =>
+      s.attackTypeFilter
+        ? s.alerts.filter((a) => a.type === s.attackTypeFilter)
+        : s.alerts,
+    pieData: (s) => {
+      // 聚合:按 type 分组计数
+      const map = new Map<string, number>();
+      for (const a of s.alerts) {
+        map.set(a.type, (map.get(a.type) || 0) + 1);
+      }
+      return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
+    },
+  },
+  actions: {
+    setAttackTypeFilter(type: string | null) {
+      // 点击已选中的 → 取消过滤
+      this.attackTypeFilter = this.attackTypeFilter === type ? null : type;
+    },
+    toggleByRouteQuery(queryType: string | undefined) {
+      // 路由变化 → 同步到 store（刷新不丢过滤状态）
+      this.attackTypeFilter = queryType || null;
+    },
+  },
+});
+```
+
+```vue
+<!-- 饼图组件 -->
+<script setup>
+import { useDashboardStore } from '@/stores/dashboard';
+import { useRouter } from 'vue-router';
+
+const store = useDashboardStore();
+const router = useRouter();
+
+function handlePieClick(params: { name: string }) {
+  // 方式 1:只更新 store（当前页联动）
+  store.setAttackTypeFilter(params.name);
+
+  // 方式 2:同步到路由（可刷新/分享链接）
+  router.push({
+    path: router.currentRoute.value.path,
+    query: { ...router.currentRoute.value.query, attackType: params.name },
+  });
+}
+</script>
+```
+
+```vue
+<!-- 告警列表组件 -->
+<script setup>
+import { useDashboardStore } from '@/stores/dashboard';
+
+const store = useDashboardStore();
+// store.filteredAlerts 自动响应 filter 变化
+</script>
+
+<template>
+  <table>
+    <thead>
+      <tr>
+        <th>时间</th>
+        <th>类型</th>
+        <th>IP</th>
+        <th>UA</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr v-for="alert in store.filteredAlerts" :key="alert.id">
+        <td>{{ alert.time }}</td>
+        <td>{{ alert.type }}</td>
+        <td>{{ alert.ip }}</td>
+        <td>{{ alert.userAgent }}</td>
+      </tr>
+    </tbody>
+  </table>
+</template>
+```
+
+</details>
+
+<details>
+<summary><b>6. 【进阶】AntV G6 的关系图怎么做到"点击节点高亮关联节点、灰掉无关节点"？</b></summary>
+
+**答案**：G6 支持自定义节点/边的 state 样式 + graph.setState / graph.setElementState 方法：
+
+```ts
+// 初始化时注册 state 样式
+graph.setOptions({
+  node: {
+    state: {
+      selected: { stroke: '#ff6b6b', lineWidth: 3 },
+      highlight: { stroke: '#6bcb77', lineWidth: 2, fillOpacity: 1 },
+      dimmed: { fillOpacity: 0.2, strokeOpacity: 0.2 },
+    },
+  },
+  edge: {
+    state: {
+      highlight: { stroke: '#6bcb77', lineWidth: 2 },
+      dimmed: { strokeOpacity: 0.1 },
+    },
+  },
+});
+
+// 点击节点 → 高亮关联节点 + 灰掉其它
+graph.on('node:click', (evt) => {
+  const nodeId = evt.target.id;
+  // 获取关联节点（一度邻居）
+  const relatedEdges = graph.getRelatedEdges(nodeId, 'both');
+  const relatedNodeIds = new Set([nodeId]);
+  for (const edge of relatedEdges) {
+    relatedNodeIds.add(edge.source);
+    relatedNodeIds.add(edge.target);
+  }
+
+  // 设置 state:关联节点 → highlight, 其它 → dimmed
+  graph.setElementState(
+    graph.getAllNodes().map((n) => ({
+      id: n.id,
+      state: relatedNodeIds.has(n.id) ? ['highlight'] : ['dimmed'],
+    }))
+  );
+  graph.setElementState(
+    graph.getAllEdges().map((e) => ({
+      id: e.id,
+      state: relatedEdges.includes(e) ? ['highlight'] : ['dimmed'],
+    }))
+  );
+});
+```
+
+核心思路：**state 是声明式的**——不直接改 node.style，而是通过 state 触发样式切换。这样可以随时恢复（graph.setElementState(..., []) 清空 state），不会把样式改乱。
+
+</details>
+
+<details>
+<summary><b>7. 【基础】ECharts 的 setOption 是合并还是覆盖？如何完全重置？</b></summary>
+
+**答案**：
+
+**默认是合并**（merge）。规则：
+- 相同 key → 新值替换旧值（数字、字符串、对象）
+- 数组 → 按索引一对一 merge（不是 append！）——这是最容易踩的坑
+
+```ts
+chart.setOption({
+  xAxis: { data: ['A', 'B', 'C'] }, // 替换旧的 xAxis.data
+  series: [{ data: [1, 2, 3] }], // 替换 series[0].data
+  color: ['red', 'blue'], // 替换整个 color 数组
+});
+// 注意:如果原来有 3 个 series,新的 setOption 只有 1 个 → series[1]、series[2] 保留!
+```
+
+**完全重置**有两种方式：
+
+```ts
+// 方式 1:setOption 第二个参数 = true（notMerge）
+chart.setOption(newFullOption, true);
+
+// 方式 2:先 clear 再 setOption（推荐,语义最清晰）
+chart.clear();
+chart.setOption(newFullOption);
+```
+
+</details>
+
+<details>
+<summary><b>8. 【挑战】一个运维看板需要实时刷新（每秒拉一次），怎么实现"平滑过渡"而不是"每秒闪一下"？</b></summary>
+
+**答案**：三层叠加解决：
+
+**第一层：ECharts 内置 animationDurationUpdate**
+```ts
+chart.setOption({
+  animationDurationUpdate: 500, // 500ms 过渡动画
+  animationEasingUpdate: 'cubicOut', // 先快后慢的 easing
+  series: [{
+    type: 'line',
+    animation: false, // 初始渲染不播动画（避免首屏闪烁）
+  }],
+});
+```
+
+**第二层：数据管道平滑（版本守卫 + 追加式更新）**
+- 不要每秒 `chart.setOption({ series: [...] })` 全量替换——每次都是"拆旧图→重新画"，很容易闪
+- 而是：趋势图用 `appendData` API 逐点追加，KPI 数字用自绘 Canvas 的 rAF 插值，分类图只变 `data` 数组（setOption 的 merge 会让 animationDurationUpdate 接管过渡）
+
+```ts
+// 趋势图:用 appendData 代替 setOption
+chart.appendData({
+  seriesIndex: 0,
+  data: [newPoint], // 追加单个新点
+});
+// 这会触发 ECharts 内部的平滑追加动画,不闪
+```
+
+**第三层：防抖 resize**
+- 每秒更新时不要触发 resize
+- Tab 切换回来时 resize（浏览器可能缩放 canvas）
+- resize 加 200ms 防抖
+
+</details>
+
+---
+
+## 58.7 本章避坑清单
+
+| # | 坑 | 后果 | 正确做法 |
+| --- | --- | --- | --- |
+| 1 | **ECharts setOption 数组按索引 merge** | 原 3 个 series 只剩 1 个 → 另外 2 个没被删除 | 完整覆盖用 `chart.clear()` + 新 options，或显式传 `notMerge: true` |
+| 2 | **图表 resize 不防抖** | 窗口 resize 高频触发 → 反复重绘掉帧 | `debounce(chart.resize, 200)` |
+| 3 | **G6 力导向布局节点乱飞** | 节点在不停抖动/发散（力参数不合适） | `force.repulsion` 设置节点间斥力（一般 300~1000）；大图调小 iterations 让布局更快收敛 |
+| 4 | **趋势图每秒 setOption 全量替换** | 图表每秒重新构建 → 闪烁、性能差 | 用 `chart.appendData()` 逐点追加 + animationDurationUpdate 做过渡 |
+| 5 | **饼图点击不做 toggle** | 点一次过滤了，用户想取消不知道怎么操作 | 点已选中的 = 取消过滤；或在 UI 上加"清除过滤"按钮 |
+| 6 | **G6 忽略 WebGL 渲染** | 万级节点图用 Canvas 2D → 卡死 | `graph.setOptions({ renderer: 'webgl' })` |
+| 7 | **ECharts 事件监听的是旧实例** | `init` 后监听事件但实例被 clear 重建 → 事件不触发 | `chart.on()` 注册在 init 后的那个 chart 实例上；clear 后要重新 on |
+| 8 | **G2 encode 不是覆盖而是增量** | 连续调两次 `.encode('x', ...)` 以为第二次生效 → 实际第一次生效 | `.encode('x', 'field1').encode('x', 'field2')` 后者覆盖前者（因为是链式调用的同一对象）；但 spec 对象传入后 chart.data() 才是最终数据源 |
+| 9 | **大数组传给 ECharts 不做 large 模式** | 10 万点折线图卡到不能动 | `series[0].large: true` + `largeThreshold: 2000` + `progressive: 1000` + `progressiveThreshold: 20000`（见 17.2） |
+| 10 | **KPI 数字直接改 DOM textContent** | 数字从 450 跳到 520 硬切 → 视觉突兀 | 用 requestAnimationFrame 做数字插值动画（600ms easeOutCubic） |

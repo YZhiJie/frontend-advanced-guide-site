@@ -1,0 +1,32 @@
+<!-- 文件: examples/12-09-content-visibility.html —— [浏览器] 长页面渲染提速 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        .section {
+            /* 视口外的 section 跳过布局与绘制;滚动接近时才渲染 */
+            content-visibility: auto;
+            /* 关键:给"未渲染状态"一个估算高度,保证滚动条稳定(防 CLS) */
+            contain-intrinsic-size: auto 500px;
+            margin: 8px 0;
+            padding: 16px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 100 个大段落:首屏渲染成本从 100 个 section 降到 ~3 个 -->
+    <div id="app"></div>
+    <script>
+        const app = document.getElementById('app');
+        for (let i = 0; i < 100; i++) {
+            const section = document.createElement('section');
+            section.className = 'section';
+            section.innerHTML = `<h2>章节 ${i + 1}</h2><p>${'很长的内容...'.repeat(200)}</p>`;
+            app.appendChild(section);
+        }
+    </script>
+</body>
+</html>

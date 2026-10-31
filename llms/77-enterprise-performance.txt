@@ -1,0 +1,627 @@
+# 第七十七部分 · 企业级性能优化专题——GPU 加速、卡顿治理与白屏兜底（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/77-enterprise-performance
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第七十七部分 · 企业级性能优化专题——GPU 加速、卡顿治理与白屏兜底
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第七十六部分 · 移动办公岗位面试专题](./76-mobile-office-interview.md)｜关联章节：[第三部分 · 工程化与性能体系](./03-engineering.md) · [第十部分 · 浏览器渲染性能](./10-browser-rendering.md) · [第十二部分 · CSS 性能](./12-css-engineering.md#_12-4-css-性能优化) · [第二十五部分 · 生产可用 Web API](./25-prod-ready-web-apis.md#_25-9-性能度量) · [第四十五部分 · 前端高级实用技巧](./45-frontend-advanced-tips.md) · [第五十九部分 · 监控与可观测性](./59-monitoring-observability.md) · [第六十部分 · 浏览器兼容性](./60-browser-compatibility.md) · [第六十九部分 · 埋点体系](./69-frontend-tracking.md) · [第四十六部分 · 错误捕获](./46-error-handling.md#_46-5-框架与特殊运行时的错误边界)
+
+> 💡 **本章特色**：前六册分别讲了「怎么量」「怎么画」「怎么防错」，这一册把它们收束成**企业级性能治理的完整闭环**。不重复 API 手册，聚焦四件真正会出事的事：① GPU 加速的**成本边界**——合成层不是越多越好，一层全屏纹理就是 30MB 显存；② 卡顿的**分类归因**——加载卡、水合卡、输入卡、滚动卡是四种病，药方完全不同；③ 白屏的**检测与兜底**——从「用户截图反馈」升级为「探针自动发现 + 一次性恢复 + 降级页」；④ 企业级**闸门与灰度**——让性能不回退靠制度和流水线，而不是靠自觉。
+
+## 本部分内容
+
+- [77.1 企业级性能度量：指标口径、RUM 与预算门禁](#_77-1-企业级性能度量-指标口径-rum-与预算门禁)
+- [77.2 GPU 加速与合成层：硬件加速的成本边界](#_77-2-gpu-加速与合成层-硬件加速的成本边界)
+- [77.3 页面加载卡顿：分类、归因与帧预算](#_77-3-页面加载卡顿-分类-归因与帧预算)
+- [77.4 白屏治理：检测、兜底与恢复](#_77-4-白屏治理-检测-兜底与恢复)
+- [77.5 企业级性能闭环：预算门禁、灰度观测与劣化归因](#_77-5-企业级性能闭环-预算门禁-灰度观测与劣化归因)
+- [77.6 自测题](#_77-6-自测题)
+- [77.7 本章避坑清单](#_77-7-本章避坑清单)
+
+```mermaid
+flowchart LR
+    A[77.1 度量<br/>分档 p75 + 预算] --> B[77.2 渲染<br/>GPU 合成层预算]
+    A --> C[77.3 卡顿<br/>长任务归因]
+    B --> C
+    C --> D[77.4 白屏<br/>探针 + 兜底]
+    D --> E[77.5 闭环<br/>门禁 · 灰度 · 复盘]
+    E -->|劣化回灌| A
+```
+
+---
+
+## 77.1 企业级性能度量：指标口径、RUM 与预算门禁
+
+### 概念解析
+
+性能优化最大的浪费，是**用实验室分数替真实用户做决定**。Lighthouse 跑出 98 分，低端安卓上的真实用户依然可能在白屏前等 6 秒。企业级度量必须同时握住两套事实：
+
+| 维度 | 实验室（Lab） | 真实用户（Field / RUM） |
+| --- | --- | --- |
+| 数据来源 | Lighthouse / Playwright / Performance 面板 | 线上 `web-vitals` + `PerformanceObserver` 上报 |
+| 优点 | 可复现、可对比、能定位到代码 | 覆盖真实设备、网络、地域、版本 |
+| 盲区 | 设备与网络是模拟的，长尾问题看不见 | 噪声大，需要分桶与分位数 |
+| 用途 | PR 门禁、单次优化验证 | 发布决策、告警、劣化归因 |
+
+**指标口径先统一，再谈优化。** 同一个「首屏慢」，产品、前端、后端可能各自有一套算法：产品看「页面打开到看见内容」，前端看 LCP，后端看 TTFB。企业级的第一条纪律是建立**指标字典**——每个指标写清定义、采集方式、统计口径（p75 还是均值）、分桶维度、责任团队，否则看板越多，争论越多。
+
+Core Web Vitals 是公共基线，但不是全部：
+
+| 指标 | 回答的问题 | 优秀线 | 常见误用 |
+| --- | --- | --- | --- |
+| LCP | 首屏主要内容多快出现 | ≤ 2.5s | 只看 LCP 不看 FCP，骨架屏把 LCP「优化」得很好看 |
+| INP | 交互后多久有可见反馈 | ≤ 200ms | 用 FID 代替 INP，漏掉会话中最差的那次交互 |
+| CLS | 内容是否乱跳 | ≤ 0.1 | 只修图片占位，忽略字体切换与异步插入 |
+| TBT | 主线程被长任务阻塞多久 | 实验室参考 | 拿 TBT 当线上指标，忽略真实输入路径 |
+| TTFB | 首字节多快到 | ≤ 800ms | 前端独自背锅，实际是服务端/网关/缓存问题 |
+
+**为什么用 p75 而不是平均值。** 平均值会被高端机与好网络稀释：100 个用户里 75 个 1.2 秒、25 个 8 秒，均值可能只有 2.9 秒，看起来「还行」，但四分之一用户在骂人。p75 回答的是「大多数用户」的体验，p95 用来盯长尾。企业级看板应默认展示 p75，并按**设备档位、网络类型、地域、版本、渠道**分桶——不分桶的均值几乎没有决策价值。
+
+**性能预算（Performance Budget）** 是把体验翻译成可执行的数字：首屏 JS 不超过多少 KB、关键页 LCP 不超过多少毫秒、首次请求数不超过多少个。预算必须进 CI，否则它只是文档里的一句愿望。完整的闸门有两道：
+
+1. **绝对预算**：超过阈值直接失败，防止「本来就慢」的页面继续上线；
+2. **相对基线**：与上一个稳定版本比，回退超过容忍度即失败，防止「这版悄悄变慢」。
+
+低端机的预算要**更严而不是更松**：它的 CPU 更慢、内存更小、GPU 填充率更低，同样的 300KB JS 在高端机上无感，在低端机上就是秒级白屏。
+
+### 可运行代码示例
+
+下面的核心逻辑来自 [77-01-perf-budget.ts](./examples/77-01-perf-budget.ts)：按档位定义预算、用 nearest-rank 算 p75、同时做绝对与回归两类判定。
+
+```typescript
+// 文件: src/perf/budget-gate.ts —— 预算门禁核心（完整可运行版见 examples/77-01-perf-budget.ts）
+
+type Tier = 'high' | 'mid' | 'low';
+
+interface Budget {
+    lcpMs: number;
+    inpMs: number;
+    cls: number;
+    tbtMs: number;
+    initialJsKb: number;
+}
+
+// 低端机预算更严：CPU/GPU/内存都更紧张，不能用高端机口径糊弄
+const BUDGETS: Record<Tier, Budget> = {
+    high: { lcpMs: 2000, inpMs: 150, cls: 0.08, tbtMs: 200, initialJsKb: 300 },
+    mid:  { lcpMs: 2500, inpMs: 200, cls: 0.10, tbtMs: 300, initialJsKb: 250 },
+    low:  { lcpMs: 3500, inpMs: 300, cls: 0.15, tbtMs: 450, initialJsKb: 180 },
+};
+
+/** nearest-rank 分位数：小样本也能算，结果一定是真实出现过的样本 */
+function percentile(values: number[], p: number): number {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const rank = Math.ceil((p / 100) * sorted.length) - 1;
+    return sorted[Math.max(0, Math.min(sorted.length - 1, rank))];
+}
+
+// 两道闸门：绝对预算防「本来慢」，回归容忍防「这版变慢」
+function gate(current: number, budget: number, baseline: number, tolerance: number) {
+    if (current > budget) return { pass: false, kind: 'budget' as const };
+    if (current > baseline * (1 + tolerance)) return { pass: false, kind: 'regression' as const };
+    return { pass: true, kind: 'ok' as const };
+}
+```
+
+> 运行方式：`npx tsx examples/77-01-perf-budget.ts`。输出分档 p75 汇总、违规明细与发布闸门结论；脚本内置硬断言，聚合或判定逻辑写错会直接红。
+
+### 最佳实践
+
+- ✅ **先建字典再建看板**：指标定义、采集方式、统计口径、责任团队四件事写进同一份文档，避免「同名不同义」；
+- ✅ **默认 p75，长尾看 p95**：同时观察 p99 只用于发现极端设备问题，不用于日常考核；
+- ✅ **必须分桶**：设备档位、网络、地域、版本、渠道至少五维，否则均值会骗人；
+- ✅ **预算进 CI**：绝对预算 + 基线回归双闸门，低端机档位单独设线；
+- ⚠️ 不要拿实验室分数当发布依据——实验室只能证明「这次改动有效」，不能证明「线上用户满意」；
+- ⚠️ 不要只看均值与总分：一个 98 分的 Lighthouse 报告，可能掩盖 20% 低端机用户的 8 秒白屏。
+
+---
+
+## 77.2 GPU 加速与合成层：硬件加速的成本边界
+
+### 概念解析
+
+浏览器的渲染流水线可以简化成：**DOM/CSSOM → 样式计算 → 布局（Layout）→ 绘制（Paint）→ 光栅化（Raster）→ 合成（Composite）**。GPU 真正负责的是后两步：把绘制指令光栅化成纹理，再按图层合成上屏。所以「GPU 加速」的本质不是「让 JavaScript 变快」，而是**把某些变化从布局/绘制阶段下移到合成阶段**。
+
+一个元素被提升为**合成层**之后，它拥有独立的纹理；当只改变 `transform` / `opacity` 时，浏览器可以复用已有纹理，只做矩阵变换与透明度混合，跳过 Layout 与 Paint。这正是「动画只动 transform/opacity」的底层原因。
+
+常见的合成层创建条件（不同引擎略有差异）：
+
+| 触发条件 | 典型写法 | 说明 |
+| --- | --- | --- |
+| 3D 变换 | `translate3d()` / `translateZ(0)` | 最常见的「强制提升」手法 |
+| 动画相关属性 | `will-change: transform/opacity` | 只是**提示**，是否提升由引擎决定 |
+| 滤镜 | `filter` / `backdrop-filter` | 需要离屏渲染，通常自动成层 |
+| 视频 / Canvas / WebGL | `<video>`、`<canvas>` | 本身就有独立绘制表面 |
+| 固定定位 / 重叠裁剪 | `position: fixed`、`overflow: hidden` 等 | 特定条件下提升 |
+
+**合成层不是免费午餐。** 每层都要一张 RGBA 纹理，显存成本约为：
+
+```text
+显存 ≈ 逻辑宽 × DPR × 逻辑高 × DPR × 4 字节
+```
+
+一块 1920×1080 的全屏层在 DPR=2 时需要 `1920×2 × 1080×2 × 4 ≈ 31.6MB`，已经超过很多低端机的单层承受范围。合成层过多的代价包括：
+
+- **显存暴涨**：移动端 GPU 内存与系统共享，超限会触发纹理淘汰甚至整页崩溃；
+- **GPU 带宽与填充率吃紧**：层数越多，合成阶段要混合的表面越多，低端机直接掉帧；
+- **overdraw 增加**：多层重叠时，同一像素被反复写入；
+- **首帧更慢**：提升层需要先分配纹理并光栅化，动画还没开始就先卡一下。
+
+因此正确的问法不是「要不要 GPU 加速」，而是「**这个动画值不值得为它付出多少显存与填充率**」。
+
+`will-change` 的正确用法是**短时提示**，不是常驻声明：
+
+```css
+/* 文件: src/styles/carousel.css —— will-change 生命周期示范 */
+
+/* ❌ 常驻：全站每个卡片都提前建层，内存直接翻倍 */
+.card { will-change: transform; }
+
+/* ✅ 只在动画期间提示：动画开始前加类，animationend 后移除 */
+.carousel-item.is-animating {
+    will-change: transform;
+    transform: translate3d(0, 0, 0);
+    transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ✅ 滤镜类动画在低端机上应直接降级为静态遮罩 */
+@media (max-width: 768px) {
+    .hero-blur { backdrop-filter: none; background: rgba(0, 0, 0, 0.72); }
+}
+```
+
+**GPU 加速在 Canvas 世界还有另一套账。** Canvas 2D 的绘制未必跑在 GPU 上；`getImageData` 会强制同步回读，可能把 GPU 管线打断。真正的加速路径是：
+
+- 大数据量、粒子、复杂图形 → **WebGL**（或 Three.js 等封装）；
+- 渲染循环挤占主线程 → **OffscreenCanvas + Worker**（见 [18.2.10](./18-worker-messaging.md#_2-10-offscreencanvas-把渲染搬进-worker)）；
+- 图片解码与缩放 → `createImageBitmap` 在 Worker 中完成，避免主线程解码卡顿。
+
+### 可运行代码示例
+
+下面的决策模型来自 [77-02-gpu-layer-budget.ts](./examples/77-02-gpu-layer-budget.ts)：先算显存，再看动画属性是否真的走合成，最后用「时长 / 单层上限 / 层总量」三道门决定是否提升。
+
+```typescript
+// 文件: src/perf/layer-budget.ts —— 合成层提升决策（完整版见 examples/77-02-gpu-layer-budget.ts）
+
+/** RGBA8888：每像素 4 字节；DPR=2 时物理像素是逻辑像素的 4 倍 */
+function layerMemoryMb(width: number, height: number, dpr: number): number {
+    const bytes = width * dpr * height * dpr * 4;
+    return Math.round((bytes / 1024 / 1024) * 100) / 100;
+}
+
+type AnimationCost = 'composite' | 'paint' | 'layout';
+
+/** 只有 transform / opacity 真正走合成，其余属性仍要绘制甚至重排 */
+function classify(prop: string): AnimationCost {
+    if (prop === 'transform' || prop === 'opacity') return 'composite';
+    if (prop === 'filter' || prop === 'backdrop-filter' || prop === 'box-shadow') return 'paint';
+    return 'layout';
+}
+
+const LAYER_LIMIT = { high: 16, low: 8 }; // 单层显存上限（MB）
+const MAX_LAYERS = 12;                    // 页面合成层总量上限
+
+function shouldPromote(input: {
+    width: number; height: number; dpr: number; durationMs: number;
+    property: string; existingLayers: number; tier: 'high' | 'low';
+}) {
+    const memoryMb = layerMemoryMb(input.width, input.height, input.dpr);
+    if (classify(input.property) === 'layout') return { promote: false, reason: '重排属性，提升无效' };
+    if (input.durationMs > 2000) return { promote: false, reason: '动画过长，应短时启停' };
+    if (memoryMb > LAYER_LIMIT[input.tier]) return { promote: false, reason: '单层显存超限' };
+    if (input.existingLayers >= MAX_LAYERS) return { promote: false, reason: '层总量超限' };
+    return { promote: true, memoryMb, reason: '面积可控 + 合成属性 + 短时动画' };
+}
+```
+
+> 运行方式：`npx tsx examples/77-02-gpu-layer-budget.ts`。示例对 6 组真实风格动画计划逐个决策，并断言「全屏大层被拒」「top 动画提升无效」「低端机滤镜降级」等关键结论。
+
+### 最佳实践
+
+- ✅ **动画只碰 `transform` 与 `opacity`**：这是唯一能稳定跳过 Layout/Paint 的组合，其余属性再「加 GPU」也救不了；
+- ✅ **`will-change` 按需启停**：交互/动画开始时添加，`animationend` / `transitionend` 后移除，禁止全站常驻；
+- ✅ **按显存做预算**：单层与总层数都设上限，移动端优先看总面积而不是层数；
+- ✅ **滤镜类效果分档降级**：`backdrop-filter`、大面积 `box-shadow`、模糊动画在低端机直接切静态样式；
+- ✅ **Canvas 选对后端**：万级图元上 WebGL，主线程渲染循环搬 OffscreenCanvas，图片解码用 `createImageBitmap`；
+- ⚠️ 不要把 `translateZ(0)` 当万能药：它确实能强制成层，但在部分 GPU 上会导致文字模糊，且显存成本照付；
+- ⚠️ 不要用 DevTools 的 FPS 仪表当作唯一证据：它只说明「当前帧率」，不说明显存是否已经逼近上限。
+
+---
+
+## 77.3 页面加载卡顿：分类、归因与帧预算
+
+### 概念解析
+
+「卡顿」是一个被滥用的词。用户说卡，可能指四件完全不同的事，归因路径与修复手段也完全不同：
+
+| 卡顿类型 | 发生时段 | 用户感受 | 主因 | 首选药方 |
+| --- | --- | --- | --- | --- |
+| 加载卡顿 | 首屏 0~3s | 白屏、点不动 | JS 解析执行、CSS 阻塞、请求瀑布 | 代码分割、关键 CSS、预连接、SSR 流式 |
+| 水合卡顿 | 首屏 HTML 已显示后 | 看得到但点不动 | 框架同步水合整棵组件树 | 收紧客户端边界、组件级懒水合、Islands |
+| 输入卡顿 | 点击/输入后 | 按了没反应，随后一次性爆发 | 事件处理里的长任务、同步请求、复杂计算 | 任务切片、乐观更新、Worker |
+| 滚动/动画卡顿 | 滚动、拖拽、图表刷新 | 掉帧、抖动 | 布局抖动、非合成属性动画、重绘面积大 | 虚拟列表、rAF 合并、transform、增量渲染 |
+
+**帧预算是最硬的尺子。** 60Hz 屏幕每帧只有约 **16.7ms**，120Hz 只有 **8.3ms**。这 16.7ms 要同时容纳样式、布局、绘制、合成与 JavaScript。一个 100ms 的长任务会占掉 6 帧，用户看到的就是明显顿挫。长任务（Long Task）定义为超过 50ms 的主线程任务，TBT（Total Blocking Time）则是所有长任务超出 50ms 部分之和。
+
+**INP 的三段拆解**比单看一个数字更有用：
+
+```text
+INP = 输入延迟（排队等主线程空闲）
+    + 处理时长（事件回调与框架更新）
+    + 呈现延迟（样式/布局/绘制到下一帧）
+```
+
+- 输入延迟高 → 主线程被别的长任务占着，要切片或让路；
+- 处理时长高 → 事件回调太重，要减少同步计算或搬 Worker；
+- 呈现延迟高 → 更新触发了大范围布局/绘制，要缩小更新范围或改合成属性。
+
+**布局抖动（Layout Thrashing）** 是最隐蔽的一类。读写交替会强制同步布局：
+
+```javascript
+// ❌ 每次循环都「写样式 → 读几何 → 再写」，每轮都触发一次强制同步布局
+for (const el of items) {
+    el.style.width = el.offsetWidth + 10 + 'px';
+}
+
+// ✅ 先批量读，再批量写：把 N 次强制布局压成 1 次
+const widths = items.map((el) => el.offsetWidth);
+items.forEach((el, i) => { el.style.width = widths[i] + 10 + 'px'; });
+```
+
+**归因五步法**（企业级排查 SOP）：
+
+1. **复现**：明确设备档位、网络、路由、账号与数据量，别拿高配开发机下结论；
+2. **录制**：Performance 面板录制完整操作，勾选 Screenshots 与 Memory；
+3. **分轨**：先看 Main 轨道有无 >50ms 长任务，再看 Compositor / GPU 轨道是否掉帧；
+4. **定位**：Bottom-Up 按自身耗时排序找热点函数，Call Tree 看调用链，Layers 看层爆炸；
+5. **验证**：修复后同设备同网络复测，指标回落且无新长任务才算完成。
+
+低端机是卡顿的放大器。企业级做法是按设备档位**分级降级**：低端机减少动画、关闭毛玻璃、缩短列表首屏渲染条数、图表降采样、非关键脚本延后加载，而不是让所有设备跑同一套最重体验。
+
+### 可运行代码示例
+
+下面的分类器来自 [77-03-jank-classifier.ts](./examples/77-03-jank-classifier.ts)：用时间窗（水合窗、输入窗、滚动窗）与任务来源把长任务归类，算 TBT 与掉帧，再按「感知程度 × 修复成本」排序。
+
+```typescript
+// 文件: src/perf/jank-classifier.ts —— 长任务归因（完整版见 examples/77-03-jank-classifier.ts）
+
+type Category = 'load-parse' | 'hydration' | 'input-response'
+              | 'scroll-layout' | 'layout-thrash' | 'gc';
+
+interface LongTask { start: number; duration: number; source: 'script' | 'layout' | 'style' | 'gc'; }
+
+const FRAME_BUDGET = 1000 / 60; // 60Hz ≈ 16.7ms
+
+/** TBT：所有 >50ms 长任务超出 50ms 的部分之和 */
+function totalBlockingTime(tasks: LongTask[]): number {
+    return tasks.reduce((sum, t) => sum + Math.max(0, t.duration - 50), 0);
+}
+
+/** 掉帧估算：按帧预算折算，一个长任务会占满多少帧 */
+function droppedFrames(tasks: LongTask[]): number {
+    return tasks.reduce((sum, t) => sum + Math.floor(t.duration / FRAME_BUDGET), 0);
+}
+
+function classify(task: LongTask, markers: {
+    hydrationStart?: number; inputs?: number[]; scroll?: { start: number; end: number };
+}): Category {
+    // 输入窗优先：输入后 500ms 内的长任务，用户会直接归因到「点了没反应」
+    if (markers.inputs?.some((t) => task.start >= t && task.start <= t + 500)) return 'input-response';
+    if (markers.scroll && task.start >= markers.scroll.start && task.start <= markers.scroll.end) return 'scroll-layout';
+    if (markers.hydrationStart !== undefined
+        && task.start >= markers.hydrationStart
+        && task.start <= markers.hydrationStart + 2000) return 'hydration';
+    if (task.source === 'gc') return 'gc';
+    if (task.source === 'layout') return 'layout-thrash';
+    return 'load-parse';
+}
+```
+
+> 运行方式：`npx tsx examples/77-03-jank-classifier.ts`。示例输出一张「长任务 → 分类 → 修复优先级」表，并断言 TBT/掉帧/INP 近似值以及各时间窗归类结果。
+
+### 最佳实践
+
+- ✅ **先分类再开药**：加载卡、水合卡、输入卡、滚动卡分别处理，别用骨架屏掩盖所有问题；
+- ✅ **任务切片**：超过 50ms 的同步计算用 `scheduler.yield()`（降级 `setTimeout(0)`）或直接搬 Worker；
+- ✅ **读写分离**：几何读取批量前置，样式写入批量后置，杜绝循环内强制同步布局；
+- ✅ **缩小更新范围**：列表只更新变化项，图表用增量追加而不是全量 `setOption`；
+- ✅ **低端机降级**：动画、毛玻璃、图表精度、首屏条数按档位下探；
+- ⚠️ 不要用「加个 loading」当性能优化：它改善感知，不减少主线程阻塞；
+- ⚠️ 不要在滚动/输入回调里做同步布局读取：`offsetTop`、`getBoundingClientRect` 都是强制布局触发器。
+
+---
+
+## 77.4 白屏治理：检测、兜底与恢复
+
+### 概念解析
+
+白屏是前端事故里最伤用户信任的一种：页面「打开了」，但什么都没出现。企业级治理不能依赖用户截图，必须把白屏变成**可检测、可恢复、可告警**的工程问题。
+
+**先分清六类成因**，否则兜底方案会打错靶：
+
+| 成因 | 典型现象 | 根因 | 防线 |
+| --- | --- | --- | --- |
+| 资源 404 | 页面骨架都没有，控制台 chunk 报错 | 发布时 HTML 与 CDN chunk 不同步、子路径 base 配错 | 发布顺序、chunk 重试、缓存头 |
+| JS 语法/运行时错误 | 根节点为空，`window.onerror` 有记录 | 旧内核不支持的语法、顶层代码抛错 | browserslist + polyfill、错误边界、全局兜底 |
+| CSS 阻塞 | 长时间纯白，Network 里 CSS 未完成 | `@import` 串行、超大样式表、字体阻塞 | 关键 CSS 内联、非关键样式异步 |
+| 配置缺失 | 渲染到一半停住，控制台 `undefined` | 运行时配置字段缺失、环境变量未注入 | 启动期 schema 校验 + 默认值 |
+| 兼容性 | 仅特定机型/WebView 白屏 | 国产 ROM WebView 被替换、双核浏览器切内核 | 特性探测、内核分桶告警、降级包 |
+| 渲染崩溃 | 首屏后整块消失 | 组件渲染抛错、水合失败、SSR 流中断 | 按业务区块的错误边界 + 最小兜底 UI |
+
+**三层防线**是企业级白屏治理的标准结构：
+
+1. **预防**：关键资源预加载、脚本 `defer/module`、配置校验、`base` 对齐、按浏览器基线转译+polyfill；
+2. **检测**：独立于主包的**白屏探针**在首屏后 3~5 秒检查「是否真的有内容」；
+3. **恢复**：严格分级的恢复动作——重试资源 → 自动刷新一次 → 兜底页，禁止无限刷新。
+
+**检测的关键是防误报。** 以下情况都不是白屏，探针必须先排除：
+
+- 骨架屏正在显示（说明应用还活着，只是数据没到）；
+- 业务允许的合法空态（「暂无数据」「无权限」）；
+- 登录跳转、维护页、A/B 实验变体；
+- 极慢网络下尚未超过超时阈值。
+
+推荐的多信号判定：
+
+```text
+白屏 = 关键内容缺失（根节点为空 或 关键业务节点不存在）
+     且（始终没有 FCP 或 FCP 超过 5s
+         或 捕获到渲染期未处理错误）
+```
+
+只满足其中一项时，最多判「疑似」并上报，不要打扰用户刷新。
+
+**主包挂了，主包里的探针也挂了。** 这是白屏检测的经典悖论。企业级做法是把 watchdog 做成**独立内联脚本**（尽量小、无依赖、在 `<head>` 里先于业务包执行）：
+
+- 定时检查根节点子节点数与关键选择器；
+- 监听 `window.onerror` / `unhandledrejection` / 资源 `error` 事件（捕获阶段）；
+- 超时后通过 `navigator.sendBeacon` 上报，不依赖业务框架与请求库；
+- 同时配套**服务端/边缘合成监控**（定时用无头浏览器访问关键路由），覆盖「脚本完全没执行」的极端情况。
+
+**恢复动作必须幂等且防循环**：
+
+| 动作 | 适用场景 | 约束 |
+| --- | --- | --- |
+| `retry-chunk` | 资源加载失败 | 同一会话最多 1 次，成功则继续 |
+| `reload-once` | 版本/缓存不一致导致的疑似白屏 | `sessionStorage` 标记 + 时间戳，最多 1 次 |
+| `fallback` | 刷新后仍白屏、渲染崩溃 | 展示极简兜底页（静态 HTML，不依赖主包） |
+| `report-only` | 仅单一异常信号 | 只上报，不改变用户页面 |
+
+**白屏率**是治理的核心指标：
+
+```text
+白屏率 = 判定为白屏的会话数 / 总会话数（按版本、渠道、机型、网络分桶）
+```
+
+告警阈值建议按业务分级：核心交易页 5 分钟内白屏率 > 0.5% 即 P0；内容页 > 2% 触发 P1。没有分桶的白屏率同样会骗人——某个老旧 WebView 渠道的白屏可能被大盘稀释成 0.1%。
+
+**灰度发布是最后一道保险。** 新版本按 1% → 10% → 50% → 100% 放量，每一档对比白屏率、LCP p75、INP p75 与错误率；任一指标显著劣化立即回滚。回滚要能**秒级**生效（CDN 版本切换或网关开关），而不是重新构建。
+
+### 可运行代码示例
+
+下面的状态机来自 [77-04-blank-screen-guard.ts](./examples/77-04-blank-screen-guard.ts)：多信号判定 + 三级恢复 + 会话级防循环。
+
+```typescript
+// 文件: src/perf/blank-guard.ts —— 白屏守卫状态机（完整版见 examples/77-04-blank-screen-guard.ts）
+
+interface Signals {
+    fcpMs?: number;              // 首次内容绘制；undefined = 从未绘制
+    rootChildCount: number;      // 根容器子节点数
+    keyNodePresent: boolean;     // 关键业务节点是否存在
+    runtimeError: boolean;
+    chunkError: boolean;
+    skeletonVisible: boolean;    // 骨架屏可见 = 正常加载中
+    allowEmptyState: boolean;    // 合法空态
+    reloadedThisSession: boolean;
+    chunkRetryCount: number;
+}
+
+const FCP_TIMEOUT_MS = 5000;
+const MAX_CHUNK_RETRY = 1;
+
+function evaluate(s: Signals) {
+    // 先排除误报：骨架屏与合法空态都不算白屏
+    if (s.skeletonVisible) return { blank: false, action: 'healthy' as const };
+    if (s.allowEmptyState) return { blank: false, action: 'healthy' as const };
+
+    const noPaint = s.fcpMs === undefined || s.fcpMs > FCP_TIMEOUT_MS;
+    const noContent = s.rootChildCount === 0 || !s.keyNodePresent;
+    const confirmed = noContent && (noPaint || s.runtimeError);
+
+    // 恢复动作严格分级，顺序不可颠倒
+    if (s.chunkError && s.chunkRetryCount < MAX_CHUNK_RETRY) return { blank: confirmed, action: 'retry-chunk' as const };
+    if (confirmed && s.runtimeError) return { blank: true, action: 'fallback' as const };
+    if (confirmed) {
+        if (!s.reloadedThisSession) return { blank: true, action: 'reload-once' as const };
+        return { blank: true, action: 'fallback' as const };
+    }
+    if (noPaint || noContent) return { blank: false, action: 'report-only' as const };
+    return { blank: false, action: 'healthy' as const };
+}
+```
+
+> 运行方式：`npx tsx examples/77-04-blank-screen-guard.ts`。示例覆盖 7 个典型场景（正常、骨架屏、chunk 404、渲染崩溃、慢网白屏、刷新后仍白屏、关键节点缺失），并断言「骨架屏不误报」「二次白屏不刷新」等硬约束。
+
+### 最佳实践
+
+- ✅ **探针独立于主包**：内联小脚本先执行，主包挂了它还能上报；
+- ✅ **多信号 + 防误报**：内容缺失 + 无绘制/渲染崩溃才确认，骨架屏与空态必须排除；
+- ✅ **恢复分级**：先重试资源，再刷新一次，最后兜底页；
+- ✅ **刷新只一次**：`sessionStorage` 标记 + 时间戳，杜绝刷新死循环；
+- ✅ **按区块放错误边界**：单个图表/挂件崩溃不能拖垮整页，兜底 UI 必须极简；
+- ✅ **白屏率分桶告警**：版本、渠道、机型、网络四维，核心页阈值更严；
+- ✅ **灰度 + 秒级回滚**：每一档放量对比白屏率与 Web Vitals，劣化即回滚；
+- ⚠️ 不要用「重新加载」按钮当唯一兜底：用户不知道何时该点，自动分级恢复才是工程方案；
+- ⚠️ 不要把白屏检测写进业务请求拦截器：主包已挂时拦截器根本不存在。
+
+---
+
+## 77.5 企业级性能闭环：预算门禁、灰度观测与劣化归因
+
+### 概念解析
+
+单点优化只能赢一次，企业级要的是**不回退**。完整闭环由四个环节组成：
+
+```text
+准入（PR 预算门禁） → 发布（灰度对照） → 观测（RUM + 告警） → 复盘（劣化归因）
+        ↑                                                        │
+        └────────────────────── 规则/预算回灌 ────────────────────┘
+```
+
+**准入**：PR 阶段就拦住体积与指标回退。两类门禁最有效：
+
+- **静态预算**：入口 JS、首屏 CSS、图片总量、请求数超限即失败；
+- **关键页 Lighthouse CI**：首页、登录页、核心列表页跑固定设备配置，分数或 LCP 低于基线即失败。
+
+**发布**：灰度不是「先给 1% 用户试试」，而是**带对照的观测实验**。必须同时看：
+
+- 业务指标：转化率、下单成功率、接口错误率；
+- 体验指标：LCP/INP/CLS p75、白屏率、崩溃率；
+- 资源指标：chunk 404 率、CDN 命中率、TTFB p95。
+
+**观测**：RUM 看板 + 分级告警。告警要能回答三个问题：影响了多少用户、集中在哪个版本/渠道、从什么时候开始。没有这三要素的告警只会制造噪音。
+
+**复盘**：劣化归因矩阵把「变慢」拆到责任面：
+
+| 归因面 | 典型证据 | 责任方 |
+| --- | --- | --- |
+| 代码 | 新增长任务、组件重复渲染、循环内布局读取 | 前端业务团队 |
+| 依赖 | 新引入重库、重复打包、polyfill 膨胀 | 前端架构/基建 |
+| 配置 | base 配错、缓存头错误、CDN 未同步 | 前端基建/运维 |
+| 后端 | TTFB 上升、接口变慢、分页变大 | 服务端 |
+| 环境 | 特定机型/WebView、弱网、地域 CDN | 基建/运维 |
+
+**降级矩阵**按「设备档位 × 网络 × 业务重要性」三维设计，而不是全局一刀切：
+
+| 档位 | 网络 | 策略 |
+| --- | --- | --- |
+| 高端 | 4G/5G/Wi-Fi | 完整动画、高清图、实时图表 |
+| 中端 | 4G | 关闭毛玻璃与大面积阴影，图表适度降采样 |
+| 低端 | 3G/弱网 | 关闭非关键动画、图片降级、列表首屏缩短、非关键脚本延后 |
+| 任意 | 离线/极弱网 | 缓存优先 + 骨架屏 + 明确的重试入口 |
+
+**性能要有 owner。** 没有责任人的指标一定会退化。企业级常见做法是：每个核心页指定一名性能 owner，季度目标写进 OKR；性能预算变更必须走评审；线上 P0 性能事故按故障流程复盘并产出行动项。
+
+### 可运行代码示例
+
+预算门禁的完整实现见 [77-01-perf-budget.ts](./examples/77-01-perf-budget.ts)。落地到流水线时，把同一套阈值搬进 CI：
+
+```yaml
+# 文件: .github/workflows/perf-budget.yml —— 性能预算准入（示意）
+name: perf-budget
+on: [pull_request]
+
+jobs:
+  budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # 1) 静态预算：入口 JS / 首屏 CSS 超限直接失败
+      - run: node scripts/check-bundle-budget.mjs --max-entry-kb=300 --max-css-kb=80
+      # 2) 关键页实验室指标：LCP / CLS / TBT 低于基线即失败
+      - run: pnpm lighthouse:ci
+      # 3) 相对基线回归：与 main 分支同口径对比，回退 > 10% 失败
+      - run: node scripts/check-perf-regression.mjs --baseline=main --tolerance=0.1
+```
+
+> 运行方式：`npx tsx examples/77-01-perf-budget.ts`。先本地跑通「分档 p75 + 双闸门」逻辑，再把阈值同步到 CI 脚本，避免两套口径漂移。
+
+### 最佳实践
+
+- ✅ **预算单一事实来源**：本地脚本与 CI 读同一份阈值配置，禁止两处手写；
+- ✅ **灰度带对照**：每一档放量同时看业务、体验、资源三类指标；
+- ✅ **告警三要素**：影响面、版本/渠道、起始时间，缺一不可；
+- ✅ **归因到责任面**：代码/依赖/配置/后端/环境五类，避免「性能问题」变成无人认领的口袋；
+- ✅ **降级矩阵化**：设备 × 网络 × 业务重要性，低端机默认更轻；
+- ✅ **性能 owner 制**：核心页有人负责，预算变更走评审；
+- ⚠️ 不要只看发布当天的指标：有些劣化在低峰期或特定机型上才暴露，至少观察一个完整业务周期；
+- ⚠️ 不要把性能优化做成一次性专项：没有门禁与 owner，三个月后一定回到原点。
+
+---
+
+## 77.6 自测题
+
+<details>
+<summary><b>1. 【基础】为什么企业级性能看板默认用 p75 而不是平均值？</b></summary>
+
+**答案**：平均值会被高端设备与良好网络稀释。假设 75% 用户 1.2 秒、25% 用户 8 秒，均值可能只有 2.9 秒，看起来「可接受」，但四分之一用户已经在经历明显卡顿甚至流失。p75 描述「大多数用户」的体验，配合 p95 盯长尾，才能让优化资源落到真实痛点。另一个原因是平均值对极端值不稳健：一次 CDN 抖动就能把均值拉高，却未必代表普遍劣化。
+
+</details>
+
+<details>
+<summary><b>2. 【基础】合成层为什么能优化动画？它的代价是什么？</b></summary>
+
+**答案**：合成层拥有独立纹理，当只改变 `transform`/`opacity` 时，浏览器可复用纹理，只做矩阵变换与透明度混合，跳过 Layout 与 Paint，直接进入 Composite。代价是每层都要分配 RGBA 纹理，显存约为「逻辑宽 × DPR × 逻辑高 × DPR × 4 字节」；全屏 1080p@2x 一层就约 31.6MB。层数过多还会增加 GPU 带宽与填充率压力、加剧 overdraw，低端机可能直接掉帧或纹理淘汰。
+
+</details>
+
+<details>
+<summary><b>3. 【基础】`will-change` 的正确用法是什么？为什么不能全站常驻？</b></summary>
+
+**答案**：它是「即将发生变化」的提示，正确姿势是在动画/交互开始前添加、结束后移除，让浏览器只为短时动画分配合成层。全站常驻会让大量元素提前建层，显存与合成开销成倍增加，反而拖慢首帧与滚动；而且 `will-change` 只是提示，引擎仍可能因内存压力拒绝提升，不能当作「一定 GPU 加速」的保证。
+
+</details>
+
+<details>
+<summary><b>4. 【进阶】页面「看得到但点不动」通常属于哪类卡顿？怎么归因？</b></summary>
+
+**答案**：优先怀疑水合卡顿：SSR/SSG 已经把 HTML 显示出来，但客户端仍在同步水合整棵组件树，主线程被占满，输入事件排队。归因方法：Performance 面板看首屏后是否有一段连续长任务，且时间点与 hydration 标记吻合；Network 看客户端 bundle 体积与 `'use client'` 边界是否过大。药方是收紧客户端边界、组件级懒水合、流式 Suspense 或 Islands 架构。若长任务出现在点击之后，则属于输入卡顿，应切片事件处理或搬 Worker。
+
+</details>
+
+<details>
+<summary><b>5. 【进阶】什么是布局抖动？给出一个修复前后的代码对照。</b></summary>
+
+**答案**：布局抖动指在同一轮任务里反复「写样式 → 读几何 → 再写样式」，每次读取 `offsetWidth`/`getBoundingClientRect` 都会强制浏览器立刻完成一次同步布局，N 次循环就是 N 次布局。修复原则是读写分离：先批量读取所有几何值存入数组，再批量写入样式。这样把 N 次强制布局压缩成 1 次，主线程长任务随之消失。
+
+</details>
+
+<details>
+<summary><b>6. 【进阶】白屏检测为什么容易误报？列出至少三种必须排除的情况。</b></summary>
+
+**答案**：白屏的判定信号（根节点空、关键节点缺失、无 FCP）在正常加载过程中也会短暂成立。必须排除：① 骨架屏正在显示（应用活着，只是数据未到）；② 业务合法空态（「暂无数据」「无权限」）；③ 登录跳转、维护页或 A/B 实验变体；④ 极慢网络但尚未超过超时阈值。企业级做法是用「内容缺失 + 无绘制/渲染崩溃」的多信号组合判定，并把只满足单一信号的情况降级为「疑似，仅上报」。
+
+</details>
+
+<details>
+<summary><b>7. 【挑战】主包 JS 加载失败导致白屏时，为什么主包内的探针不可靠？设计一套可靠的检测与恢复方案。</b></summary>
+
+**答案**：主包没加载，主包里的探针代码也不存在，形成检测悖论。可靠方案分三层：① 在 `<head>` 放一个极小的内联 watchdog，独立于业务包，监听错误与资源失败，超时检查根节点与关键选择器，用 `sendBeacon` 上报；② 服务端/边缘合成监控定时用无头浏览器访问核心路由，覆盖「脚本完全没执行」的极端情况；③ 恢复动作分级：资源失败先重试 chunk（每会话 1 次），仍失败则自动刷新一次（`sessionStorage` 标记防循环），二次仍白屏则展示不依赖主包的静态兜底页。三者共同构成「检测不依赖被测对象、恢复不制造新故障」的闭环。
+
+</details>
+
+<details>
+<summary><b>8. 【挑战】线上 LCP p75 从 2.0s 劣化到 3.2s，但 Lighthouse 分数没变。列出你的排查顺序与可能的根因。</b></summary>
+
+**答案**：实验室分数不变、线上劣化，说明问题集中在真实环境的长尾。排查顺序：① 按版本/渠道/机型/网络分桶，确认劣化是否集中在某一档；② 对比新版本的首屏 JS 体积、chunk 数量与请求瀑布，看是否新增重依赖或拆分过度；③ 看 TTFB p95 与 CDN 命中率，排除服务端/缓存问题；④ 看 LCP 元素是否变化（例如首屏主图换成更大的图或字体阻塞）；⑤ 检查低端机是否命中降级逻辑、是否被新动画/滤镜拖慢。常见根因包括：新引入图表/编辑器库、polyfill 膨胀、首屏请求串行化、CDN 未同步导致回源、特定机型 GPU 填充率不足。
+
+</details>
+
+---
+
+## 77.7 本章避坑清单
+
+| # | 坑 | 后果 | 正确做法 |
+| --- | --- | --- | --- |
+| 1 | 只看 Lighthouse 分数，不看线上 RUM | 实验室 98 分，低端机用户仍白屏 8 秒 | Lab 管 PR 门禁，Field 管发布决策，两者都要 |
+| 2 | 用平均值代替 p75 | 高端机稀释均值，长尾劣化被掩盖 | 默认 p75，长尾看 p95，按设备/网络/版本分桶 |
+| 3 | 预算只写在文档里，不进 CI | 三个月后体积与指标全面回退 | 绝对预算 + 基线回归双闸门进流水线 |
+| 4 | 低端机沿用高端机预算 | 低端机 CPU/GPU/内存更差，直接白屏或卡死 | 低端档位单独设更严阈值与降级矩阵 |
+| 5 | 全站常驻 `will-change` | 合成层与显存暴涨，滚动反而更卡 | 动画前添加、结束后移除，按面积与层总量设预算 |
+| 6 | 给 `top/left/width` 动画加 GPU 提示 | 仍触发 Layout，提升合成层无效 | 动画只用 `transform`/`opacity`，其余属性改实现 |
+| 7 | 把 `backdrop-filter` 当高端质感标配 | 低端机填充率爆炸，掉帧甚至崩溃 | 按设备档位降级为静态半透明遮罩 |
+| 8 | 循环内读写 DOM 几何属性 | 强制同步布局，形成长任务与掉帧 | 批量读 → 批量写，读写分离 |
+| 9 | 用骨架屏掩盖所有卡顿 | 感知改善但主线程仍被阻塞，交互依旧卡 | 先归因再对症：分割、切片、Worker、虚拟列表 |
+| 10 | 白屏探针放进主包 | 主包挂了探针也挂，永远收不到白屏上报 | `<head>` 内联独立 watchdog + 边缘合成监控兜底 |
+| 11 | 白屏判定不排除骨架屏/空态 | 大量误报，用户被无故刷新 | 多信号判定，骨架屏与合法空态先排除 |
+| 12 | 白屏后无条件自动刷新 | 版本不一致时刷新死循环，事故放大 | `sessionStorage` 标记 + 时间戳，最多刷新一次，之后兜底 |
+| 13 | 只包一层根级错误边界 | 单个图表崩溃导致整页白屏 | 按业务区块放边界，兜底 UI 极简且不依赖主包 |
+| 14 | 灰度只看业务指标，不看体验指标 | 转化率正常但白屏率悄悄翻倍 | 灰度每档同时看业务、体验、资源三类指标 |
+
+---
+
+> **性能治理速查**：先统一指标字典并默认 p75（77.1）→ 动画只碰 transform/opacity，按显存与层总量做合成层预算（77.2）→ 把卡顿分成加载/水合/输入/滚动四类再对症（77.3）→ 白屏用独立探针 + 分级恢复 + 兜底页（77.4）→ 预算进 CI、灰度带对照、劣化归因到责任面（77.5）。记住三句话：**没有分桶的指标会骗人；没有预算的优化会回退；没有兜底的白屏会失控。**[返回总目录](./README.md)

@@ -1,0 +1,2614 @@
+# 第一部分：JavaScript 高级特性（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/01-javascript-advanced
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第一部分：JavaScript 高级特性
+
+> 🧭 [返回总目录](./README.md)｜下一篇：[TypeScript 高级应用](./02-typescript.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-1" target="_blank" rel="noopener">EP.01《闭包与事件循环》</a>、<a href="/comics/index.html#ep-33" target="_blank" rel="noopener">EP.33《描述符·Proxy 与现代 ES》</a>、<a href="/comics/index.html#ep-35" target="_blank" rel="noopener">EP.35《正则高级用法通关》</a>、<a href="/comics/index.html#ep-36" target="_blank" rel="noopener">EP.36《生成器高阶模式》</a>
+
+## 本部分内容
+
+- [1.1 执行上下文与作用域](#_1-1-执行上下文与作用域)
+- [1.2 闭包](#_1-2-闭包)
+- [1.3 原型链与继承](#_1-3-原型链与继承)
+- [1.4 this 指向与函数绑定](#_1-4-this-指向与函数绑定)
+- [1.5 异步编程与事件循环](#_1-5-异步编程与事件循环)
+- [1.6 内存管理与垃圾回收](#_1-6-内存管理与垃圾回收)
+- [1.7 函数式编程](#_1-7-函数式编程)
+- [1.8 手写高频工具函数](#_1-8-手写高频工具函数)
+- [1.9 属性描述符与对象封闭](#_1-9-属性描述符与对象封闭)
+- [1.10 继承方案演进与多态](#_1-10-继承方案演进与多态)
+- [1.11 Symbol 与集合类型](#_1-11-symbol-与集合类型)
+- [1.12 ES 版本特性演进（2022–2027）](#_1-12-es-版本特性演进-2022–2027)
+- [1.13 Proxy 与 Reflect](#_1-13-proxy-与-reflect)
+- [1.14 Iterator、Generator 与惰性管线](#_1-14-iterator、generator-与惰性管线)
+- [1.15 正则高级用法](#_1-15-正则高级用法)
+- [1.16 错误处理体系](#_1-16-错误处理体系)
+- [1.17 JSON 序列化深入](#_1-17-json-序列化深入)
+- [1.18 自测题](#_1-18-自测题)
+- [1.19 本章避坑清单](#_1-19-本章避坑清单)
+
+---
+
+> 这一部分是所有框架、工程化的地基。面试高频、日常易错的知识点集中在这里。
+
+## 1.1 执行上下文与作用域
+
+#### 概念解析
+
+先建立一条完整时间线：**一段 JS 代码从字符到执行结果，要经过"解析 → 编译 → 执行"三大段**，提升、TDZ、作用域链这些高频考点全部挂在这条时间线上。
+
+| 阶段 | 干了什么 | 产物 / 你能观察到的现象 |
+| ---- | -------- | ---------------------- |
+| ① 词法分析（分词 / Tokenize） | 引擎把源码字符流切成语法单元：关键字、标识符、数字、运算符、分隔符 | token 流；遇到无法识别的字符直接 `SyntaxError` |
+| ② 语法分析（Parse） | 按文法规则把 token 流组织成**抽象语法树（AST）**，节点描述"这是一句声明/一个二元表达式/一次函数调用" | AST；括号不闭合、`let x = ;` 这类错误在此阶段抛 `SyntaxError`，**整段脚本一行都不会执行** |
+| ③ 生成字节码 | V8 的 Ignition 把 AST 编译成字节码并解释执行；反复执行的热点函数再交给 TurboFan JIT 优化成机器码 | 解释执行 → JIT 分层编译（这也是 V8 启动快、越跑越快的原因） |
+| ④ 执行上下文创建阶段 | 进入一段作用域后、逐行执行前，先扫描其中的声明，建立**变量环境 / 作用域链 / this 绑定** | `var` 在此被初始化为 `undefined`；`let/const` 只绑定不初始化（TDZ）；函数声明整体可用 |
+| ⑤ 执行阶段 | 按语句顺序执行：赋值、函数调用入栈、表达式求值 | 执行到声明行时 `let/const` 才离开 TDZ；`ReferenceError` 在这一阶段抛出 |
+
+> 记忆抓手：**`SyntaxError` 是解析期错误（全段不执行），`ReferenceError` 是执行期错误（前面的语句已经执行）**——在 Console 里写半行语法错误，会发现连之前的代码输出都没有，就是这个原因。
+
+理解了"先创建、后执行"，下面三个概念就是创建阶段与执行阶段的具体规则：
+
+- **执行上下文（Execution Context）**：JS 代码执行前会先创建执行上下文，包含变量环境、词法环境、this 等。上下文分为全局上下文、函数上下文、`eval` 上下文三种。
+- **词法作用域（静态作用域）**：作用域链在**函数定义时**就确定了，与函数在哪里被调用无关——这是理解闭包的前提。
+- **变量提升与暂时性死区**：`var` 声明在创建阶段被初始化为 `undefined`；`let`/`const` 也会在创建阶段被绑定，但**不初始化**，声明前行处于暂时性死区（TDZ），访问直接报错。
+
+#### 典型应用场景
+
+- 理解为什么 `var` 在循环 + 异步回调中总是输出同一个值；
+- 排查"为什么这个变量访问报 ReferenceError"；
+- 判断报错发生在哪个阶段：语法错误整段不执行，可用来解释"为什么加了一行语法错误后整个文件都没反应"；
+- 理解工程化工具链：Babel / ESLint / Prettier / SWC 的本质都是**解析源码成 AST → 改写/检查 AST → 重新生成代码**，Tree Shaking 也是基于 ESM 的静态 AST 分析（见 [3.4](./03-engineering.md#_3-4-代码分割与-tree-shaking)）；
+- 面试中解释作用域链、提升、TDZ 时，从"词法分析 → AST → 创建阶段 → 执行阶段"讲起，结论才有机制支撑。
+
+#### 完整代码示例
+
+```javascript
+// 文件: examples/01-25-engine-pipeline.js
+// 用约 60 行极简模拟器跑通"词法分析 → AST → 创建阶段 → 执行阶段"全链路,
+// 直接观察 var 的 undefined 初始化、let 的 TDZ、SyntaxError 与 ReferenceError 的阶段差异。
+// 运行:node examples/01-25-engine-pipeline.js
+
+// ① 词法分析:字符流 → token 流(关键字/标识符/数字/运算符)
+// ② 语法分析:token 流 → AST(VariableDeclaration / ExpressionStatement / BinaryExpression 节点)
+// ③ 创建阶段:扫描声明 —— var 绑定为 undefined,let/const 标记 TDZ
+// ④ 执行阶段:逐行求值 —— 执行到声明行 let 才离开 TDZ
+//
+// 关键输出:
+//   创建阶段刚结束:env.a === undefined(可访问),读取 b 抛 TDZ
+//   执行阶段:console.log(a + b) → 3
+//   'let x = ;' → SyntaxError(解析期,整段不执行)
+```
+
+```typescript
+// 文件: examples/01-01-hoisting.ts
+// ============ 变量提升与函数提升 ============
+
+// ---- 示例 1:var 提升 ----
+console.log(a); // undefined —— var 声明被提升并初始化为 undefined,赋值不提升
+var a = 1;
+
+// ---- 示例 2:函数声明"整体"提升(声明前即可调用)----
+hoisted(); // ✅ '我被提升了' —— 函数声明连同函数体一起提升
+
+function hoisted() {
+    console.log('我被提升了');
+}
+
+// 面试追问:var 声明与函数声明同名时谁赢?
+// 提升阶段函数优先(此时 typeof 同名变量 === 'function'),但后续的变量赋值会在运行时覆盖它。
+// ⚠️ 注意:同一作用域下 var 与函数同名重复声明,在 ES Module(严格模式)中会直接报语法错误,
+// 上述行为仅在非严格脚本中存在,现代代码不要这样写。
+
+// ---- 示例 3:词法作用域 —— 作用域链在定义时确定,与调用位置无关 ----
+const outer = 'outer';
+function inner() {
+    console.log(outer); // 沿定义处的作用域链查找
+}
+function run() {
+    const outer = 'shadowed'; // 遮蔽了全局的 outer
+    inner(); // 依然打印 'outer',证明 JS 是词法(静态)作用域,不是动态作用域
+}
+inner(); // 'outer'
+run();   // 'outer'
+```
+
+```javascript
+// 文件: examples/01-02-tdz.js
+// ============ 暂时性死区(TDZ)与块级作用域 ============
+
+function demo() {
+    // 从作用域开始到 let 声明之间,是变量 x 的"暂时性死区"
+    try {
+        console.log(x); // 若放开会抛出 ReferenceError
+    } catch (e) {
+        console.log(e instanceof ReferenceError); // true —— 说明 x 处于 TDZ
+    }
+    let x = 42;
+    console.log(x); // 42 —— 死区结束,正常访问
+}
+
+// ---- 块级作用域:var 没有,let/const 有 ----
+{
+    var varInBlock = 'var 泄漏到了块外';
+    let letInBlock = 'let 被关在块里';
+}
+console.log(varInBlock); // 'var 泄漏到了块外'
+// console.log(letInBlock); // ❌ ReferenceError: letInBlock is not defined
+
+demo();
+```
+
+```typescript
+// 文件: examples/01-34-classic-traps.ts（第 1 组：提升三连问，完整可运行版本见该文件）
+
+// 陷阱 ①：return 之后的 var 声明依然提升（创建阶段只做静态扫描，与代码在 return 前后无关）
+function afterReturn() {
+    console.log(x); // undefined —— 提升存在；赋值语句留在 return 后不会执行
+    x = 2;
+    return x; // 实际返回 2
+    var x;
+}
+
+// 陷阱 ②：未声明的赋值在"非严格脚本"中创建隐式全局变量
+// 作用域链一路找不到声明，就把变量挂到全局对象上；严格模式（ESM 默认）直接 ReferenceError
+(0, eval)("function leak(){ leaked = '全局变量'; } leak();"); // 间接 eval 模拟非严格脚本
+console.log(globalThis.leaked); // '全局变量'
+
+// 陷阱 ③：var a = b = 10 连续赋值，只有 a 带声明符
+// 等号从右向左结合：先执行 b = 10（b 无声明 → 隐式全局），再执行 var a = b
+(0, eval)('function f(){ var a = b = 10; } f();');
+console.log(globalThis.b); // 10 —— b 泄漏成了全局变量
+```
+
+> 运行方式：`node examples/01-25-engine-pipeline.js` 先跑执行管线全景；再 `npx tsx examples/01-01-hoisting.ts && node examples/01-02-tdz.js && npx tsx examples/01-34-classic-traps.ts`（示例包含 `var` 与函数重名等机制演示，TypeScript 严格模式下会有重复声明提示，属正常现象）。
+
+#### 最佳实践
+
+- ✅ 建立"解析 → 创建 → 执行"的阶段心智模型：看到 `SyntaxError` 知道是解析期、看到 `undefined`/TDZ 知道是创建阶段的初始化差异，不再靠死记硬背；
+- ✅ 默认使用 `const`，需要重新赋值时才用 `let`，不再使用 `var`；
+- ✅ 函数体保持在"先声明后使用"的顺序，不要依赖提升来组织代码；
+- ✅ 利用块级作用域 `{}` 隔离临时变量，减少命名冲突；
+- ⚠️ TDZ 并不是"变量不存在"，而是"已创建但未初始化"——面试时常考这个表述。
+
+## 1.2 闭包
+
+#### 概念解析
+
+**闭包（Closure）= 函数 + 该函数定义时所处词法环境的引用。**
+
+当内层函数引用了外层函数的变量，并且内层函数被暴露到外部（被 return、被赋值给全局、被作为回调传递），这些变量的生命周期就被延长了——即使外层函数已经执行完毕，变量依然可以被内层函数访问和修改。
+
+关键理解点：闭包捕获的是**变量的引用**而不是值的拷贝。
+
+#### 典型应用场景
+
+| 场景 | 说明 |
+| ---- | ---- |
+| 数据私有化 | 模拟私有变量（在 `#` 私有字段出现前的经典方案） |
+| 防抖 / 节流 | 闭包保存定时器 ID、上次触发时间等内部状态 |
+| 柯里化 / 偏函数 | 闭包保存已传入的参数 |
+| 模块模式 | IIFE + 闭包实现命名空间和私有方法 |
+| React Hooks | `useState` 的值正是通过闭包 + Fiber 节点存储的（见 [4.2](./04-frameworks.md#_4-2-hooks-原理与自定义-hook)） |
+| 缓存 / 记忆化 | 闭包保存 Map 缓存（见 [1.7](./01-javascript-advanced.md#_1-7-函数式编程)） |
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-03-closure-wallet.ts
+// ============ 示例 1:闭包实现数据私有化 ============
+
+function createWallet(initialBalance: number) {
+    // balance 被下面的方法"封闭"起来,外部无法直接读写
+    let balance = initialBalance;
+
+    return {
+        deposit(amount: number): number {
+            if (amount <= 0) throw new Error('金额必须大于 0');
+            balance += amount; // 闭包捕获的是 balance 这个变量的引用
+            return balance;
+        },
+        withdraw(amount: number): number {
+            if (amount > balance) throw new Error('余额不足');
+            balance -= amount;
+            return balance;
+        },
+        getBalance(): number {
+            return balance;
+        },
+    };
+}
+
+const wallet = createWallet(100);
+wallet.deposit(50);
+console.log(wallet.getBalance()); // 150
+console.log((wallet as any).balance); // undefined —— 外部拿不到 balance
+```
+
+```typescript
+// 文件: examples/01-04-closure-loop.ts
+// ============ 示例 2:经典循环陷阱与修复 ============
+
+// ❌ 陷阱:var 没有块级作用域,三个回调共享同一个 i
+for (var i = 0; i < 3; i++) {
+    setTimeout(() => console.log('var 版本:', i)); // 3 3 3 —— 循环结束时 i 已经是 3
+}
+
+// ✅ 修复一:let 每轮循环创建一个新的词法环境,各自捕获各自的 i
+for (let j = 0; j < 3; j++) {
+    setTimeout(() => console.log('let 版本:', j)); // 0 1 2
+}
+
+// ✅ 修复二:IIFE 立即执行函数,手动为每轮创建独立作用域(ES5 时代的做法)
+for (var k = 0; k < 3; k++) {
+    ((captured) => {
+        setTimeout(() => console.log('IIFE 版本:', captured)); // 0 1 2
+    })(k);
+}
+```
+
+```typescript
+// 文件: examples/01-05-closure-once.ts
+// ============ 示例 3:once —— 只执行一次的函数 ============
+// 应用:幂等的初始化逻辑、支付按钮防重复提交
+
+function once<T extends (...args: never[]) => unknown>(fn: T): T {
+    let called = false;
+    let result: unknown;
+    return function (this: unknown, ...args: never[]) {
+        if (called) return result;          // 第二次起直接返回缓存结果
+        called = true;
+        result = fn.apply(this, args);      // 只有第一次真正执行
+        return result;
+    } as T;
+}
+
+const initApp = once(() => {
+    console.log('应用初始化(昂贵的操作,只应执行一次)');
+    return { ready: true };
+});
+
+initApp(); // 打印"应用初始化"
+initApp(); // 不打印,直接返回上次结果
+initApp(); // 同上
+```
+
+> 运行方式：`npx tsx examples/01-03-closure-wallet.ts examples/01-04-closure-loop.ts examples/01-05-closure-once.ts`
+
+#### 最佳实践
+
+- ✅ 闭包非常适合封装**有内部状态的工具函数**（计数、缓存、节流），比挂在全局变量上安全得多；
+- ⚠️ 闭包会延长变量生命周期，**不要在闭包中长期引用大对象**，否则可能内存泄漏（见 [1.6](./01-javascript-advanced.md#_1-6-内存管理与垃圾回收)）；
+- ⚠️ 循环 + 异步回调是闭包 bug 重灾区，牢记"捕获的是引用不是值"；
+- ✅ 现代写法中，真正的私有字段可以优先用 `class` 的 `#field` 语法，语义更明确。
+
+## 1.3 原型链与继承
+
+#### 概念解析
+
+- 每个对象都有一个内部指针 `[[Prototype]]`（可通过 `Object.getPrototypeOf()` / `__proto__` 访问），指向它的原型对象；
+- 访问属性时，若对象自身没有，就沿着原型链逐层向上查找，直到 `Object.prototype`，仍未找到则返回 `undefined`；
+- **函数同时拥有 `prototype` 属性**：作为构造函数调用时，新实例的 `[[Prototype]]` 会指向它；
+- `class` 语法只是原型的语法糖，底层机制完全一致。
+
+原型链示意：
+
+```
+dog ──[[Prototype]]──> Dog.prototype ──[[Prototype]]──> Animal.prototype ──[[Prototype]]──> Object.prototype ──[[Prototype]]──> null
+      (实例自身属性)        (constructor: Dog, 共享方法)         (共享方法)                        (toString 等)
+```
+
+#### 典型应用场景
+
+- 理解 `instanceof`、`in`、`Object.keys` 的差异；
+- 给原生对象"打补丁"（如老项目的 polyfill）；
+- 面试手写：`instanceof`、寄生组合继承、`Object.create`。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-06-prototype-chain.ts
+// ============ 原型链:属性查找机制 ============
+
+const animal = {
+    name: '动物',
+    speak(this: { name: string }) {
+        return `${this.name} 发出声音`;
+    },
+};
+
+// Object.create(proto):创建一个原型指向 proto 的新对象
+const dog = Object.create(animal);
+dog.name = '小狗'; // 自有属性(遮蔽了原型上的 name)
+
+console.log(dog.speak());               // '小狗 发出声音' —— speak 在 dog 上找不到,沿原型链到 animal 找到
+console.log(Object.keys(dog));          // ['name'] —— 只列自有可枚举属性
+console.log('speak' in dog);            // true —— in 会查整条原型链
+console.log(Object.hasOwn(dog, 'speak')); // false —— 只看自身(hasOwnProperty 的现代替代)
+console.log(Object.getPrototypeOf(dog) === animal); // true
+```
+
+```typescript
+// 文件: examples/01-07-inherit-es5.ts
+// ============ ES5 经典继承:寄生组合式继承(传统方案中最完善)============
+
+function Animal(this: { name: string }, name: string) {
+    this.name = name; // 实例属性:每个实例独立一份
+}
+Animal.prototype.speak = function (this: { name: string }) {
+    return `${this.name} 发出声音`; // 原型方法:所有实例共享一份,省内存
+};
+
+function Dog(this: { name: string; color: string }, name: string, color: string) {
+    Animal.call(this, name); // ① 借用构造函数:继承实例属性
+    this.color = color;
+}
+// ② 寄生组合:用 Object.create 建立原型链
+//    相比 "Dog.prototype = new Animal()" 的好处:不会执行 Animal 构造函数、不会在原型上挂多余实例属性
+Dog.prototype = Object.create(Animal.prototype);
+Dog.prototype.constructor = Dog; // ③ 修复 constructor 指向(否则 constructor 会指向 Animal)
+Dog.prototype.fetch = function (this: { name: string }) {
+    return `${this.name} 去捡球`;
+};
+
+const dog = new (Dog as any)('旺财', '黄色');
+console.log(dog.speak());           // 旺财 发出声音 —— 继承自 Animal.prototype
+console.log(dog.fetch());           // 旺财 去捡球
+console.log(dog instanceof Dog);    // true
+console.log(dog instanceof Animal); // true
+```
+
+```typescript
+// 文件: examples/01-08-class.ts
+// ============ ES6 class:原型的语法糖 ============
+
+class Animal {
+    protected name: string;
+
+    constructor(name: string) {
+        this.name = name;
+    }
+
+    speak(): string {
+        return `${this.name} 发出声音`;
+    }
+
+    static category(): string { // 静态方法挂在类本身上,不在 prototype 上
+        return '生物';
+    }
+}
+
+class Dog extends Animal {
+    private color: string;
+
+    constructor(name: string, color: string) {
+        super(name); // 必须先调用 super(),之后才能使用 this
+        this.color = color;
+    }
+
+    speak(): string { // 方法重写(运行时多态)
+        return `${this.name}(${this.color}): 汪汪`;
+    }
+}
+
+const dog = new Dog('旺财', '黄色');
+console.log(dog.speak());        // 旺财(黄色): 汪汪
+console.log(Animal.category());  // 生物
+// dog.name;                     // ❌ 编译错误 —— protected 在 TS 层面禁止外部访问
+
+// 证明 class 本质仍是原型:
+console.log(typeof Animal.prototype.speak); // 'function'
+console.log(Object.getPrototypeOf(dog) === Dog.prototype); // true
+```
+
+```typescript
+// 文件: examples/01-09-instanceof.ts
+// ============ 手写 instanceof:沿原型链逐层比对 ============
+
+function myInstanceof(obj: unknown, ctor: Function): boolean {
+    // 基本类型直接返回 false
+    if (obj === null || (typeof obj !== 'object' && typeof obj !== 'function')) {
+        return false;
+    }
+    let proto: object | null = Object.getPrototypeOf(obj);
+    while (proto !== null) {
+        if (proto === ctor.prototype) return true; // 找到匹配的原型
+        proto = Object.getPrototypeOf(proto);      // 继续向上
+    }
+    return false;
+}
+
+class A {}
+class B extends A {}
+const b = new B();
+
+console.log(myInstanceof(b, B));      // true
+console.log(myInstanceof(b, A));      // true
+console.log(myInstanceof(b, Object)); // true
+console.log(myInstanceof(b, Array));  // false
+console.log(myInstanceof(1, Number)); // false —— 基本类型无原型链(自动装箱前的字面量)
+console.log(b instanceof A);          // true —— 与原生行为一致
+```
+
+> 运行方式：`npx tsx examples/01-06-prototype-chain.ts examples/01-07-inherit-es5.ts examples/01-08-class.ts examples/01-09-instanceof.ts`
+
+#### 最佳实践
+
+- ✅ 日常开发直接用 `class` + 组合（组合优于继承：优先"对象拥有能力"而非"层层继承"）；
+- ✅ 判断自有属性用 `Object.hasOwn(obj, key)`（替代已不推荐使用的 `obj.hasOwnProperty`）；
+- ⚠️ 不要直接修改 `__proto__`，建立原型关系用 `Object.create` 或 `class extends`；
+- ⚠️ 不要随意给 `Array.prototype` 等原生原型添加方法，容易与 polyfill / 第三方库冲突；
+- 📖 面试高频追问：`new` 操作符做了什么？——创建空对象 → 绑定原型 → 以该对象为 this 执行构造函数 → 构造函数返回对象时用它，否则返回新对象。
+
+## 1.4 this 指向与函数绑定
+
+#### 概念解析
+
+`this` 不是"定义时"决定的，而是**函数被调用时**根据调用方式决定的。四条绑定规则按优先级从高到低：
+
+| 优先级 | 规则 | 触发形式 | this 指向 |
+| ------ | ---- | -------- | --------- |
+| 1 | new 绑定 | `new Foo()` | 新创建的实例 |
+| 2 | 显式绑定 | `fn.call/apply/bind(obj)` | 指定的 obj |
+| 3 | 隐式绑定 | `obj.fn()` | 调用者 obj（`.` 前面的对象） |
+| 4 | 默认绑定 | `fn()` 直接调用 | `undefined`（严格模式）/ `globalThis` |
+
+**箭头函数是特例**：它没有自己的 `this`，使用**定义处词法作用域的 this**，且无法被 `call`/`apply`/`bind` 修改，也不能作为构造函数。
+
+#### 典型应用场景
+
+- 回调函数中丢失 this（`setTimeout`、事件监听、数组方法的回调）；
+- 类方法被解构赋值后调用报错（React class 组件时代的经典问题）；
+- 需要预设参数时用 `bind` 实现偏函数。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-10-this.ts
+// ============ 四条绑定规则与经典丢失场景 ============
+
+const user = {
+    name: 'Alice',
+    normal() {
+        return `我是 ${this.name}`; // 隐式绑定:this = 调用者 user
+    },
+    arrow: () => `我是 ${(globalThis as any).name}`, // 箭头函数:this 沿用定义处,与 user 无关
+    delayed() {
+        // ❌ 经典坑:普通函数作为回调,隐式绑定丢失,退化为默认绑定
+        setTimeout(function () {
+            console.log('延迟(丢失 this):', this.name); // undefined
+        }, 100);
+        // ✅ 修复:箭头函数捕获外层 delayed 的 this(即 user)
+        setTimeout(() => {
+            console.log('延迟(箭头修复):', this.name); // Alice
+        }, 200);
+    },
+};
+
+console.log(user.normal());            // 我是 Alice
+const detached = user.normal;          // 解构赋值导致"调用者"消失
+console.log(detached.call(user));      // 显式绑定找回:我是 Alice
+user.delayed();
+
+// ---- call / apply / bind 三兄弟的区别 ----
+function greet(this: { name: string }, greeting: string, punctuation: string) {
+    return `${greeting}, ${this.name}${punctuation}`;
+}
+const bob = { name: 'Bob' };
+
+console.log(greet.call(bob, '你好', '!'));    // 立即调用,参数逐个传递
+console.log(greet.apply(bob, ['你好', '!'])); // 立即调用,参数以数组传递
+const bound = greet.bind(bob, '你好');        // 不立即调用,返回新函数,可预设参数(偏函数)
+console.log(bound('?'));                      // 你好, Bob?
+
+// ---- 箭头函数的 this 无法被显式修改 ----
+const arrowFn = () => (globalThis as any).tag;
+(globalThis as any).tag = 'global';
+console.log(arrowFn.call({ tag: 'local' })); // 'global' —— call 对箭头函数无效
+```
+
+```typescript
+// 文件: examples/01-11-mybind.ts
+// ============ 手写 bind:支持预设参数、支持 new 调用、维护原型链 ============
+
+function myBind(this: (...args: unknown[]) => void, ctx: unknown, ...preset: unknown[]) {
+    const original = this;
+
+    const bound = function (this: unknown, ...args: unknown[]) {
+        // 用 new 调用 bound 时,this 是新创建的实例 —— 此时应忽略 ctx,让实例属性生效
+        const thisArg = this instanceof bound ? this : ctx;
+        return original.apply(thisArg, [...preset, ...args]);
+    };
+
+    // 维护原型链:让 new bound() 出来的实例能访问原函数原型上的方法
+    if (original.prototype) {
+        (bound as any).prototype = Object.create(original.prototype);
+    }
+    return bound;
+}
+
+// ---- 验证 ----
+function Person(this: { name: string }, name: string) {
+    this.name = name;
+}
+Person.prototype.hi = function (this: { name: string }) {
+    return `hi, ${this.name}`;
+};
+
+const BoundPerson = myBind.call(Person, null, '默认名') as any;
+
+const p = new (BoundPerson as any)('小明');
+console.log(p.name); // '默认名' —— new 调用时预设参数在前、调用参数在后
+console.log(p.hi()); // 'hi, 默认名' —— 原型链维护成功
+```
+
+```typescript
+// 文件: examples/01-34-classic-traps.ts（第 2 组：this 的四个边界场景）
+
+// 边界 ①：显式绑定传 null/undefined，严格模式"原样保留"，非严格才会回退到全局对象
+function whoAmI(this: unknown) {
+    return this === undefined || this === null ? String(this) : Object.prototype.toString.call(this);
+}
+whoAmI.call(null); // 'null'（ESM 严格模式）
+whoAmI.apply(undefined); // 'undefined'
+whoAmI.bind(null)(); // 'null'
+// 非严格脚本中同一段代码的 this 会被替换为 globalThis —— 这也是"为什么回调里 this 莫名指向 window"的来源
+
+// 边界 ②：间接函数引用 —— (obj.fn = fn)() 整体是"裸函数调用"，点前缀在赋值结果上已丢失
+(0, eval)(`
+    "use strict";
+    const a = { tag: 'A', f(){ return this === undefined ? 'undefined' : this.tag; } };
+    const b = { tag: 'B' };
+    console.log((b.f = a.f)());  // undefined：默认绑定
+    b.f = a.f; console.log(b.f()); // 'B'：这才是隐式绑定
+`);
+
+// 边界 ③：内置高阶函数的 thisArg 参数（map/filter/find/forEach/flatMap 第二参数）
+[7].forEach(function (this: { tag: string }) {
+    console.log(this.tag); // '显式 thisArg'；不传则严格模式为 undefined
+}, { tag: '显式 thisArg' });
+// 对照：DOM 中 addEventListener 的回调 this 是绑定元素本身（用箭头函数反而拿不到）
+```
+
+```typescript
+// 文件: examples/01-34-classic-traps.ts（第 3 组：手写 call / apply，面试 G12）
+
+// 核心思想：把函数临时挂成 context 的属性，用"成员调用"完成隐式绑定，调用后立即清理
+(Function.prototype as any).myCall = function (this: Function, ctx: unknown, ...args: unknown[]) {
+    // null/undefined → 全局对象；原始值（number/string）装箱；对象原样使用
+    const target = (ctx === null || ctx === undefined ? globalThis : Object(ctx)) as Record<symbol, unknown>;
+    const key = Symbol('temp-fn'); // Symbol 临时键，避免覆盖 context 已有属性
+    target[key] = this;
+    try {
+        return (target[key] as (...a: unknown[]) => unknown)(...args);
+    } finally {
+        delete target[key]; // finally 保证即使抛错也不污染 context
+    }
+};
+
+(Function.prototype as any).myApply = function (this: Function, ctx: unknown, args: unknown[] = []) {
+    const target = (ctx === null || ctx === undefined ? globalThis : Object(ctx)) as Record<symbol, unknown>;
+    const key = Symbol('temp-fn');
+    target[key] = this;
+    try {
+        return (target[key] as (...a: unknown[]) => unknown)(...args); // 与 myCall 只差参数是数组
+    } finally {
+        delete target[key];
+    }
+};
+
+function introduce(this: { name: string; age: number }, role: string) {
+    return `${role}:${this.name},${this.age} 岁`;
+}
+const person = { name: '阿黄', age: 28 };
+(Function.prototype as any).myCall.call(introduce, person, '工程师'); // '工程师:阿黄,28 岁'
+(Function.prototype as any).myApply.apply(introduce, [person, ['架构师']]); // '架构师:阿黄,28 岁'
+// 与 01-11 的手写 bind 连起来：bind = 预设 this + 预设参数 + 返回新函数 + 兼容 new（四件套）
+```
+
+> 运行方式：`npx tsx examples/01-10-this.ts examples/01-11-mybind.ts examples/01-34-classic-traps.ts`（示例中含 `setTimeout`，输出有 200ms 延迟属正常）。
+
+#### 最佳实践
+
+- ✅ 对象方法内的异步回调、数组方法回调，一律用**箭头函数**保住 this；
+- ✅ 类组件中把回调方法在 `constructor` 里 `bind`，或使用类字段语法（`handleClick = () => {}`）；
+- ⚠️ 箭头函数**不适合**做对象方法（会拿不到调用者）和原型方法，也不可用作构造函数；
+- ⚠️ `call`/`apply` 传参格式不同（逐个 vs 数组），`bind` 返回新函数不会立即执行——三者混淆是高频笔试题。
+
+## 1.5 异步编程与事件循环
+
+#### 概念解析
+
+**事件循环（Event Loop）模型**：
+
+1. JS 是单线程的，同步任务在主线程上按序执行；
+2. 异步任务的回调先挂起，条件满足后进入对应队列；
+3. 主线程每执行完一轮同步代码，会**先清空整个微任务队列**，再取一个宏任务执行，如此循环。
+
+```mermaid
+flowchart TD
+    A["执行同步代码(调用栈)"] --> B{"微任务队列清空了吗?"}
+    B -- "否" --> C["执行一个微任务<br/>(执行中产生的新微任务也会入队)"]
+    C --> B
+    B -- "是" --> D["取一个宏任务执行<br/>(setTimeout / I/O / 事件回调)"]
+    D --> E["渲染时机: rAF → 样式 → 布局 → 绘制"]
+    E --> A
+```
+
+| 分类 | 包含内容 | 特点 |
+| ---- | -------- | ---- |
+| 微任务（microtask） | `Promise.then/catch/finally`、`queueMicrotask`、`MutationObserver`、`await` 之后的代码 | 当前宏任务结束后立即全部执行完 |
+| 宏任务（macrotask） | `setTimeout`、`setInterval`、I/O、UI 事件、`requestAnimationFrame`（渲染前） | 每轮循环只取一个 |
+
+**Promise 三种状态**：`pending → fulfilled` 或 `pending → rejected`，状态一旦改变不可逆。`async/await` 是 Promise 的语法糖，`await` 后面的代码相当于放进 `then` 里执行。
+
+#### 典型应用场景
+
+- 并发请求控制（限制同时最多 N 个请求，保护服务端）；
+- 多个依赖接口的串行 / 并行编排；
+- 超时控制、失败重试（见 [1.8](./01-javascript-advanced.md#_1-8-手写高频工具函数) 与 6.4）；
+- 面试手写：Promise 输出题、Promise.all、并发池。
+
+#### 完整代码示例
+
+```javascript
+// 文件: examples/01-12-event-loop.js
+// ============ 事件循环输出题:由浅入深 ============
+
+// ---- 第 1 题:基础 ----
+console.log('1');
+setTimeout(() => console.log('2'), 0);           // 宏任务
+Promise.resolve().then(() => console.log('3'));  // 微任务
+console.log('4');
+// 输出:1 4 3 2 —— 同步代码(1,4) → 微任务(3) → 宏任务(2)
+
+// ---- 第 2 题:微任务队列会"清空到见底"才走宏任务 ----
+setTimeout(() => console.log('A'), 0);
+Promise.resolve()
+    .then(() => {
+        console.log('B');
+        Promise.resolve().then(() => console.log('C')); // 新微任务插到队尾,本轮也会执行
+    })
+    .then(() => console.log('D'));
+console.log('E');
+// 输出:E B C D A —— 同步(E) → 微任务依次:B、C、D → 宏任务:A
+
+// ---- 第 3 题:await 的本质 —— 后面的代码相当于 then 回调 ----
+async function async1() {
+    console.log('async1 start');
+    await async2();
+    console.log('async1 end'); // 相当于放在 then 里
+}
+async function async2() {
+    console.log('async2');
+}
+console.log('script start');
+setTimeout(() => console.log('setTimeout'), 0);
+async1();
+new Promise((resolve) => {
+    console.log('promise1');
+    resolve();
+}).then(() => console.log('promise2'));
+console.log('script end');
+// 输出顺序:
+// script start → async1 start → async2 → promise1 → script end
+// → async1 end → promise2 → setTimeout
+```
+
+> 运行方式：`node examples/01-12-event-loop.js`，输出与注释一致，可自行验证。
+
+```typescript
+// 文件: examples/01-13-promise-patterns.ts
+// ============ Promise 组合 API:日常最常用的编排手段 ============
+
+const p = (value: number, ms: number, shouldReject = false) =>
+    new Promise<number>((resolve, reject) =>
+        setTimeout(() => (shouldReject ? reject(new Error(`fail ${value}`)) : resolve(value)), ms),
+    );
+
+// ---- Promise.all:全部成功才成功,一个失败立即失败(短路)----
+// 适用:多个请求缺一不可,如首屏聚合
+const [a, b] = await Promise.all([p(1, 100), p(2, 200)]);
+console.log('all:', a, b); // 1 2
+
+// ---- Promise.allSettled:全部完成,永远不短路 ----
+// 适用:多个独立请求,失败也要展示已成功的部分(如仪表盘多卡片)
+const results = await Promise.allSettled([p(1, 100), p(2, 50, true), p(3, 150)]);
+const fulfilled = results.filter((r) => r.status === 'fulfilled').map((r) => (r as PromiseFulfilledResult<number>).value);
+const failed = results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.message);
+console.log('allSettled 成功:', fulfilled, '失败:', failed); // [1, 3] ['fail 2']
+
+// ---- Promise.race:第一个"出结果"的(无论成败)----
+// 适用:超时控制(见 1.8 的 withTimeout)
+const first = await Promise.race([p(9, 300), p(0, 50)]);
+console.log('race:', first); // 0 —— 50ms 的先完成
+
+// ---- Promise.any:第一个成功的;全失败才抛 AggregateError ----
+// 适用:多 CDN 择优、多镜像源容灾
+const fastest = await Promise.any([p(1, 300, true), p(2, 100), p(3, 200, true)]);
+console.log('any:', fastest); // 2
+
+// ---- 串行 vs 并行:链式 await 是串行(慢),先收集再 all 是并行(快)----
+console.time('串行');
+const s1 = await p(1, 100);
+const s2 = await p(2, 100);
+console.timeEnd('串行');   // ≈200ms
+console.time('并行');
+const [j1, j2] = await Promise.all([p(1, 100), p(2, 100)]);
+console.timeEnd('并行');   // ≈100ms
+```
+
+```typescript
+// 文件: examples/01-14-my-promise.ts
+// ============ 手写简化版 Promise(教学版,非 A+ 全量实现)============
+
+type State = 'pending' | 'fulfilled' | 'rejected';
+type Executor<T> = (resolve: (value: T | PromiseLike<T>) => void, reject: (reason?: unknown) => void) => void;
+type Callback<T, R> = (value: T) => R;
+
+class MyPromise<T> {
+    private state: State = 'pending';
+    private value!: T;
+    private reason!: unknown;
+    private callbacks: Array<{ ok: Callback<T, unknown>; fail: (e: unknown) => unknown }> = [];
+
+    constructor(executor: Executor<T>) {
+        const resolve = (value: T | PromiseLike<T>) => {
+            if (this.state !== 'pending') return;          // 状态不可逆
+            // resolve 的值如果本身是 thenable,等它落定(链式解包的关键)
+            if (value && typeof (value as PromiseLike<T>).then === 'function') {
+                (value as PromiseLike<T>).then(resolve, reject);
+                return;
+            }
+            this.state = 'fulfilled';
+            this.value = value as T;
+            this.flush();
+        };
+        const reject = (reason?: unknown) => {
+            if (this.state !== 'pending') return;
+            this.state = 'rejected';
+            this.reason = reason;
+            this.flush();
+        };
+        try {
+            executor(resolve, reject);
+        } catch (e) {
+            reject(e); // executor 同步抛错 → 直接 reject
+        }
+    }
+
+    // 用微任务模拟异步执行回调(真实 Promise 遵循同样的时机)
+    private flush() {
+        queueMicrotask(() => {
+            this.callbacks.forEach(({ ok, fail }) => {
+                try {
+                    if (this.state === 'fulfilled') ok(this.value);
+                    else fail(this.reason);
+                } catch (e) {
+                    // 注意:这里简化处理,完整实现应让后续 promise reject
+                    console.error('回调执行出错(教学版简化):', e);
+                }
+            });
+            this.callbacks = [];
+        });
+    }
+
+    then<R1 = T, R2 = never>(
+        onFulfilled?: Callback<T, R1 | PromiseLike<R1>> | null,
+        onRejected?: Callback<unknown, R2 | PromiseLike<R2>> | null,
+    ): MyPromise<R1 | R2> {
+        return new MyPromise<R1 | R2>((resolve, reject) => {
+            const handle = () => {
+                try {
+                    if (this.state === 'fulfilled') {
+                        // 回调返回值可能又是 promise,交给新 promise 的 resolve 解包
+                        resolve((onFulfilled ? onFulfilled(this.value) : this.value) as any);
+                    } else {
+                        if (!onRejected) return reject(this.reason); // 没有失败回调 → 错误继续向后传
+                        resolve(onRejected(this.reason) as any);     // 失败被处理 → 返回成功链
+                    }
+                } catch (e) {
+                    reject(e);
+                }
+            };
+            this.callbacks.push({ ok: handle, fail: handle });
+            if (this.state !== 'pending') this.flush(); // 已落定时注册的回调直接执行
+        });
+    }
+
+    catch<R = never>(onRejected: Callback<unknown, R | PromiseLike<R>>) {
+        return this.then(null, onRejected);
+    }
+
+    finally(cb: () => void) {
+        // 无论成败都执行 cb,并把原值/原错误透传下去
+        return this.then(
+            (v) => MyPromise.resolve(cb()).then(() => v),
+            (e) => MyPromise.resolve(cb()).then(() => { throw e; }),
+        );
+    }
+
+    static resolve<T>(value?: T | PromiseLike<T>) {
+        return new MyPromise<T>((resolve) => resolve(value as T));
+    }
+    static reject<T = never>(reason?: unknown) {
+        return new MyPromise<T>((_, reject) => reject(reason));
+    }
+}
+
+// ---- 验证 ----
+MyPromise.resolve(1)
+    .then((v) => v + 1)
+    .then((v) => MyPromise.resolve(v * 10)) // 返回 promise 会被自动解包
+    .then((v) => {
+        console.log('链式结果:', v); // 20
+        throw new Error('手动抛错');
+    })
+    .catch((e) => console.log('捕获:', e.message)) // 错误沿链传递到 catch
+    .finally(() => console.log('finally 总是执行'));
+```
+
+```typescript
+// 文件: examples/01-15-async-pool.ts
+// ============ 并发控制:asyncPool —— 最多同时 N 个任务 ============
+// 场景:批量上传分片、批量请求接口,防止瞬间打爆服务端
+
+async function asyncPool<T, R>(limit: number, items: readonly T[], task: (item: T, index: number) => Promise<R>): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    let cursor = 0; // 共享游标:每个 worker 从这里领任务
+
+    async function worker() {
+        while (cursor < items.length) {
+            const index = cursor++;
+            results[index] = await task(items[index], index);
+        }
+    }
+
+    // 启动 min(limit, 任务数) 个 worker,谁空闲谁领下一个任务
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+    return results;
+}
+
+// ---- 演示:8 个任务,并发上限 3 ----
+const tasks = Array.from({ length: 8 }, (_, i) => i);
+let running = 0;
+let peak = 0;
+
+const start = Date.now();
+await asyncPool(3, tasks, async (i) => {
+    running++;
+    peak = Math.max(peak, running);
+    await new Promise((r) => setTimeout(r, 100)); // 模拟 100ms 的 IO
+    running--;
+    console.log(`任务 ${i} 完成 @ ${Date.now() - start}ms`);
+});
+console.log(`全部完成,峰值并发 = ${peak}(应为 3),总耗时 ≈ ${Math.ceil(8 / 3) * 100}ms`);
+```
+
+```typescript
+// 文件: examples/01-35-promise-eventloop-traps.ts（Promise 解包规则与时序陷阱，完整版可运行）
+
+// ---- ① resolve(value) 的三种入参，走的是同一套 Promise Resolve 过程 ----
+Promise.resolve(1); // 普通值：本轮微任务即可落定
+Promise.resolve({ then(r: (v: number) => void) { r(2); } }); // thenable：引擎排队调用其 then，至少多一个微任务
+const late = new Promise((r) => setTimeout(() => r('done'), 10));
+Promise.resolve(late); // 真正的 Promise：状态与值完全"跟随"，哪怕已完成也至少隔一个 tick
+
+// ---- ② then/catch 回调的四种"返回值"决定下一环节 ----
+Promise.resolve('x')
+    .then(() => 42) // 普通值 → 下一环成功值
+    .then(() => new Promise((r) => setTimeout(() => r('异步结果'), 10))) // thenable/Promise → 等待并解包
+    .then(() => {
+        throw new Error('回调内同步抛出'); // throw（或 return rejected promise）→ 跳到最近的失败分支
+    })
+    .catch((e) => (e as Error).message);
+
+// ---- ③ 时序题：thenable 为什么"慢两拍" ----
+const seq: number[] = [];
+Promise.resolve().then(() => seq.push(1));
+Promise.resolve({
+    then(resolve: () => void) {
+        seq.push(2);
+        resolve();
+    },
+}).then(() => seq.push(3));
+queueMicrotask(() => seq.push(4));
+// 结果：1 → 2 → 4 → 3
+// 拆解：thenable 先占一个微任务去执行 .then（push 2），resolve 回调再占一个微任务完成落定，
+//       这期间入队的 queueMicrotask(4) 就插到了 then 回调(3) 前面。
+
+// ---- ④ finally 透传但不改结果，除非它自己抛错 ----
+Promise.resolve('原值').finally(() => '我不是返回值'); // 下一环仍收到 '原值'
+Promise.reject(new Error('原始错误')).finally(() => {
+    /* 不 return/throw → 原原因透传 */
+});
+Promise.resolve().finally(() => {
+    throw new Error('清理失败'); // finally 抛错会替换链上原有的成功/失败结果
+});
+
+// ---- ⑤ Node 事件循环六阶段 + process.nextTick 优先级（浏览器无此模型）----
+// 阶段顺序：timers → pending callbacks → idle/prepare → poll(I/O) → check(setImmediate) → close callbacks
+// 阶段回调执行完：先清空 nextTick 队列（含嵌套，可"饿死" I/O，慎用），再清空 Promise 微任务队列。
+setImmediate(() => {
+    const ticks: string[] = [];
+    process.nextTick(() => {
+        ticks.push('nextTick1');
+        process.nextTick(() => ticks.push('nextTick2'));
+    });
+    Promise.resolve().then(() => ticks.push('promise'));
+    process.nextTick(() => ticks.push('nextTick3'));
+    setImmediate(() => console.log(ticks)); // ['nextTick1','nextTick3','nextTick2','promise']
+});
+// ⚠️ 顶层模块作用域是特例：V8 在脚本栈清空时先跑微任务检查点，会看到 Promise 先于 nextTick；
+//    setTimeout(fn,0) 与 setImmediate 仅在 poll/I/O 回调内才有稳定的相对顺序，顶层顺序不确定。
+```
+
+> 运行方式：`npx tsx examples/01-13-promise-patterns.ts examples/01-14-my-promise.ts examples/01-15-async-pool.ts examples/01-35-promise-eventloop-traps.ts`（含 `setTimeout`/`setImmediate`，输出有毫秒级延迟属正常；Node 特有阶段示例在非 Node 环境自动跳过）。
+
+#### 最佳实践
+
+- ✅ **默认并行、按需串行**：无依赖的请求用 `Promise.all` 一起发；有依赖才链式 `await`；
+- ✅ 并发批量任务一律上并发池（`asyncPool` / `p-limit`），上限一般 3~6；
+- ⚠️ `Promise.all` 一个失败全部失败且**无法取消已发出的请求**，需要"全部结果"时用 `allSettled`；
+- ⚠️ `await` 在循环里是串行陷阱：`for...of` 中 `await` 会逐个等待，大列表务必改用并发池；
+- ✅ `async` 函数内部必须 `try/catch`（或由上层统一捕获），否则 unhandled rejection；
+- 📖 面试高频：宏/微任务执行顺序、`await` 的糖衣本质、手写 `Promise.all` / `race` / 并发池。
+
+## 1.6 内存管理与垃圾回收
+
+#### 概念解析
+
+**V8 的分代式垃圾回收**：
+
+| 区域 | 存放内容 | 回收算法 | 特点 |
+| ---- | -------- | -------- | ---- |
+| 新生代（新生空间） | 存活时间短的新对象 | Scavenge（复制算法） | 空间小、回收快、频繁 |
+| 老生代 | 存活时间长的对象 | 标记清除（Mark-Sweep）+ 标记整理（Mark-Compact） | 配合增量标记、并发标记，减少主线程停顿 |
+
+判断"对象是否存活"用的是**可达性分析**：从根（全局对象、当前调用栈等）出发，能引用到的对象就是活的；**引用不到的才被回收**。所以"内存泄漏"的本质是：**无用的对象仍然被引用链挂着，GC 够不着它**。
+
+**为什么不用"引用计数"？** 早期 GC 算法给每个对象记"被引用次数"，归零即回收，实现简单但有致命缺陷——**循环引用永远无法归零**：`a.b = b; b.a = a` 之后两个对象计数各为 1，即使外部已经不可达也回收不掉（老 IE 中 JS 对象与 DOM 对象互引导致的经典泄漏正源于此）。可达性分析不存在这个问题：**只要从根出发不可达，环内对象互相引用得再热闹，也会被整批回收**。面试中"循环引用会不会泄漏"的标准答案是：在现代 JS 的 GC 下不会，只有"从根可达但业务上已无用"才叫泄漏。
+
+**闭包并不会保留整个活动对象（AO）**。引擎在编译期分析内部函数实际引用了哪些外层变量，只为这些"被捕获的变量"建立闭包存储，未被引用的变量可随函数执行结束正常释放。这带来两条实践推论：
+
+- 回调中"顺手"引用一次大对象（哪怕只是打日志），它就会被闭包保活——这正是下方泄漏模式 3 的根因，修复方式是只取标量字段；
+- 不要依赖"闭包里能看到所有外层变量"的直觉做调试，DevTools 作用域面板里未被捕获的变量可能直接消失，这是优化行为而非 bug。
+
+#### 典型应用场景（常见泄漏与修复）
+
+```typescript
+// 文件: examples/01-16-memory-leak.ts
+// ============ 四大常见内存泄漏模式(浏览器环境示意)============
+
+// ---- 泄漏 1:被遗忘的定时器 ----
+function startPolling() {
+    const bigData = new Array(100000).fill('x');
+    setInterval(() => {
+        console.log(bigData.length); // bigData 被 interval 的回调闭包持有,永远无法回收
+    }, 1000);
+    // ✅ 修复:保存 timer id,在合适的时机(组件卸载/页面离开)clearInterval
+}
+
+// ---- 泄漏 2:事件监听未移除 ----
+function mount(el: HTMLElement) {
+    const onClick = () => console.log('clicked');
+    el.addEventListener('click', onClick);
+    // ✅ 修复:卸载时 el.removeEventListener('click', onClick)
+    // React 的 useEffect 返回清理函数、Vue 的 onUnmounted 都是干这个的
+}
+
+// ---- 泄漏 3:闭包持有大对象 ----
+function createHandler() {
+    const hugeList = new Array(1e6).fill({ detail: '很多数据' });
+    return () => hugeList.length; // 只要返回的函数活着,hugeList 就活着
+    // ✅ 修复:只保留真正需要的字段,如 return () => hugeList.length 改为先取 count = hugeList.length
+}
+
+// ---- 泄漏 4:全局变量累积 / 被遗忘的 Map 缓存 ----
+const cache = new Map<string, unknown>();
+function addToCache(key: string, value: unknown) {
+    cache.set(key, value); // 以长生命周期对象为 key,value 永远不会被回收
+}
+// ✅ 修复:以"短生命周期对象"为 key 用 WeakMap(见下方对比)
+
+// ---- WeakMap vs Map:key 的回收行为 ----
+let obj = { data: new Array(1e6) };
+
+const strongMap = new Map();
+strongMap.set(obj, 'metadata'); // Map 强引用 obj → 即使 obj = null 也不会被回收
+
+const weakMap = new WeakMap<object, string>();
+weakMap.set(obj, 'metadata');   // WeakMap 弱引用 obj → obj 置 null 后可被正常回收
+
+obj = null as any;
+console.log(strongMap.size); // 1 —— 强引用还在
+// weakMap 无法遍历,但内部条目会随 obj 一起被 GC
+```
+
+> 运行方式：`npx tsx examples/01-16-memory-leak.ts`（本示例用于阅读理解泄漏模式，定时器部分会持续运行，可用 `Ctrl+C` 结束）。
+
+```javascript
+// [浏览器] 文件: examples/01-17-memory-debug.js
+// ============ 用 Chrome DevTools 排查内存问题 ============
+
+// 1. 生成快照对比:Memory 面板 → Heap snapshot,操作前后各拍一次,对比增量
+// 2. Allocation timeline:记录每次分配,蓝色柱 = 分配后仍未回收
+
+// 3. 用 performance.memory 粗略监控(仅 Chromium)
+console.log('已用堆内存(MB):', (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(2));
+
+// 4. 手动触发 GC(需 --js-flags="--expose-gc" 启动 Chrome 后才有)
+if (typeof gc === 'function') gc();
+
+// 5. 分离 DOM 节点检查:被 JS 变量引用、但已从文档移除的节点 = Detached
+let detachedHolder = [];
+function createDetached() {
+    const div = document.createElement('div');
+    detachedHolder.push(div);   // 节点已"孤儿"但被 JS 持有 → 不会回收
+    document.body.appendChild(div);
+    document.body.removeChild(div);
+}
+```
+
+> 运行方式：粘贴到 DevTools Console，配合 Memory 面板使用。
+
+#### 最佳实践
+
+- ✅ `setInterval` / `addEventListener` / 订阅，**必须有对应的清理动作**，与注册动作成对出现；
+- ✅ 缓存 key 是 DOM 节点、组件实例等短生命周期对象时，用 `WeakMap`/`WeakSet`；
+- ✅ 长列表、大 JSON 处理完及时置 `null`，或改用流式处理；
+- ⚠️ 闭包是最隐蔽的泄漏源：回调里只捕获**真正需要的字段**，不要捕获整个大对象；
+- 📖 排查三板斧：Performance 录制看内存锯齿是否下降 → Heap snapshot 对比增量 → Allocation timeline 定位分配点。
+
+## 1.7 函数式编程
+
+#### 概念解析
+
+函数式编程（FP）的核心思想：**用纯函数和组合来构建程序，而不是用共享状态和命令式步骤**。
+
+| 概念 | 定义 | 价值 |
+| ---- | ---- | ---- |
+| 纯函数 | 相同输入永远得到相同输出，且无副作用 | 可测试、可缓存、可并行 |
+| 不可变性 | 不修改原数据，返回新数据 | 可预测、简化 diff（React/Vue 依赖它） |
+| 柯里化 | `f(a,b,c)` → `f(a)(b)(c)` | 参数复用、延迟执行 |
+| 组合/管道 | `compose(f, g)(x) = f(g(x))` | 小函数拼装出复杂逻辑 |
+| 高阶函数 | 接收或返回函数的函数 | `map/filter/reduce` 的本质 |
+
+#### 典型应用场景
+
+- 数据转换管道（清洗 → 过滤 → 聚合）；
+- Redux 不可变 reducer、React 状态更新；
+- 带缓存的昂贵计算（`memoize`）；
+- 表单校验规则的组合复用。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-18-fp-basics.ts
+// ============ 纯函数与不可变性 ============
+
+// ❌ 非纯函数:修改了外部状态(副作用),同样的调用结果却不同
+let count = 0;
+function impureIncrement() {
+    count++;
+    return count;
+}
+
+// ✅ 纯函数:不碰外部状态,输入定输出
+const pureIncrement = (n: number) => n + 1;
+
+// ---- 不可变更新:永远返回新对象/新数组,不修改原值 ----
+interface Todo { id: number; title: string; done: boolean }
+
+const todos: Todo[] = [{ id: 1, title: '学习闭包', done: false }];
+
+// ❌ 突变式更新(react-redux 时代会直接导致组件不更新)
+// todos.push({ id: 2, title: '学习FP', done: false });
+
+// ✅ 不可变更新:展开运算符 + map
+const addTodo = (list: Todo[], title: string): Todo[] => [...list, { id: list.length + 1, title, done: false }];
+const toggleTodo = (list: Todo[], id: number): Todo[] =>
+    list.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+
+const next = toggleTodo(addTodo(todos, '学习FP'), 1);
+console.log(todos);     // 原数组未被修改
+console.log(next);      // [{done:true}, {id:2,...}]
+
+// ---- 对象的不可变更新 ----
+const state = { user: { name: 'Alice', tags: ['a'] }, page: 1 };
+const newState = {
+    ...state,                                        // 浅拷贝第一层
+    user: { ...state.user, tags: [...state.user.tags, 'b'] }, // 深层要逐层展开
+    page: 2,
+};
+// 💡 提示:深层嵌套更新很繁琐,生产中用 Immer:`produce(state, draft => { draft.page = 2 })`
+
+console.log(JSON.stringify(newState.user.tags)); // ['a','b']
+```
+
+```typescript
+// 文件: examples/01-19-curry-compose.ts
+// ============ 柯里化、组合与管道 ============
+
+// ---- 手写柯里化:参数凑够才执行,否则返回收集参数的新函数 ----
+function curry<T extends (...args: never[]) => unknown>(fn: T): (...args: never[]) => unknown {
+    const arity = fn.length;
+    return function curried(...args: never[]): unknown {
+        if (args.length >= arity) return fn(...args);
+        return (...rest: never[]) => curried(...(args.concat(rest) as never[]));
+    };
+}
+
+const add3 = (a: number, b: number, c: number) => a + b + c;
+const curriedAdd = curry(add3) as any;
+console.log(curriedAdd(1)(2)(3)); // 6
+console.log(curriedAdd(1, 2)(3)); // 6
+console.log(curriedAdd(1)(2, 3)); // 6
+
+// 柯里化的实战价值:参数复用(偏函数)
+const log = (level: string, module: string, message: string) => `[${level}] ${module}: ${message}`;
+const curriedLog = curry(log) as any;
+const errorLog = curriedLog('ERROR');       // 固定日志级别
+const userError = errorLog('UserService');  // 再固定模块
+console.log(userError('登录失败'));          // [ERROR] UserService: 登录失败
+
+// ---- 组合(从右往左)与管道(从左往右)----
+const compose = <T,>(...fns: Array<(x: T) => T>) => (x: T): T => fns.reduceRight((acc, fn) => fn(acc), x);
+const pipe = <T,>(...fns: Array<(x: T) => T>) => (x: T): T => fns.reduce((acc, fn) => fn(acc), x);
+
+const trim = (s: string) => s.trim();
+const toLowerCase = (s: string) => s.toLowerCase();
+const wrap = (s: string) => `<b>${s}</b>`;
+
+const normalize = pipe(trim, toLowerCase, wrap);
+console.log(normalize('  Hello World  ')); // <b>hello world</b>
+
+// ---- 记忆化:缓存纯函数结果 ----
+function memoize<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+    const cache = new Map<string, R>();
+    return (...args: A): R => {
+        const key = JSON.stringify(args);
+        if (cache.has(key)) return cache.get(key)!;
+        const result = fn(...args);
+        cache.set(key, result);
+        return result;
+    };
+}
+
+let callCount = 0;
+const slowSquare = memoize((n: number) => {
+    callCount++;
+    return n * n; // 假设这是昂贵计算
+});
+slowSquare(9);
+slowSquare(9);
+slowSquare(9);
+console.log('计算了', callCount, '次'); // 1 —— 后两次命中缓存
+```
+
+> 运行方式：`npx tsx examples/01-18-fp-basics.ts examples/01-19-curry-compose.ts`
+
+#### 最佳实践
+
+- ✅ 数据转换逻辑尽量写成**纯函数 + 管道**，可读性和可测试性都会显著提升；
+- ✅ React/Vue 中的状态更新遵循不可变原则，是框架高效 diff 的前提；
+- ⚠️ 不可变更新对深层嵌套很繁琐，推荐 `Immer`（写法可变、结果不可变）；
+- ⚠️ `memoize` 的缓存 key 要能唯一标识参数（对象参数需自定义 keyFn），并注意缓存上限。
+
+## 1.8 手写高频工具函数
+
+#### 概念解析
+
+以下函数是面试手写题的"必考题库"，同时也是日常开发的真实基建。每个实现都包含完整边界处理与注释。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-20-debounce-throttle.ts
+// ============ 防抖与节流 ============
+
+// ---- 防抖:停止触发 wait 毫秒后才执行一次("回城被打断就重来")----
+// 场景:搜索框输入联想、窗口 resize 结束后重算布局、表单校验
+function debounce<T extends (...args: never[]) => void>(fn: T, wait = 300, immediate = false) {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    return function (this: unknown, ...args: never[]) {
+        if (timer) clearTimeout(timer);          // 每次触发都取消上一次等待
+        if (immediate && !timer) fn.apply(this, args); // 立即执行版:首次触发立刻调用
+        timer = setTimeout(() => {
+            timer = null;
+            if (!immediate) fn.apply(this, args); // 停止触发 wait 后执行
+        }, wait);
+    };
+}
+
+// ---- 节流:每 interval 毫秒最多执行一次,并保证最后一次触发也会执行(尾触发)----
+// 场景:滚动加载、鼠标移动、按钮防连点(更高频、需要持续响应的场景)
+function throttle<T extends (...args: never[]) => void>(fn: T, interval = 300) {
+    let last = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    return function (this: unknown, ...args: never[]) {
+        const now = Date.now();
+        const remaining = interval - (now - last);
+        if (remaining <= 0) {
+            last = now;
+            fn.apply(this, args);       // 距上次执行已超过间隔,直接执行
+        } else if (!timer) {
+            timer = setTimeout(() => {  // 兜底:保证停手前的最后一次也能执行
+                timer = null;
+                last = Date.now();
+                fn.apply(this, args);
+            }, remaining);
+        }
+    };
+}
+
+// ---- 简易验证 ----
+const log = (tag: string) => console.log(tag, '@', Date.now() % 10000);
+const debounced = debounce(() => log('debounce'), 200);
+const throttled = throttle(() => log('throttle'), 200);
+
+// 模拟高频触发:每 50ms 一次,共 10 次
+let i = 0;
+const id = setInterval(() => {
+    debounced(); // 只会在最后一次触发 200ms 后执行 1 次
+    throttled(); // 大约每 200ms 执行 1 次
+    if (++i >= 10) clearInterval(id);
+}, 50);
+```
+
+```typescript
+// 文件: examples/01-21-deep-clone.ts
+// ============ 深拷贝:处理循环引用、Date/RegExp/Map/Set ============
+
+function deepClone<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+    // 1. 基本类型与 null 直接返回
+    if (value === null || typeof value !== 'object') return value;
+
+    // 2. 循环引用:已克隆过的对象直接返回缓存(这也是 WeakMap 而非 Map 的原因)
+    const cached = seen.get(value as object);
+    if (cached !== undefined) return cached as T;
+
+    // 3. 特殊对象类型
+    if (value instanceof Date) return new Date(value.getTime()) as T;
+    if (value instanceof RegExp) return new RegExp(value.source, value.flags) as T;
+
+    if (value instanceof Map) {
+        const result = new Map();
+        seen.set(value, result);
+        value.forEach((v, k) => result.set(deepClone(k, seen), deepClone(v, seen)));
+        return result as T;
+    }
+    if (value instanceof Set) {
+        const result = new Set();
+        seen.set(value, result);
+        value.forEach((v) => result.add(deepClone(v, seen)));
+        return result as T;
+    }
+
+    // 4. 普通对象 / 数组:保留原型(兼容类实例)
+    const result: Record<PropertyKey, unknown> = Array.isArray(value)
+        ? []
+        : Object.create(Object.getPrototypeOf(value));
+    seen.set(value, result);
+
+    // Reflect.ownKeys 同时包含 Symbol 键;跳过不可枚举属性用 for...in + hasOwn 更简单,这里求全
+    for (const key of Reflect.ownKeys(value)) {
+        result[key] = deepClone((value as Record<PropertyKey, unknown>)[key], seen);
+    }
+    return result as T;
+}
+
+// ---- 验证:循环引用 ----
+interface Node { name: string; self?: unknown }
+const a: Node = { name: 'a' };
+a.self = a; // 循环引用,普通递归会栈溢出
+const cloned = deepClone(a);
+console.log(cloned.name);                  // 'a'
+console.log(cloned.self === cloned);       // true —— 克隆体内部循环关系被保留
+console.log(cloned !== a);                 // true —— 是全新对象
+
+// ---- 验证:Map/Set/Date ----
+const complex = new Map([['date', new Date('2026-01-01')], ['set', new Set([1, 2])]]);
+const clonedComplex = deepClone(complex);
+console.log(clonedComplex.get('date') instanceof Date);          // true
+console.log(clonedComplex.get('date') !== complex.get('date'));  // true —— 新的 Date 实例
+
+// 💡 生产提示:运行环境支持时,内置 structuredClone() 是更简单可靠的选择(不支持函数/Symbol/DOM 节点)
+const builtIn = structuredClone({ list: [1, { ok: true }], when: new Date() });
+console.log(builtIn.list[1].ok); // true
+```
+
+```typescript
+// 文件: examples/01-22-event-bus.ts
+// ============ 发布订阅(EventEmitter):组件解耦的基石 ============
+
+type Handler = (...args: unknown[]) => void;
+
+class EventBus {
+    private events = new Map<string, Set<Handler>>();
+
+    /** 订阅;返回取消订阅函数(方便在组件卸载时清理) */
+    on(event: string, handler: Handler): () => void {
+        let set = this.events.get(event);
+        if (!set) this.events.set(event, (set = new Set()));
+        set.add(handler);
+        return () => this.off(event, handler);
+    }
+
+    /** 只触发一次 */
+    once(event: string, handler: Handler): void {
+        const wrapped: Handler = (...args) => {
+            this.off(event, wrapped); // 先移除再执行,防止执行中再次 emit
+            handler(...args);
+        };
+        this.on(event, wrapped);
+    }
+
+    off(event: string, handler: Handler): void {
+        this.events.get(event)?.delete(handler);
+    }
+
+    emit(event: string, ...args: unknown[]): void {
+        // 拷贝一份,防止回调中 off 导致遍历异常
+        [...(this.events.get(event) ?? [])].forEach((handler) => handler(...args));
+    }
+}
+
+// ---- 验证 ----
+const bus = new EventBus();
+const off = bus.on('user:login', (name) => console.log('A 收到:', name));
+bus.on('user:login', (name) => console.log('B 收到:', name));
+bus.once('user:login', () => console.log('C 只收到一次'));
+
+bus.emit('user:login', 'Alice'); // A、B、C 都收到
+off();                            // A 取消订阅
+bus.emit('user:login', 'Bob');    // 只有 B 收到
+```
+
+```typescript
+// 文件: examples/01-23-lru-cache.ts
+// ============ LRU 缓存:利用 Map 的插入顺序 ============
+
+class LRUCache<K, V> {
+    private map = new Map<K, V>();
+
+    constructor(private capacity: number) {}
+
+    get(key: K): V | undefined {
+        if (!this.map.has(key)) return undefined;
+        const value = this.map.get(key)!;
+        this.map.delete(key);  // 删除后重新插入 → 该 key 移到"最近使用"的位置(末尾)
+        this.map.set(key, value);
+        return value;
+    }
+
+    set(key: K, value: V): this {
+        if (this.map.has(key)) this.map.delete(key);
+        else if (this.map.size >= this.capacity) {
+            // 淘汰最久未使用的条目 = Map 的第一个 key(迭代器按插入顺序)
+            const oldest = this.map.keys().next().value as K;
+            this.map.delete(oldest);
+        }
+        this.map.set(key, value);
+        return this;
+    }
+
+    get size() {
+        return this.map.size;
+    }
+}
+
+// ---- 验证 ----
+const cache = new LRUCache<string, number>(2);
+cache.set('a', 1).set('b', 2);
+cache.get('a');        // 访问 a → b 变成"最久未使用"
+cache.set('c', 3);     // 容量已满,淘汰 b
+console.log(cache.get('b')); // undefined
+console.log(cache.get('a'), cache.get('c')); // 1 3
+```
+
+```typescript
+// 文件: examples/01-24-retry-timeout.ts
+// ============ sleep / 重试 / 超时:请求层的三件套 ============
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// ---- 指数退避重试 ----
+async function retry<T>(fn: () => Promise<T>, times = 3, baseDelay = 500): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < times; attempt++) {
+        try {
+            return await fn();
+        } catch (e) {
+            lastError = e;
+            const delay = baseDelay * 2 ** attempt; // 500ms → 1s → 2s,指数退避
+            console.log(`第 ${attempt + 1} 次失败,${delay}ms 后重试`);
+            await sleep(delay);
+        }
+    }
+    throw lastError;
+}
+
+// ---- 超时控制:race 一竞到底 ----
+// ⚠️ 注意:超时只是"不再等待结果",原请求并没有真正取消;要真正取消请用 AbortController(见 6.5)
+function withTimeout<T>(promise: Promise<T>, ms: number, label = '操作'): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${label}超时(${ms}ms)`)), ms)),
+    ]);
+}
+
+// ---- 验证 ----
+let attempts = 0;
+await retry(async () => {
+    attempts++;
+    if (attempts < 3) throw new Error('网络抖动');
+    return '终于成功';
+}).then(console.log); // 第 3 次成功
+
+try {
+    await withTimeout(sleep(5000).then(() => 'done'), 1000);
+} catch (e) {
+    console.log((e as Error).message); // 操作超时(1000ms)
+}
+```
+
+```typescript
+// 文件: examples/01-34-classic-traps.ts（第 4 组：arguments 类数组与 callee）
+
+function variadic() {
+    // arguments 是"类数组"：有 length 和数字下标，但没有任何数组方法；箭头函数没有自己的 arguments
+    console.log(arguments.length, arguments[0], arguments[2]); // 3 'a' 'c'
+    console.log(Array.isArray(arguments)); // false
+
+    // 类数组 → 真数组的三种写法
+    const a1 = Array.prototype.slice.call(arguments); // ES5 时代经典
+    const a2 = Array.from(arguments); // ES6 语义最清晰
+    const a3 = [...arguments]; // 展开运算符
+
+    // arguments.callee 指向"当前正在执行的函数"，曾用于匿名递归
+    console.log(arguments.callee === variadic); // 非严格下 true；严格模式读取直接抛 TypeError
+}
+variadic('a', 'b', 'c');
+
+// callee 的历史用途：匿名函数不依赖函数名递归（仅非严格可用，结果 5! = 120）
+(0, eval)('(function (n) { return n <= 1 ? 1 : n * arguments.callee(n - 1); })(5);');
+
+// ✅ 现代写法：具名函数表达式递归 + 剩余参数，严格模式安全、还能拿到真数组
+const factorial = function fact(n: number): number {
+    return n <= 1 ? 1 : n * fact(n - 1);
+};
+function variadicModern(...args: unknown[]) {
+    console.log(args); // 直接就是数组，map/filter 随便用
+}
+```
+
+> 运行方式：`npx tsx examples/01-20-debounce-throttle.ts examples/01-21-deep-clone.ts examples/01-22-event-bus.ts examples/01-23-lru-cache.ts examples/01-24-retry-timeout.ts examples/01-34-classic-traps.ts`
+
+#### 最佳实践
+
+- ✅ 防抖 vs 节流一句话：**防抖"等停止"，节流"匀速跑"**——搜索联想用防抖，滚动加载用节流；
+- ✅ 事件订阅返回**取消函数**而不是让调用方再调一次 `off`，能显著降低泄漏概率；
+- ✅ 优先使用平台内置能力：`structuredClone`、`AbortController`、`queueMicrotask`，减少自造轮子；
+- ⚠️ 重试只应作用于**幂等操作**（GET、上传分片），POST 下单这类操作盲目重试可能造成重复提交，需配合幂等 token。
+
+---
+
+## 1.9 属性描述符与对象封闭
+
+#### 概念解析
+
+对象的每个属性都挂着一张"配置表"——**属性描述符（Property Descriptor）**。`Object.getOwnPropertyDescriptor(obj, key)` 可以看到它，`Object.defineProperty` 可以改写它。描述符分两类，六个特性：
+
+| 特性 | 含义 | 数据描述符 | 存取描述符 |
+| ---- | ---- | ---------- | ---------- |
+| `value` | 属性的值 | ✅ | ❌ |
+| `writable` | 能否用赋值运算符改值 | ✅ | ❌ |
+| `get` / `set` | 读取 / 写入时触发的访问器 | ❌ | 共用 |
+| `enumerable` | 能否被 `for...in` / `Object.keys` / `JSON.stringify` 枚举 | 共用 | 共用 |
+| `configurable` | 能否再改描述符、能否 `delete` | 共用 | 共用 |
+
+两个高频踩坑点：① `defineProperty` 中省略的特性**默认是 `false`**（字面量定义的属性则默认全 `true`）；② `value/writable` 与 `get/set` **互斥**，混用直接 `TypeError: Invalid property descriptor`。
+
+对象封闭有三档限制逐级增强的 API：
+
+| API | 禁止新增 | 禁止删除 | 禁止改值 | 判定 |
+| --- | -------- | -------- | -------- | ---- |
+| `Object.preventExtensions(o)` | ✅ | ❌ | ❌ | `Object.isExtensible(o) === false` |
+| `Object.seal(o)` | ✅ | ✅（全部 `configurable:false`） | ❌ | `Object.isSealed(o)` |
+| `Object.freeze(o)` | ✅ | ✅ | ✅（再叠 `writable:false`） | `Object.isFrozen(o)` |
+
+#### 典型应用场景
+
+- **Vue2 响应式的底层机制**：把数据属性改写成 getter/setter 做依赖收集（详见 1.13）；
+- **常量配置防误改**：状态枚举、路由表、SDK 默认参数用 `freeze`/递归深冻结；
+- **隐藏内部字段**：`enumerable:false` 的属性不进序列化与枚举，但 `in` / `getOwnPropertyNames` 仍能取到，适合放元数据；
+- 理解 **class 字段语义**：实例字段在构造时以 `writable:true, enumerable:true, configurable:true` 定义；私有字段 `#x` 则根本不出现在描述符层面。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-26-property-descriptors.ts（完整文件含 5 个演示块，此处为核心节选）
+
+// ---- 数据描述符 ----
+const product: Record<string, unknown> = { id: 1001, name: '机械键盘' };
+Object.defineProperties(product, {
+    fixed: { value: '不可变的值', writable: false, enumerable: true, configurable: true },
+    hidden: { value: '隐藏属性', writable: true, enumerable: false, configurable: true },
+});
+product.fixed = '试图修改'; // ESM 严格模式直接抛 TypeError（非严格脚本静默失败）
+Object.keys(product).includes('hidden'); // false —— 不参与枚举
+'hidden' in product; // true —— 但属性真实存在
+Object.getOwnPropertyNames(product); // 包含不可枚举键
+JSON.stringify(product).includes('hidden'); // false —— 序列化也忽略
+
+// configurable:false 后描述符被锁死,不能再改特性、不能 delete
+Object.defineProperty(product, 'fixed', { configurable: false });
+// 反直觉细节:writable:true + configurable:false 时仍可把 writable 单向改成 false(只能加锁不能解锁)
+
+// ---- 存取描述符 ----
+const account: { _balance: number; balance: number } = { _balance: 100, balance: 100 };
+Object.defineProperty(account, 'balance', {
+    enumerable: true,
+    configurable: true,
+    get() {
+        return this._balance;
+    }, // 读取拦截
+    set(v: number) {
+        if (v < 0) throw new RangeError('余额不能为负');
+        this._balance = v;
+    }, // 写入校验
+});
+
+// ---- 三档封闭:逐级增强 ----
+function probe(label: string, obj: Record<string, unknown>) {
+    // 对每档分别尝试新增/改值/删除,观察 isExtensible/isSealed/isFrozen
+    // 输出:普通对象 [✓✓✓] → preventExtensions [✗✓✓] → seal [✗✓✗] → freeze [✗✗✗]
+    void label;
+    void obj;
+}
+// ⚠️ freeze 是浅冻结!嵌套对象依然可变,配置数据必须递归 deepFreeze
+function deepFreeze<T extends object>(obj: T): T {
+    for (const key of Reflect.ownKeys(obj)) {
+        const v = (obj as Record<PropertyKey, unknown>)[key];
+        if (v && typeof v === 'object') deepFreeze(v as object);
+    }
+    return Object.freeze(obj);
+}
+const OrderStatus = deepFreeze({ PENDING: 'pending', PAID: 'paid' }); // 运行时误改即抛错
+
+// ---- 存取描述符实战:读写拦截(Vue2 响应式最小内核,完整版见 1.13)----
+function withLog<T extends object>(target: T, key: keyof T): T {
+    let store = target[key]; // 局部变量做真实存储,避免 get 内再次读属性造成无限递归
+    Object.defineProperty(target, key, {
+        enumerable: true,
+        configurable: true,
+        get() {
+            console.log(`读取 ${String(key)}`);
+            return store;
+        },
+        set(v) {
+            console.log(`写入 ${String(key)}`, v);
+            store = v;
+        },
+    });
+    return target;
+}
+```
+
+> 运行方式：`npx tsx examples/01-26-property-descriptors.ts`
+
+#### 最佳实践
+
+- ✅ 对外暴露的只读配置用 `Object.freeze`（嵌套数据递归冻结），冻结前先拷贝，**不要冻结调用方传入的对象**；
+- ✅ 需要"读得着、看不见"的内部元数据用 `enumerable:false`，需要真私有用 class 私有字段 `#x` 或 `WeakMap`（见 1.11）；
+- ⚠️ 不要依赖"静默失败"——ESM 与严格模式下违反 `writable/configurable` 会直接抛 `TypeError`；
+- ⚠️ `delete` 只能删 `configurable:true` 的自身属性，原型上的属性删不掉；`JSON.stringify` 同时忽略 `undefined` 值、函数、Symbol 与不可枚举键。
+
+---
+
+## 1.10 继承方案演进与多态
+
+#### 概念解析
+
+ES6 之前，JS 没有"类"的语法，工程师围绕原型链演化出了六代继承方案。读懂它们，才能看懂老源码，也才能真正理解 `class extends` 的本质：
+
+| 方案 | 核心做法 | 缺陷 |
+| ---- | -------- | ---- |
+| ① 原型链继承 | `Child.prototype = new Parent()` | 引用类型属性被所有实例共享；无法向父构造传参 |
+| ② 借用构造函数 | `Parent.call(this, ...)` | 方法只能写在构造函数里，每个实例一份、无法复用 |
+| ③ 组合继承 | 借构造 + 原型链并用 | 父构造执行两次，原型上残留一份冗余实例属性 |
+| ④ 原型式继承 | `Object.create(o)`（Crockford 范式） | 引用类型仍然共享，只适合浅克隆 |
+| ⑤ 寄生式继承 | 在原型式对象上增强方法后返回 | 方法同样无法复用 |
+| ⑥ **寄生组合式继承** | 空构造中转复制原型 + `Parent.call(this)` | ——（集大成者） |
+
+**`class extends` 就是方案 ⑥ 的语法糖**：原型方法挂原型、实例字段走构造、父构造只调一次。配套机制：`super()` 必须在访问 `this` 前调用；`super.method()` 从父原型找方法但 `this` 仍是子实例；静态方法中的 `this` 指向当前类（子类调用时多态到子类）。**多态**则是同一接口在不同子类上的不同实现，调用方只依赖抽象。
+
+#### 典型应用场景
+
+- 阅读 ES5 老库 / 面试要求"不使用 class 实现继承"；
+- 继承内置类型：`class Stack extends Array`，并通过 `Symbol.species` 控制 `map/filter` 派生出的新对象类型；
+- Mixin 类工厂：JS 单继承下用高阶类混入横向能力（时间戳、序列化、事件能力）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-27-inheritance-evolution.ts（十种范式完整版可运行，以下为关键脉络）
+
+// ③ 组合继承:字段独立 + 方法复用,但父构造被调两次
+function Child(this: any, name: string, age: number) {
+    Parent.call(this, name); // 第二次调用:实例自身得到字段
+    this.age = age;
+}
+Child.prototype = new (Parent as any)('占位'); // 第一次调用:仅为拿到原型方法
+Child.prototype.constructor = Child; // 替换原型后务必把 constructor 指回子类
+
+// ⑥ 寄生组合式继承:用空构造中转,只复制原型不调父构造 —— class extends 的等价物
+function inheritPrototype(Child: Function, Parent: Function) {
+    const proto = Object.create(Parent.prototype);
+    proto.constructor = Child;
+    Child.prototype = proto;
+    // 等价现代写法:Object.setPrototypeOf(Child.prototype, Parent.prototype)
+}
+
+// ES6:同一套机制的声明式写法
+class Dog extends Animal {
+    constructor(name: string, public breed: string) {
+        super(name); // 访问 this 之前必须 super
+    }
+    say() {
+        return `${super.say()},一只${this.breed}`; // 父原型找方法,this 仍是子实例
+    }
+}
+Dog.create('阿黑') instanceof Dog; // true:静态方法里的 this 随调用者多态
+
+// 多态:调用方只依赖抽象 Shape,新增子类无需改 totalArea
+abstract class Shape {
+    abstract area(): number;
+}
+function totalArea(shapes: Shape[]) {
+    return shapes.reduce((sum, s) => sum + s.area(), 0);
+}
+
+// 继承内置类 + Symbol.species:控制 map/filter 返回哪个构造器的实例
+class PlainArray<T> extends Array<T> {
+    static get [Symbol.species]() {
+        return Array;
+    } // 覆盖后 map 返回普通数组而非子类
+
+// Mixin:类工厂返回增强子类,嵌套使用绕开单继承
+type Constructor<T = object> = new (...args: any[]) => T;
+function WithTimestamp<TBase extends Constructor>(Base: TBase) {
+    return class extends Base {
+        createdAt = new Date();
+    };
+}
+```
+
+> 运行方式：`npx tsx examples/01-27-inheritance-evolution.ts`（六种历史方案 + super + 多态 + 内置类 + Mixin 共 10 个演示块）
+
+#### 最佳实践
+
+- ✅ 现代代码直接用 `class extends`，但必须能说出它等价于"寄生组合式继承"，这是区分"会用"和"懂原理"的分水岭；
+- ✅ 优先**组合/委托**而非继承做能力复用（"has-a" 优于 "is-a"），层级超过两层先考虑 Mixin 或独立函数模块；
+- ✅ 替换原型后永远补 `constructor` 指回；扩展内置集合时评估是否需要覆盖 `Symbol.species`；
+- ⚠️ `super()` 前访问 `this`、静态方法里误以为 `this` 是父类、原型链上残留冗余属性，是继承相关的三大高频错误。
+
+---
+
+## 1.11 Symbol 与集合类型
+
+#### 概念解析
+
+**Symbol 是 ES6 新增的基本类型**，每次 `Symbol()` 都产生一个全局唯一值，是语言层面"绝不撞名"的键。它分两种用法：
+
+| 用法 | API | 场景 |
+| ---- | --- | ---- |
+| 普通符号 | `Symbol('desc')` | 库作者给第三方对象挂扩展、对象内部元数据键 |
+| 全局注册符号 | `Symbol.for('id')` / `Symbol.keyFor` | 跨模块、跨 iframe/realm 共享同一个协议键 |
+| 知名符号 | `Symbol.iterator` / `toPrimitive` / `hasInstance` / `asyncIterator` / `toStringTag` … | 定制语言内部行为（迭代、类型转换、instanceof） |
+
+Symbol 键**不进 `for...in` / `Object.keys` / `JSON.stringify`**，只能通过 `Object.getOwnPropertySymbols` 枚举，是"半私有"约定。
+
+ES6 同时补齐了四种数据结构，选型依据是"键类型 + 生命周期 + 是否需要遍历"：
+
+| 结构 | 键类型 | 弱引用（随对象回收） | 遍历 / size | 典型用途 |
+| ---- | ------ | -------------------- | ----------- | -------- |
+| `Set` | 值本身 | ❌ | ✅ | 去重、集合运算 |
+| `Map` | 任意类型（含对象/NaN） | ❌ | ✅，插入序 | 关系表、缓存、词频统计 |
+| `WeakSet` | 仅对象/Symbol（ES2023 起支持 Symbol） | ✅ | ❌ | 打标记、品牌检查 |
+| `WeakMap` | 仅对象/Symbol | ✅ | ❌ | 私有数据、DOM 关联元数据 |
+
+**ES2025 为 Set 新增七个数学方法**：`union`（并）、`intersection`（交）、`difference`（差）、`symmetricDifference`（对称差）、`isSubsetOf`（子集）、`isSupersetOf`（超集）、`isDisjointFrom`（不相交），全部返回新集合、不改原集合。去重比较算法是 **SameValueZero**（`NaN` 与 `NaN` 视为相等）。
+
+#### 典型应用场景
+
+- 用 `Symbol.toPrimitive` 定制金额对象的字符串/数字转换，`Symbol.hasInstance` 定制 `instanceof`；
+- `WeakMap` 做"真私有"关联：实例被回收时令牌自动消失，无需手动 `delete`；
+- 数组去重、标签集合运算、词频统计、对象→附加数据的关系映射；
+- `WeakRef` / `FinalizationRegistry` 处理"尽力而为"的外部资源清理（回调时机由 GC 决定，不能写关键逻辑）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-28-symbol-collections.ts（完整版含 7 个演示块）
+
+// ---- Symbol 基础与全局注册表 ----
+Symbol('desc') === Symbol('desc'); // false:描述相同也是不同的值
+Symbol.for('app.theme') === Symbol.for('app.theme'); // true:全局注册表复用
+Symbol.keyFor(Symbol.for('app.theme')); // 'app.theme'
+
+// ---- 知名符号:定制语言行为 ----
+const money = {
+    yuan: 100,
+    [Symbol.toPrimitive](hint: string) {
+        // hint: 'number' | 'string' | 'default',决定 +/模板字符串/比较时的转换
+        return hint === 'string' ? `¥${this.yuan}` : this.yuan;
+    },
+};
+class NonEmptyArray {
+    static [Symbol.hasInstance](x: unknown) {
+        return Array.isArray(x) && x.length > 0;
+    } // 定制 instanceof
+}
+
+// ---- Set 与 ES2025 数学方法（运行时特性检测，旧环境走兜底）----
+new Set([NaN, NaN]).size; // 1:SameValueZero
+const evens = new Set([2, 4, 6]);
+const primes = new Set([2, 3, 5]);
+if (typeof (Set.prototype as any).union === 'function') {
+    evens.union(primes); // Set { 2, 3, 4, 5, 6 }
+    evens.intersection(primes); // Set { 2 }
+    new Set([1, 9]).isDisjointFrom(evens); // true
+}
+
+// ---- Map:任意键 + 插入序;普通对象的键会被 toString 撞车 ----
+const freq = new Map<string, number>(); // 词频统计是 Map 的教科书场景
+
+// ---- WeakMap 私有数据:对象回收,条目自动消失 ----
+const secrets = new WeakMap<object, { token: string }>();
+class Vault {
+    constructor() {
+        secrets.set(this, { token: 'jwt-xxxx' });
+    }
+    get token() {
+        return secrets.get(this)!.token;
+    }
+} // 没有 size/keys/遍历,外部只能通过实例间接访问
+
+// ---- 标签模板:字符串片段 + 插值分离,函数自由决定组装方式 ----
+function emphasize(strings: TemplateStringsArray, ...values: unknown[]) {
+    return strings.reduce((a, s, i) => a + s + (i < values.length ? `【${values[i]}】` : ''), '');
+}
+String.raw`a\tb`; // 拿到转义前的原始文本
+```
+
+> 运行方式：`npx tsx examples/01-28-symbol-collections.ts`（ES2025 Set 方法在 Node 22+ 自动启用，旧运行环境走示例内置兜底分支）
+
+#### 最佳实践
+
+- ✅ 键是对象且数据生命周期跟随对象 → `WeakMap/WeakSet`；需要遍历、`size`、基本类型键、快照 → `Map/Set`；
+- ✅ 库扩展第三方对象用普通 Symbol（不污染枚举），跨模块协议用 `Symbol.for`，私有状态优先 class `#字段`，弱关联元数据用 `WeakMap`；
+- ⚠️ `WeakRef` / `FinalizationRegistry` 的回调时机和是否执行都不保证，**只能做锦上添花的清理**，关键资源请用显式 `dispose`（见 1.12 的 ES2027 资源管理）；
+- ⚠️ 普通对象做 Map 时键被 `toString`（`[1,2]` 变成 `'1,2'`），需要对象键必须用 `Map`。
+
+---
+
+## 1.12 ES 版本特性演进（2022–2027）
+
+#### 概念解析
+
+ES6（ES2015）之后规范改为**每年一版**。版本归属以 **TC39 finished-proposals 官方清单**为准，而非二手博客（本教程已对照 2026-10 官方清单逐项核实）。提案进入规范需经过 Stage 0→4，**Stage 4 即定稿，随下一年版规范发布**。下面这份清单覆盖 ES2022 至 ES2027 候选，全部可在 `examples/01-29-es2022-2027-features.ts` 中运行验证：
+
+| 版本 | 代表特性（按主题归并） |
+| ---- | ---------------------- |
+| ES2022 | 类公共/私有字段 `#x`、私有方法、静态初始化块 `static {}`、`#x in obj` 检查；顶层 `await`；`Array/String.prototype.at`；`Object.hasOwn`；正则 `/d` 匹配索引；`Error.cause` |
+| ES2023 | 数组非破坏性方法 `toSorted/toReversed/toSpliced/with`；`findLast/findLastIndex`；Symbol 可作 `WeakMap` 键；`#!` hashbang 语法 |
+| ES2024 | `Object.groupBy` / `Map.groupBy`；`Promise.withResolvers`；`String.isWellFormed/toWellFormed`；正则 `/v` 标志（字符类集合运算）；可伸缩 `ArrayBuffer`（`resize`） |
+| ES2025 | **同步 Iterator helpers**（`Iterator.from(it).map/filter/take/drop/reduce/toArray…`）；`Promise.try`；`Float16Array`/`Math.f16round`；`RegExp.escape`；**Set 数学方法**（见 1.11）；重复命名捕获组；JSON Modules（import attributes） |
+| ES2026 | `Array.fromAsync`；`Error.isError`；`Math.sumPrecise`；`Uint8Array.toBase64/toHex/fromBase64/fromHex`；`Iterator.concat`；`JSON.rawJSON/isRawJSON`；Map/WeakMap Upsert（`getOrInsert/getOrInsertComputed`） |
+| ES2027 候选（已 Stage 4） | 显式资源管理 `using` / `await using`、`Symbol.dispose/asyncDispose`、`DisposableStack/AsyncDisposableStack`、`SuppressedError`；`Atomics.pause`；联合迭代 `Iterator.zip/zipKeyed`；`Temporal` 现代日期时间 API |
+
+两条工程铁律：① **新 API 先特性检测再使用**（`typeof fn === 'function'`、`'key' in proto`、`globalThis.T`），保证旧引擎下走降级而不是崩；② 用 **Babel/SWC 转译语法**，但 **API 需要 polyfill/运行时支持**（core-js、浏览器/Node 版本矩阵），两者不是一回事。
+
+顺带补两个比 2022 更早、本教程代码里高频露面的字面量语法——不是新知识，但第一次见面容易犯嘀咕：
+
+- **数值分隔符（ES2021）**：`1_000_000`、`60_000`、`0xff_ff` —— `_` 只能夹在两个数字之间（开头、结尾、紧贴小数点都非法），纯粹是可读性糖，运行时与 `1000000` 无异。全站的 `timeout: 10_000`、`retryDelay: 3_200` 都是它；
+- **进制字面量（ES2015 起标准化）**：二进制 `0b1010`、八进制 `0o755`、十六进制 `0x1f` —— 位运算与二进制协议场景的常客（第 26 册 WebSocket 帧头 `0x80 | opcode`、22 册哈希函数都靠它）。
+
+#### 典型应用场景
+
+- 升级技术栈 / 定项目 browserslist 时，快速判断某 API 属于哪年规范、需要什么运行时；
+- 财务/大整数场景：ES2026 `Math.sumPrecise` 解决 `0.1+0.2`、`JSON.rawJSON` 解决 16 位以上 ID 精度丢失；
+- 二进制处理：`Uint8Array.toBase64` 取代手写 base64；ML 推理：`Float16Array` 半精度存储；
+- 资源密集型应用：`using` 自动释放文件句柄/连接，杜绝忘记 `close`。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-29-es2022-2027-features.ts（按版本分组、逐项特性检测，建议 Node 22+/26 看全 ✓）
+
+// ---- ES2022:类私有字段 + 静态块 ----
+class BankAccount {
+    #balance: number;
+    static #count = 0;
+    static {
+        console.log('类加载时执行一次');
+    } // 静态初始化块可访问静态私有字段
+    constructor(initial: number) {
+        this.#balance = initial;
+    }
+    static isAccount(x: unknown): x is BankAccount {
+        return typeof x === 'object' && x !== null && #balance in x;
+    } // 人体工程学 instanceof
+}
+
+// ---- ES2023:非破坏性数组方法(契合不可变状态更新)----
+const nums = [3, 1, 2];
+nums.toSorted((a, b) => a - b); // [1,2,3],nums 不动
+
+// ---- ES2024:groupBy / withResolvers ----
+(Object as any).groupBy(items, (item) => item.type); // 按键分组
+const { promise, resolve } = (Promise as any).withResolvers(); // 适配事件/队列场景
+
+// ---- ES2025:Iterator helpers 惰性管线,不产生中间数组 ----
+(globalThis as any).Iterator.from([1, 2, 3, 4, 5])
+    .filter((x: number) => x % 2 === 1)
+    .map((x: number) => x * 10)
+    .take(2)
+    .toArray(); // [10,30]
+await (Promise as any).try(() => JSON.parse('{"ok":true}')); // 同步值/同步抛错统一成 Promise
+
+// ---- ES2026:大整数无损序列化、异步迭代收数组、精确求和(逐项特性检测)----
+const text = JSON.stringify({ big: (JSON as any).rawJSON?.('9007199254000000001') });
+JSON.parse(text, ((_k: string, v: unknown, ctx?: { source: string }) =>
+    _k === 'big' ? BigInt(ctx!.source) : v) as never);
+await (Array as any).fromAsync(asyncGen()); // 异步可迭代 → 数组
+
+// ---- ES2027 候选:using 作用域结束自动释放 ----
+{
+    using resource = {
+        [(Symbol as any).dispose]() {
+            console.log('自动清理');
+        },
+    } as any;
+} // ← 离开块自动执行,无遗漏;await using 用于异步资源
+```
+
+> 运行方式：`npx tsx examples/01-29-es2022-2027-features.ts`（输出中 `✓` 表示当前引擎支持并演示，`○` 表示引擎尚未实现、代码已兼容降级——这不是报错）
+
+再配一个**统一兼容性检测与降级封装**示例——能力探测只做一次，业务代码零感知降级：
+
+```typescript
+// 文件: examples/01-36-es2026-2027-compat.ts（完整文件含 15 项探测报告与九组"原生 vs 降级"演示，以下为核心节选）
+
+// 原则:能力探测只做一次 → 统一封装 safe* → 业务代码零感知降级
+const hasFn = (v: unknown) => typeof v === 'function';
+const flags = {
+    errorIsError: hasFn((Error as any).isError), // ES2026
+    jsonRawJSON: hasFn((JSON as any).rawJSON), // ES2026
+    mapGetOrInsert: hasFn((Map.prototype as any).getOrInsert), // ES2026
+    disposableStack: hasFn((globalThis as any).DisposableStack), // ES2027 候选
+    // using 是语法特性,typeof 探测不到:不支持它的引擎解析 `using x = null` 会抛 SyntaxError
+    usingSyntax: (() => {
+        try {
+            new Function('using x = null');
+            return true;
+        } catch {
+            return false;
+        }
+    })(),
+};
+
+// 降级封装示例:跨 realm 安全的错误判别(原生缺失时用 toString 标签,不受 iframe/vm 影响)
+const safeIsError = hasFn((Error as any).isError)
+    ? (v: unknown) => (Error as any).isError(v) as boolean
+    : (v: unknown) => Object.prototype.toString.call(v) === '[object Error]';
+
+// 降级封装示例:精确求和(原生缺失时用 Neumaier 补偿求和找回"大数吃小数"的精度)
+const safeSumPrecise = hasFn((Math as any).sumPrecise)
+    ? (xs: number[]) => (Math as any).sumPrecise(xs) as number
+    : (xs: number[]) => {
+          let sum = 0;
+          let c = 0; // 补偿项:每步把 t=sum+x 丢失的精度捡回来
+          for (const x of xs) {
+              const t = sum + x;
+              if (Math.abs(sum) >= Math.abs(x)) c += sum - t + x;
+              else c += x - t + sum;
+              sum = t;
+          }
+          return sum + c;
+      };
+safeSumPrecise([1e16, 1, -1e16]); // 朴素 reduce 得 0,封装后得 1
+
+// Map upsert 缺失时按提案语义安装(不可枚举、可配置,将来可被原生无缝覆盖)
+if (!hasFn((Map.prototype as any).getOrInsert)) {
+    Object.defineProperty(Map.prototype, 'getOrInsert', {
+        value: function (this: Map<unknown, unknown>, k: unknown, v: unknown) {
+            if (!this.has(k)) this.set(k, v);
+            return this.get(k);
+        },
+        writable: true,
+        enumerable: false,
+        configurable: true,
+    });
+}
+```
+
+> 运行方式：`npx tsx examples/01-36-es2026-2027-compat.ts`（先打印 15 项能力探测报告，再跑九组降级演示：跨 realm isError、精确求和、base64 往返、rawJSON BigInt、upsert 词频、zip/concat、DisposableStack LIFO 等）
+
+> 实测（Node v24.17.0）：`Array.fromAsync`、`Error.isError`、`JSON.rawJSON`、`Symbol.dispose`/`DisposableStack`/`using` 语法已原生可用；`Math.sumPrecise`、`Uint8Array` base64/hex、`Iterator.concat/zip`、`Map.getOrInsert`、`Temporal` 仍走降级分支——同一份业务代码两种引擎都不崩，这正是统一封装的价值。另注意原生 `DisposableStack.use()` 要求资源实现 **`Symbol.dispose` 键**（而非 `dispose` 属性），否则运行时抛 `TypeError`。
+
+#### 最佳实践
+
+- ✅ 判断 API 能不能用查三张表：TC39 proposals → caniuse/Node 兼容性 → 项目 browserslist；上线前在最低版本 Node/浏览器实测；
+- ✅ 对新 API 统一封装特性检测与兜底分支（本教程 01-28/01-29/01-36 已示范），不要把 `as any` 散落在业务代码里；
+- ✅ 数组不可变更新优先用 ES2023 `to*` 系列；分组用 `Object.groupBy`；并发协调用 `Promise.withResolvers`；
+- ⚠️ `Temporal`、`Iterator.zip`、`Map.getOrInsert` 等在 Node 24 上仍不可用，教程/面试中提及要说明"ES2026/ES2027"而非笼统说"ES6+"；
+- ⚠️ 不要把规范年份与引擎版本混为一谈：规范定稿只代表"标准存在"，V8/JavaScriptCore 落地可能晚半年到一年。
+
+---
+
+## 1.13 Proxy 与 Reflect
+
+#### 概念解析
+
+`Proxy(target, handler)` 在目标对象外套一层"拦截层"，对对象的**一切元操作**都可被劫持——属性读写、删除、`in`、原型链、函数调用、`new`、属性枚举……共 13 个捕获器。`Reflect` 则提供与每个捕获器一一对应的静态方法，给出"默认行为"。两者是镜像关系：
+
+- **为什么捕获器里要用 `Reflect` 转发？** `Reflect.get(o, key, receiver)` 返回值、`Reflect.set(...)` 返回布尔成功标记，自动处理 **receiver 透传、原型链、严格模式报错**，手写 `target[key] = v` 会丢失这些语义；
+- **receiver 是什么？** 触发这次属性访问时 `this` 应该指向的对象。当代理被其他对象**继承**时，getter 里的 `this` 必须指向继承者（receiver）而非代理的目标对象，否则访问器里读到的就是原型自己的字段——这是 Proxy 最深的坑；
+- Proxy 是"代理整个对象"，`defineProperty`（Vue2 方案）是"逐属性改写"。所以 Proxy 能拦截**新增键、数组下标、`length`、删除**，而 Vue2 必须 `$set`/`$delete` 打补丁——这就是 Vue3 重写响应式系统的根本原因。
+
+`Proxy.revocable()` 还能生成可吊销代理：数据安全场景下调用 `revoke()` 后代理立即失效（抛 `TypeError`），目标对象被隔离。
+
+#### 典型应用场景
+
+- **Vue3/MobX 的响应式核心**：get 收集依赖、set 触发更新（示例中有 Vue2 defineProperty 版与 Vue3 Proxy 版双实现对照）；
+- 只读/校验代理、**负索引数组**（`arr[-1]` 转 `arr[arr.length-1]`）、链式默认值（`a.b.c.d` 不再抛 undefined）；
+- SDK 调用埋点、方法不存在时自动补桩（RPC stub）、不可变数据的写时拷贝；
+- 数据隔离：revocable 代理把内部对象"借出去"，随时收回。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-30-proxy-reflect.ts（13 个捕获器 + receiver + 可吊销 + 两代响应式内核）
+
+// ---- 基础:读日志 / 写校验 / 不存在的方法自动补桩 ----
+const user = { name: '码叔', age: 18 };
+const logged = new Proxy(user, {
+    get(target, key, receiver) {
+        console.log(`读 ${String(key)}`);
+        return Reflect.get(target, key, receiver); // receiver 透传,getter 的 this 才正确
+    },
+    set(target, key, value, receiver) {
+        if (key === 'age' && (typeof value !== 'number' || value < 0))
+            throw new TypeError('年龄必须是非负数字');
+        return Reflect.set(target, key, value, receiver); // 必须返回布尔值表示成败
+    },
+});
+
+// ---- receiver 的关键场景:代理被继承 ----
+const target = Object.create(null, {
+    tag: {
+        get() {
+            return `访问者是:${this.role}`;
+        },
+    },
+});
+const proxy = new Proxy(target, {
+    get(t, k, receiver) {
+        return Reflect.get(t, k, receiver); // 带 receiver:输出"继承者";省略则恒为"原型自身"
+    },
+});
+const heir = Object.create(proxy);
+heir.role = '继承者';
+heir.tag; // 带 receiver → '访问者是:继承者'
+
+// ---- 数组负索引 / 函数调用拦截 ----
+const neg = new Proxy([10, 20, 30], {
+    get(t, k, r) {
+        if (typeof k === 'string' && /^-\d+$/.test(k)) return t[t.length + Number(k)];
+        return Reflect.get(t, k, r);
+    },
+});
+neg[-1]; // 30
+
+// ---- 可吊销代理:租借到期后所有访问失效 ----
+const { proxy: loan, revoke } = Proxy.revocable(user, {});
+revoke(); // 之后任何 loan.xxx 都抛 TypeError: Cannot perform 'get' on a proxy that has been revoked
+
+// ---- Vue3 响应式最小内核:targetMap 依赖收集(完整版含 Depend/watchFn/reactive)----
+// const reactiveMap = new WeakMap(); get 时 track(target,key) 收 effect,set 后 trigger
+// 对照:Vue2 版只能遍历已有键逐个 defineProperty,新增键与下标删除都监测不到
+```
+
+> 运行方式：`npx tsx examples/01-30-proxy-reflect.ts`（含 defineProperty 版 Depend/watchFn 与 Vue3 Proxy 响应式对照实现）
+
+#### 最佳实践
+
+- ✅ 捕获器内一律用 `Reflect.*` 转发并原样传递 `receiver`，不要直接操作 `target`；
+- ✅ 缓存代理对象（`WeakMap`）避免同一目标反复 `new Proxy`（Vue3 的 reactiveMap 就是这个做法）；
+- ✅ 只拦截需要的捕获器，空转发也有成本；深层对象做**惰性代理**（get 时才对嵌套对象包代理）；
+- ⚠️ `this` 绑定到代理后可能让依赖原始引用的内置对象出错（如 Map 内部槽），需要在 get 时对原型方法做 `bind(target)`；
+- ⚠️ 代理不可被 `Object.isFrozen` 等"静态化"后再拦截写操作——封闭是对目标的硬约束；性能敏感的热路径避免 Proxy，直接改数据结构。
+
+---
+
+## 1.14 Iterator、Generator 与惰性管线
+
+#### 概念解析
+
+迭代有两个协议：
+
+- **可迭代协议（Iterable）**：对象实现 `[Symbol.iterator]()`，它返回一个迭代器；`for...of`、展开、解构、`Array.from`、`new Map` 都认这个协议；
+- **迭代器协议（Iterator）**：拥有 `next()` 方法，返回 `{ value, done }`；ES2025 起迭代器还带 `map/filter/take/drop/reduce/forEach/some/every/find/flatMap/toArray` 等**惰性链式方法**（Iterator helpers），以及 `return()`（提前终止时回收资源）。
+
+Generator 函数 `function*` 是**双协议的自动实现**：`yield` 每次暂停并吐出一个值，调用方 `next()` 才继续执行——这就是**惰性求值**，可以表示无限序列而内存恒定。四个关键细节：
+
+1. **`yield*` 委托**给另一个可迭代对象，把它的产出逐个吐出；表达式的值是被委托生成器 `return` 的值（`for...of` 永远拿不到），`break` 会沿委托链逐层触发 `return()`；
+2. `next(x)` 传入的值会成为**上一条 `yield` 表达式的返回值**（所以第一次 next 传参无效），由此可实现双向通信；
+3. 迭代器有状态，`for...of` 结束后不能复用（需要可重复遍历就实现 iterable，每次返回新迭代器）；
+4. 异步版：`async function*` + `Symbol.asyncIterator` + `for await...of`，`return()` 也要 `async`。
+
+Generator 暂停/恢复的语义天然适合写**"半协程"风格的异步代码**：2014 年的 `co` 就是递归调用 `next()` 自动驱动 thunk/Promise，正是 async/await 的前身。
+
+#### 典型应用场景
+
+- 无限/超大数据流：分页拉取、逐行读文件、ID 序列，配合 `take` 取前 N 个；
+- 惰性数据管线：`Iterator.from(rows).map().filter().drop().take().toArray()`，全程不生成中间数组；
+- 自定义数据结构支持 `for...of`；中断可控的任务执行器（示例含 `interruptible` 取消）；
+- `for await...of` 消费 SSE/ReadableStream 异步流；
+- 树/DOM 惰性遍历：`yield*` 递归书写 DFS，`break` 剪枝让未搜索分支零成本；
+- 包裹式流程（洋葱模型）：中间件 `yield* next()` 下沉控制权，前后置逻辑先进后出（Koa 1 + co 的历史形态）；
+- 消费者驱动的拉模式通道：`next(参数)` 回灌让生产节奏由消费方决定（背压）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-31-iterator-generator.ts（协议/return/yield*/传参/co/异步/helpers 共 8 块）
+
+// ---- 手写可迭代对象 ----
+const range = {
+    from: 1,
+    to: 3,
+    [Symbol.iterator]() {
+        let cur = this.from;
+        const end = this.to;
+        return {
+            next() {
+                return cur <= end ? { value: cur++, done: false } : { value: undefined, done: true };
+            },
+            return() {
+                console.log('提前终止时回收资源');
+                return { value: undefined, done: true };
+            }, // break/throw/解构截断时触发
+        };
+    },
+};
+[...range]; // [1,2,3]
+
+// ---- Generator:无限序列内存恒定 + next 双向传参 ----
+function* idGen() {
+    let i = 0;
+    while (true) yield ++i; // 无限序列:取多少算多少
+}
+function* sumGen() {
+    const a: number = yield 1; // 第二次 next(10) 时,a 才被赋值为 10
+    const b: number = yield a + 2;
+    return a + b;
+}
+
+// ---- yield* 委托 ----
+function* flat<T>(nested: Iterable<Iterable<T>>) {
+    for (const inner of nested) yield* inner; // 逐个委托产出
+}
+
+// ---- co 执行器:Generator + Promise = async/await 前身 ----
+function co(genFn: () => Generator<Promise<unknown>, unknown, unknown>) {
+    const it = genFn();
+    return new Promise((resolve, reject) => {
+        const step = (fn: (v?: unknown) => unknown, arg?: unknown) => {
+            try {
+                const { value, done } = fn.call(it, arg);
+                if (done) return resolve(value);
+                Promise.resolve(value).then((v) => step(it.next, v), (e) => step(it.throw!, e));
+            } catch (e) {
+                reject(e);
+            }
+        };
+        step(it.next);
+    });
+}
+
+// ---- ES2025 Iterator helpers:惰性管线 + 无限流 ----
+(globalThis as any).Iterator.from(function* () {
+    let n = 1;
+    while (true) yield n++;
+}()).take(1_000_000).filter((x: number) => x % 2).take(5).toArray(); // 只实际计算到第 9 项
+
+// ---- 异步生成器:逐页拉取,调用方 for await ----
+async function* fetchPages(firstUrl: string) {
+    let url: string | undefined = firstUrl;
+    while (url) {
+        const res: any = { data: [1], next: undefined };
+        yield* res.data;
+        url = res.next;
+    }
+}
+```
+
+> 运行方式：`npx tsx examples/01-31-iterator-generator.ts`（Iterator helpers 在 Node 22+ 自动启用，示例含特性检测与降级写法）
+
+高阶模式（委托返回值 / 递归剪枝 / throw 注入 / 双向通道 / 状态机 / 洋葱模型）：
+
+```typescript
+// 文件: examples/01-38-generator-advanced.ts（yield* 返回值/递归剪枝/throw 注入/双向通道/状态机/洋葱模型共 6 块）
+
+// yield* 的值 = 被委托生成器的 return 值(for...of 永远拿不到它)
+function* inner() {
+    yield 1;
+    yield 2;
+    return 'inner 结束';
+}
+function* outer() {
+    const result: string = yield* inner(); // 委托吐完 1、2 后,return 值交回 result
+    yield `收到内部返回值:${result}`;
+}
+[...outer()]; // [1, 2, '收到内部返回值:inner 结束']
+
+// 递归树惰性遍历:yield* 递归书写 DFS,break 沿委托链逐层触发 return(),右侧分支不再触达
+type Node = { name: string; children?: Node[] };
+function* walk(node: Node): Generator<Node> {
+    yield node;
+    for (const child of node.children ?? []) yield* walk(child);
+}
+let visited = 0;
+for (const n of walk(tree)) {
+    visited++;
+    if (n.name === 'target') break; // 剪枝:只访问 3/5 个节点,未搜索分支零成本
+}
+
+// it.throw():错误从"暂停的那条 yield"处抛出,finally 照常执行,生成器随即终结
+const it = (function* () {
+    try {
+        yield 'step-1';
+    } finally {
+        console.log('生成器清理(在暂停点触发)');
+    }
+})();
+it.next();
+it.throw(new Error('外部注入的错误')); // 内部无 catch 则穿透到调用方,但 finally 已先执行
+
+// 消费者驱动的双向通道:next(1) 的参数成为上一条 yield 的返回值(拉模式背压)
+function* producer(): Generator<string, string, number> {
+    let acks = 0;
+    while (acks < 3) acks += yield `包裹 ${acks + 1} 已发出,回复 1 表示签收`;
+    return '全部签收';
+}
+
+// 洋葱模型(Koa 1 原理):yield* next() 把控制权下沉给内层,回来继续写"后置逻辑"
+function composeGen(mws: GenMiddleware[]) {
+    return function* dispatch(ctx: Ctx, i = 0): Generator<void, void, void> {
+        if (i >= mws.length) return;
+        yield* mws[i](ctx, () => dispatch(ctx, i + 1)); // 先进后出:A-前 → B-前 → B-后 → A-后
+    };
+}
+```
+
+> 运行方式：`npx tsx examples/01-38-generator-advanced.ts`（含全树 5 节点 vs 剪枝 3 节点的对比输出、洋葱模型先进后出日志）
+
+#### 最佳实践
+
+- ✅ 需要"可重复遍历"就实现 **iterable**（工厂式每次新迭代器），只实现一次性的 iterator 会让第二次 `for...of` 静默为空；
+- ✅ 大数据/无限数据用 Generator + `take` 做背压式消费，别先 `Array.from` 成大数组；现代环境优先 Iterator helpers 手写管道；
+- ✅ 持有资源的迭代器务必实现 `return()`（关闭文件、释放锁），`for...of` 的 break/异常才不泄漏；
+- ⚠️ `next(参数)` 注入的是**上一条 yield 的值**，首条 yield 无法接收参数，调试时用变量记录而不是猜；
+- ⚠️ 异步迭代消费端必须能处理下游提前停止（`break` 触发 async `return()`），否则上游 Promise 悬挂；
+- ✅ 树/嵌套结构用 `yield*` 递归遍历：`break` 会沿委托链逐层触发 `return()`，天然支持"找到即停"的剪枝，未搜索分支零成本；
+- ✅ 包裹式流程（日志前后置、事务开关、洋葱中间件）用 `yield* next()` 表达"先进后出"，比回调嵌套直观；生成器是一次性迭代器，重放必须重新调用生成器函数拿新实例；
+- ⚠️ `it.throw(e)` 从暂停的 yield 处抛出：内部没有 catch 就穿透到调用方（`finally` 仍执行），用它实现"外部取消/注入失败"比直接置标志位更符合协程语义。
+
+---
+
+## 1.15 正则高级用法
+
+#### 概念解析
+
+正则的"高级"不在符号多，而在四套正交机制的组合：**量词策略、分组存储、反向引用、零宽断言**。前三套解决"匹配到什么、存下来复用"，断言解决"在哪儿允许匹配"。
+
+| 机制 | 符号 | 一句话心智模型 |
+| ---- | ---- | -------------- |
+| 贪婪 / 惰性 | `* + ? {m,n}` ↔ 加 `?` 变 `*? +? ?? {m,n}?` | 贪婪=先吃满再逐字符回吐，惰性=刚好满足就停 |
+| 捕获组 | `(pat)` / `(?:pat)` / `(?<name>pat)` | 存进结果下标 / 只分组不保存 / 存进 `m.groups` |
+| 反向引用 | `\1` / `\k<name>`（匹配侧）；`$1` / `$<name>`（replace 侧） | 复用前面**实际匹配到的文本**，不是重跑一遍模式 |
+| 零宽断言 | `(?=X)` `(?!)` `(?<=X)` `(?<!X)` | 只"左右看一眼"不消耗字符，天然用于"位置级"条件 |
+
+四个高频机制点：
+
+- **回溯是贪婪的代价**：`<.+>` 匹配 `<div><span>` 会先吃到行尾最后一个 `>` 再逐字符回吐；嵌套量词 `(a+)+` 遇到不匹配的长串会指数级回溯（ReDoS）。
+- **`\1` 引用的是"文本"不是"模式"**：`(\w+)-\1` 里 `\1` 复制第一组实际吃到的字符串——所以 `ab-ab` 能匹配而 `ab-xy` 不能，这正是"成对结构"校验的原理。
+- **JS 后行断言支持变长**（如 `(?<=¥|RMB)`），比多数语言宽松；先行断言同样没有定长限制。
+- **多个 `(?=)` 并列 = AND 条件**：都从同一位置独立检查、互不消耗，密码"必须含大小写和数字"就是这么拼出来的；`(?!)` 则反过来当"禁词 / 禁格式"关卡。
+
+#### 典型应用场景
+
+- **千分位格式化**：`str.replace(/\B(?=(\d{3})+(?!\d))/g, ',')`——在"数字内部、右侧是完整 3 位组"的位置插逗号（断言不消耗字符，所以是"往位置里塞"而不是"替换内容"）；
+- **密码强度校验**：`/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)\S{8,}$/` 一行校验三个并列条件 + 一个排除条件（可接入 [19.1](./19-business-snippets.md#_19-1-表单校验与声明式规则) 的声明式规则）；
+- **成对符号提取**：markdown 粗/斜体、配对引号、成对 HTML 标签——反向引用保证开合一致，错配自动出局；
+- **模板引擎 / 富文本替换**：`{{ var }}` 定界符解析与 `**粗体**` 转 HTML，惰性 + 分组 + `$<name>` 三件套；
+- **取"某个前缀后面"的值**：`/(?<=\$)\d+/g` 提取所有美元金额；或按"右侧不是某字符"的位置做切分。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-37-regex-advanced.ts（贪婪惰性/分组/反向引用/四种断言/密码组合/模板引擎/ES2025 重复命名组共 7 块）
+
+// 贪婪 vs 惰性:同一个量词,吃到几口差很多
+'<div><span>hi</span></div>'.match(/<.+>/);  // 贪婪:吃到底 → '<div><span>hi</span></div>'
+'<div><span>hi</span></div>'.match(/<.+?>/); // 惰性:见 > 即停 → '<div>'
+
+// 分组三兄弟:捕获 / 非捕获 / 命名
+'2026-10-18'.match(/^(\d{4})-(\d{2})-(\d{2})$/);     // 捕获组:结果 [, '2026', '10', '18']
+'阿黄,28,杭州'.match(/^(?<name>[^,]+),(?<age>\d+),/); // 命名组:m.groups = { name:'阿黄', age:'28' }
+'jpg png'.match(/(?:jpg|png)/g);                     // 非捕获:只分组不保存,不占下标
+
+// 反向引用:开合必须成对(错配自动出局);replace 侧用 $1 重排
+'<h2>标题</h2> <b>错配</h2>'.match(/<(h[1-6]|b|i)>(.*?)<\/\1>/g); // ['<h2>标题</h2>']
+'2026-10-18'.replace(/(\d{4})-(\d{2})-(\d{2})/, '$3/$2/$1');      // '18/10/2026'
+
+// 四种断言:只看不吃;负向先行会被贪婪回溯"截尾"——100 想躲开元,退到 10 就满足了
+'100元 200$ 300元'.match(/\d+(?=元)/g);            // ['100', '300']
+'100元 200$ 300元'.match(/\d+(?!元)/g);            // ['10', '200', '30']  ← 回溯截尾
+'12345678'.replace(/\B(?=(\d{3})+(?!\d))/g, ','); // '12,345,678'(千分位)
+'USD$100 CNY¥88'.match(/(?<=\$)\d+/g);            // ['100']($ 后面的金额)
+
+// 并列断言当"多道关卡":必须同时含大小写、数字,不含空格,8 位起步
+const strongPwd = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?!.*\s)\S{8,}$/;
+strongPwd.test('Abc12345'); // true
+strongPwd.test('abc12345'); // false(缺大写)
+```
+
+> 运行方式：`npx tsx examples/01-37-regex-advanced.ts`（含负向先行截尾的反例输出、变长后行断言、ES2025 重复命名捕获组特性检测降级）
+
+#### 最佳实践
+
+- ✅ 不需要引用分组就写 `(?:...)`；需要引用优先命名组 `(?<name>)`——长正则里 `\k<name>` 与 `$<name>` 远比 `\3`、`$3` 可读；
+- ✅ 遍历多匹配用 `matchAll`（必须带 `/g`），别手写 `exec` 循环——忘写 `/g` 或漏推进 `lastIndex` 是经典死循环来源；
+- ✅ 校验"同时满足"用并列 `(?=)`，校验"必须没有"用 `(?!)`；两者都从同一位置出发、不消耗字符，可任意叠加；
+- ⚠️ 贪婪量词遇嵌套结构会"越界吞并"，截取片段一律惰性 `.+?` 或排除字符类 `[^>]+`；解析 HTML 标签树请用 DOM API，正则只做行内简单处理；
+- ⚠️ 嵌套量词 `(a+)+`、`(.*)*` 是 ReDoS 定时炸弹——面向用户输入的正则要限制输入长度，或改写成无嵌套量词的等价形式。
+
+---
+
+## 1.16 错误处理体系
+
+#### 概念解析
+
+`Error` 不是孤家寡人，它有一整套内建谱系，且全部可用 `instanceof` 判别：
+
+| 类型 | 触发场景 |
+| ---- | -------- |
+| `SyntaxError` | 语法解析失败（`JSON.parse` 坏 JSON 也是它） |
+| `TypeError` | 对 `null/undefined` 取属性、调用非函数、类型重赋值非法 |
+| `ReferenceError` | 读写未声明标识符（TDZ 访问 `let/const` 也是它） |
+| `RangeError` | 数值越界：递归爆栈、数组长度非法、`toFixed(-1)` |
+| `EvalError` / `URIError` | `eval` 误用、`decodeURIComponent` 坏编码 |
+| `AggregateError` | 多错误打包（`Promise.any` 全失败、ES2025 批处理） |
+| `SuppressedError`（ES2027 候选） | 清理过程又出错时保留"主错误 + 被抑制错误" |
+
+现代错误处理有四个升级点：① **`cause` 链（ES2022）**：`new Error('外层', { cause: err })` 保留因果上下文，日志可层层追溯；② **`catch (e)` 默认是 `unknown`**（TS 4.4+），必须收窄后再访问属性；③ ES2026 **`Error.isError(e)`** 跨 realm 判别（iframe/VM 里 `e instanceof Error` 会失效）；④ **Result 模式**（返回 `{ok:true,value} | {ok:false,error}`）让错误成为显式数据流，不依赖异常传播。
+
+#### 典型应用场景
+
+- 库边界抛**语义化自定义错误**（`HttpError extends Error` 带 status），调用方按类型分支处理；
+- 跨多层调用时用 `cause` 包裹底层错误，不丢失"是哪个用户/请求触发的"；
+- 批量并发：`Promise.any` 的 `AggregateError.errors` 拿到每一路失败；
+- 不希望异常打断流水线的场景（解析器、批处理、函数式管道）用 Result 模式。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-32-error-handling.ts（谱系/自定义/cause/unknown/finally/Aggregate/Suppressed/Result 共 8 块）
+
+// ---- 自定义错误:保留 name/stack,并带上业务字段 ----
+class HttpError extends Error {
+    constructor(
+        public status: number,
+        message: string,
+        public readonly cause?: unknown,
+    ) {
+        super(message);
+        this.name = new.target.name; // 子类继承后 name 正确;转译环境可再补 Object.setPrototypeOf
+    }
+}
+
+// ---- cause 链:每层添上下文,不吞掉根因 ----
+async function loadUser(id: string) {
+    try {
+        await fetch(`/api/users/${id}`);
+    } catch (err) {
+        throw new HttpError(502, `用户服务不可用:${id}`, { cause: err }); // 根错误挂在 cause
+    }
+}
+function printChain(e: unknown, depth = 0) {
+    if (e instanceof Error) {
+        console.log(`${'  '.repeat(depth)}${e.name}: ${e.message}`);
+        if (e.cause) printChain(e.cause, depth + 1);
+    }
+}
+
+// ---- catch 是 unknown:先收窄再用 ----
+try {
+    something();
+} catch (e) {
+    if (e instanceof HttpError && e.status === 404) {
+        // 按语义分支
+    } else if (e instanceof Error) {
+        console.error(e.message);
+    } else {
+        throw e; // 甚至可能 throw 字符串/对象,不要假设一定是 Error
+    }
+}
+
+// ---- finally 的陷阱:return 会覆盖 catch 的抛出;await 才能等到异步清理 ----
+try {
+    // ...
+} finally {
+    await flush(); // 没 await,外层 catch 看到的是已 resolve 的旧 Promise,真实错误晚到且无人处理
+}
+
+// ---- Result 模式:错误是值,不是异常 ----
+type Result<T, E = Error> = { ok: true; value: T } | { ok: false; error: E };
+function tryParse(json: string): Result<unknown> {
+    try {
+        return { ok: true, value: JSON.parse(json) };
+    } catch (error) {
+        return { ok: false, error: error as Error };
+    }
+}
+```
+
+> 运行方式：`npx tsx examples/01-32-error-handling.ts`（含 `Promise.any` 的 AggregateError 与 ES2027 SuppressedError 特性检测版演示）
+
+#### 最佳实践
+
+- ✅ 抛错信息遵循"**发生了什么 + 关键标识 + 怎么排查**"，原始错误一律挂 `cause`，绝不 `catch` 后只打一行日志就吞掉；
+- ✅ 库对外抛自定义错误类型并导出，调用方用 `instanceof` 分流；跨 frame/VM 边界用 ES2026 `Error.isError` 兜底；
+- ✅ `finally` 只放清理不放 `return`；异步清理记得 `await`；TS 中把 catch 变量当 `unknown`；
+- ⚠️ 区分"**预期内失败**"（用 Result/返回值表达，如校验不通过）与"**异常**"（用 throw 表达，如网络断了），不要滥用异常做流程控制；
+- ⚠️ `Promise.allSettled` 只负责汇报，错误信息要保留 `reason`，批量重试时聚合为 `AggregateError` 而不是只抛最后一个。
+
+---
+
+## 1.17 JSON 序列化深入
+
+#### 概念解析
+
+`JSON.stringify(value, replacer?, space?)` 远不是"对象转字符串"这么简单，它有一套**转换规则 + 两个钩子**：
+
+1. **值的处理规则**：`undefined`、函数、Symbol **在对象中被跳过、在数组中变 `null`**；`NaN/Infinity` 变 `null`；`Date` 调 `toJSON()` 变 ISO 字符串；`BigInt` 直接抛错；不可枚举属性被忽略；循环引用抛 `TypeError: Converting circular structure`；
+2. **`toJSON()` 钩子优先级最高**：序列化时如果值有 `toJSON`，先调它，再对返回值序列化；
+3. **replacer 钩子**：数组形式做**白名单字段筛选**，函数形式逐键转换（可隐藏敏感字段、统一格式）；
+4. **reviver 反向钩子**：`JSON.parse(text, reviver)` 在返回前逐键还原（时间字符串→Date、类型标记→类实例）。ES2026 起 reviver 接收第三参 `context`，其中 `context.source` 是**未经数字解析的原始文本**，配合 `JSON.rawJSON` 可实现大整数无损。
+
+**为什么不能用 `JSON.parse(JSON.stringify(x))` 深拷贝？** 它有七宗罪：`undefined/函数/Symbol` 丢失、`Date` 退化成字符串、`RegExp/Map/Set` 退化成 `{}`、循环引用报错、原型链丢失（结果全是普通对象）、`NaN/Infinity` 变 `null`、性能差。浏览器与 Node 17+ 的标准答案是 **`structuredClone`**（支持循环引用、Date/Map/Set/ArrayBuffer/Blob，结构化克隆算法；但函数/DOM 节点/原型类实例仍不支持）。
+
+#### 典型应用场景
+
+- 接口出参脱敏：replacer 统一剔除 `password/token` 字段；
+- 日志快照：白名单 replacer 只记业务字段，避免把函数和循环引用打进去；
+- 类实例持久化：`toJSON` 存"类型标记 + 数据"，reviver 按标记重建（同构序列化）；
+- ES2026 `JSON.rawJSON`：后端返回 18 位订单号 / 纳秒时间戳，避免 JS number 精度丢失。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/01-33-json-deep.ts（七宗罪对照 + structuredClone + rawJSON BigInt）
+
+// ---- toJSON 优先级最高,返回什么就序列化什么 ----
+class Point {
+    constructor(
+        public x: number,
+        public y: number,
+    ) {}
+    toJSON() {
+        return { $type: 'Point', coords: [this.x, this.y] }; // 打类型标记
+    }
+}
+
+// ---- replacer:函数逐键转换 / 数组做白名单 ----
+JSON.stringify(user, (key, value) =>
+    ['password', 'token'].includes(key) ? '[REDACTED]' : value,
+);
+JSON.stringify(user, ['id', 'name']); // 白名单:只保留 id/name
+
+// ---- reviver:按标记重建;Date 字段还原 ----
+JSON.parse(text, (key, value) => {
+    if (value && typeof value === 'object' && value.$type === 'Point')
+        return new Point(value.coords[0], value.coords[1]);
+    return value;
+});
+
+// ---- 深拷贝对比:JSON 法丢语义,structuredClone 保留 ----
+const src = { d: new Date('2024-01-01'), m: new Map([['a', 1]]), self: null as any };
+src.self = src; // 循环引用
+// JSON.parse(JSON.stringify(src)); // TypeError: Converting circular structure
+const cloned = structuredClone(src); // 成功;Date/Map/循环引用都保留,但原型是普通对象
+
+// ---- ES2026:大整数无损序列化（特性检测 + 降级为字符串方案）----
+if (typeof (JSON as any).rawJSON === 'function') {
+    const wire = JSON.stringify({ orderId: (JSON as any).rawJSON('9007199254740993123') });
+    // 数字以"原始 JSON 文本"嵌入,不会被解析成丢精度的 number
+    const obj = JSON.parse(wire, ((_k: string, v: unknown, ctx?: { source: string }) =>
+        _k === 'orderId' ? BigInt(ctx!.source) : v) as never); // ctx.source 取原始文本
+} else {
+    // 旧环境:序列化为字符串 {orderId:"9007199254740993123"},解析后自行 BigInt()
+}
+```
+
+> 运行方式：`npx tsx examples/01-33-json-deep.ts`（逐项演示 JSON 深拷贝七种丢失、`structuredClone` 能力边界与 ES2026 rawJSON 特性检测）
+
+#### 最佳实践
+
+- ✅ 深拷贝用 `structuredClone`；需要自定义类实例/特殊类型时写显式的 `toJSON` + reviver，或用支持插件的序列化库；
+- ✅ 对外输出统一走带白名单 replacer 的序列化函数，从源头避免敏感字段泄漏，而不是每个调用点手动删字段；
+- ✅ 超过 `Number.MAX_SAFE_INTEGER`（2^53−1）的 ID 在传输层就用字符串或 ES2026 `rawJSON` + BigInt，前后端约定一致；
+- ⚠️ `toJSON` 会改变"普通日志"里对象的样子（打印出 ISO 字符串而非 Date 对象），调试时留意；
+- ⚠️ `structuredClone` 不能克隆函数、getter/setter、原型方法，带行为的领域对象请实现自己的 `clone()`。
+
+---
+
+## 1.18 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【进阶】同步代码、setTimeout 回调、Promise.then 回调混在一起时,输出顺序是什么?给出判定口诀</b></summary>
+
+口诀:同步先跑完 → 微任务队列清空 → 取一个宏任务,循环。所以 console.log(1); setTimeout(()=>log(2)); Promise.resolve().then(()=>log(3)); console.log(4) 输出 1 4 3 2 —— setTimeout 属于宏任务,永远在全部微任务之后。
+</details>
+
+<details>
+<summary><b>2. 【进阶】闭包捕获的是值还是引用?写出一个由此引发的经典 bug 与修复方式</b></summary>
+
+捕获的是变量的引用。经典 bug:for(var i=0;i<3;i++) setTimeout(()=>console.log(i)) 输出 3 3 3 —— 三个回调共享同一个 i。修复:改用 let(每轮循环创建新的词法环境)或 IIFE 拷贝一份值。
+</details>
+
+<details>
+<summary><b>3. 【进阶】手写深拷贝为什么用 WeakMap 而不是 Map 记录已拷贝对象?</b></summary>
+
+两个原因:① 解决循环引用,遇到已拷贝对象直接返回缓存防止无限递归;② WeakMap 对 key 是弱引用,克隆完成后临时记录对象不会阻止垃圾回收,Map 则会全部兜住造成内存驻留。
+</details>
+
+<details>
+<summary><b>4. 【进阶】Promise.all 中一个请求失败,其余进行中的请求会被取消吗?</b></summary>
+
+不会。all 只是"不再等待结果",已发出的请求仍会完成并占用带宽。需要真正取消必须用 AbortController,在失败时 abort 其余请求(见竞态处理一节)。
+</details>
+
+<details>
+<summary><b>5. 【基础】new 操作符具体做了哪四步?</b></summary>
+
+① 创建空对象;② 把对象的原型指向构造函数的 prototype;③ 以该对象为 this 执行构造函数;④ 构造函数返回对象时用它,否则返回第一步创建的对象。
+</details>
+
+<details>
+<summary><b>6. 【基础】Object.defineProperty 中省略的特性默认值是什么?哪些特性不能同时出现?</b></summary>
+
+用 defineProperty 新建属性时,value/writable/enumerable/configurable 省略都默认 false(字面量直接定义的属性则默认全 true)。数据特性 value/writable 与访问器特性 get/set 互斥,同时出现抛 TypeError: Invalid property descriptor。另注意 configurable:false 后不能再改描述符、不能 delete,但 writable:true 仍可被单向改成 false。
+</details>
+
+<details>
+<summary><b>7. 【挑战】preventExtensions / seal / freeze 三档区别是什么?freeze 一个嵌套配置对象能彻底防改吗?</b></summary>
+
+preventExtensions 只禁止新增;seal 在其基础上把所有属性置 configurable:false(禁止删除/重配);freeze 再把数据属性置 writritable:false(禁止改值)。三者都是浅操作,嵌套对象不受影响,配置数据必须递归 deepFreeze。另外 ESM 与严格模式下对冻结对象赋值会直接抛 TypeError,而不是静默失败。
+</details>
+
+<details>
+<summary><b>8. 【进阶】class extends 等价于哪种 ES5 继承方案?super() 前后使用 this 会怎样?</b></summary>
+
+等价于寄生组合式继承:Object.create(Parent.prototype) 复制原型链(空构造中转,父构造不执行)+ Parent.call(this) 继承实例字段。super() 必须在构造函数访问 this 之前调用,否则 ReferenceError;super.method() 从父类原型找方法但方法内 this 仍指向子实例。静态方法中的 this 指向当前类本身,子类调用时会多态到子类。
+</details>
+
+<details>
+<summary><b>9. 【基础】Symbol 键会出现在 Object.keys / for...in / JSON.stringify 里吗?Symbol.for 与 Symbol() 有何区别?</b></summary>
+
+都不会。Symbol 键只能通过 Object.getOwnPropertySymbols 枚举,因此适合做库扩展键和"半私有"元数据。Symbol('x') 每次返回全新唯一值;Symbol.for('x') 在全局注册表登记,跨模块/跨 realm 重复调用拿到同一个 Symbol,可用 Symbol.keyFor 反查登记名。
+</details>
+
+<details>
+<summary><b>10. 【基础】new Set([NaN,NaN]).size 是多少?ES2025 给 Set 增加了哪些数学方法?</b></summary>
+
+size 为 1,Set 使用 SameValueZero 比较,NaN 与 NaN 视为相等(+0/-0 也相等)。ES2025 新增 union、intersection、difference、symmetricDifference、isSubsetOf、isSupersetOf、isDisjointFrom 七个方法,均返回新布尔/新集合、不修改原集合。旧环境使用前必须 typeof 特性检测并提供兜底。
+</details>
+
+<details>
+<summary><b>11. 【进阶】给 DOM 节点关联一份"节点消失后自动释放"的统计数据,用 Map 还是 WeakMap?为什么?</b></summary>
+
+用 WeakMap。它的键只能是对象(ES2023 起也可是 Symbol)且是弱引用:DOM 节点被移除且无其他引用时,GC 可连同条目一起回收,无需手动 delete,杜绝内存泄漏。代价是没有 size、不可遍历。需要遍历或键为字符串时才用 Map,并自行管理删除。
+</details>
+
+<details>
+<summary><b>12. 【进阶】toSorted/toReversed/with 是哪年规范?生产代码使用新 API 的正确姿势是什么?</b></summary>
+
+数组非破坏性方法 toSorted/toReversed/toSpliced/with 与 findLast 是 ES2023。使用新 API 的正确姿势:① 查 TC39 finished-proposals 确认版本,查 caniuse/Node 版本确认落地;② typeof fn === 'function' 或 'key' in prototype 做特性检测,旧环境给降级分支;③ 语法差异靠 Babel/SWC 转译,但内置 API 需要 core-js 等 polyfill,二者不能互相替代。
+</details>
+
+<details>
+<summary><b>13. 【进阶】ES2027 候选的 using 解决了什么问题?DisposableStack 按什么顺序释放资源?</b></summary>
+
+using/await using 是显式资源管理:资源对象实现 Symbol.dispose/asyncDispose,离开词法块时(无论正常结束还是抛异常)自动调用,杜绝忘记 close 文件/连接。DisposableStack 用 use/defer 注册多个资源,按后进先出(LIFO)释放;清理阶段再抛错会用 SuppressedError 同时保留主错误与被抑制错误,不吞根因。
+</details>
+
+<details>
+<summary><b>14. 【挑战】Vue3 为什么用 Proxy 重写 Vue2 的 defineProperty 响应式?Proxy 捕获器里的 receiver 有什么用?</b></summary>
+
+defineProperty 只能逐属性拦截,新增键、删除键、数组下标与 length 变化监测不到,需要 Vue.set/delete 打补丁;Proxy 代理整个对象,13 个捕获器覆盖全部元操作且对深层对象可惰性代理。receiver 表示触发访问时 this 应指向的对象:代理被其他对象继承时,Reflect.get(target,key,receiver) 保证 getter 的 this 指向继承者;省略 receiver 则多态失效,getter 读到原型自己的字段。
+</details>
+
+<details>
+<summary><b>15. 【进阶】实现斐波那契生成器后,const it=gen(); 连续两次 for...of(it) 会发生什么?next(10) 传入的值去哪了?</b></summary>
+
+第一次 for...of 已把迭代器耗尽,第二次静默为空——迭代器是有状态的。需要可重复遍历应实现可迭代协议 [Symbol.iterator](),每次返回新迭代器。next(x) 的参数会作为"上一条 yield 表达式"的返回值,所以首次 next 传参无效;生成器内要用变量接收 yield 的结果(如 const a: number = yield 1)才能拿到。
+</details>
+
+<details>
+<summary><b>16. 【挑战】catch(e) 中的 e 能直接访问 message 吗?如何保留跨函数的错误因果?Promise.any 全失败拿到什么?</b></summary>
+
+TS 4.4 起 catch 变量是 unknown,必须先 instanceof Error(或 ES2026 Error.isError,跨 iframe/VM 更可靠)收窄。跨层包装错误用 new Error('外层说明',{ cause: 原始错误 }),日志沿 cause 链追溯,不要吞错。Promise.any 全部 reject 时抛 AggregateError,其 errors 数组包含每一路失败原因;不希望异常中断流水线时可改用 Result 模式({ok,value}|{ok:false,error})。
+</details>
+
+<details>
+<summary><b>17. 【挑战】JSON.stringify({a:undefined,b:()=>{},c:[undefined,Symbol()],d:NaN}) 的结果是什么?深拷贝与超大整数 ID 怎么办?</b></summary>
+
+对象中的 undefined、函数、Symbol 被直接跳过;数组中的 undefined/Symbol 变 null 以保持下标;NaN/Infinity 变 null;Date 变 ISO 字符串;循环引用直接抛错。结果为 {"c":[null,null],"d":null}。深拷贝用 structuredClone(支持循环引用/Map/Set/Date,但不支持函数与类原型);超过 2^53-1 的整数 ID 用字符串传输,或 ES2026 用 JSON.rawJSON 原样嵌入、parse reviver 第三参 context.source 取回文本转 BigInt。
+</details>
+
+<details>
+<summary><b>18. 【进阶】严格模式下 fn.call(null, 1) 函数内的 this 是什么?Promise.resolve().then 里 return 一个 thenable,时序有什么变化?</b></summary>
+
+严格模式下 call/apply 传入的 null/undefined 不被替换为全局对象,this 就是 null(非严格函数体里才会回退到全局对象);Object.prototype.toString.call(null) 得到 [object Null]。then/await 遇到 thenable 会额外安排一轮微任务(取出 then 函数一次、调用一次共两个作业),所以手写 thenable 的决议比原生 Promise 晚一个 tick——Promise 顺序题中"thenable 慢半拍"是固定考点。
+</details>
+
+<details>
+<summary><b>19. 【进阶】/&lt;.+&gt;/ 和 /&lt;.+?&gt;/ 对 "&lt;div&gt;&lt;span&gt;" 的匹配结果分别是什么?机制差别在哪?</b></summary>
+
+贪婪版匹配整个串:先吃到行尾最后一个 >,不满足再逐字符回吐;惰性版只匹配 &lt;div&gt;:刚好满足就停。机制差别在回溯方向——贪婪"吃多了往回吐",惰性"不够再往前吃";嵌套结构下贪婪会跨标签吞并,所以截取片段要用惰性或排除字符类(如 [^&gt;]+)。
+</details>
+
+<details>
+<summary><b>20. 【挑战】用一个正则把 12345678 变成 12,345,678,并解释 /\B(?=(\d{3})+(?!\d))/g 每一段的作用</b></summary>
+
+'12345678'.replace(/\B(?=(\d{3})+(?!\d))/g, ',')。\B 锚定"非单词边界"(即数字内部的位置);(?=(\d{3})+(?!\d)) 要求右侧是一个或多个完整 3 位组,且再往后不是数字——保证分组从右往左数;断言是零宽的,不消耗任何字符,所以 replace 是在"位置"上插入逗号,而不是替换内容。
+</details>
+
+<details>
+<summary><b>21. 【进阶】(?=) (?!) (?&lt;=) (?&lt;!) 分别是什么?'100元'.match(/\d+(?!元)/g) 为什么得到 ['10'] 而不是 null?</b></summary>
+
+依次是正向先行、负向先行、正向后行、负向后行断言,都是零宽的"看一眼左右、不吃字符"。得到 ['10'] 是贪婪回溯:\d+ 先吃 100,发现右边是元(不满足),回吐一个字符变成 10,此时右边是 0(不是元)就满足了——负向先行挡不住回溯换个位置重新满足;千分位正则正是靠再叠一层 (?!\d) 钉死"右侧必须是完整 3 位组"来避免这种截尾。
+</details>
+
+<details>
+<summary><b>22. 【进阶】yield* 表达式的返回值从哪来?break 退出 for...of 遍历一棵用 yield* 递归委托的树时,清理逻辑如何触发?</b></summary>
+
+yield* 的值是被委托生成器 return 的返回值——for...of 和展开运算符永远拿不到它,只有显式接收 yield* 表达式才能接住。break 触发外层迭代器的 return(),return() 会沿 yield* 委托链逐层传递,每一层生成器的 finally 都会执行,整条链的未消费部分被统一收尾——这是惰性遍历能"找到即停、零残留"的机制保证。
+</details>
+
+---
+
+## 1.19 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 浮点精度 | `0.1 + 0.2 !== 0.3`，金额比较莫名失败 | 二进制浮点无法精确表示十进制小数；金额用「分」为单位存整数，比较时设误差阈值（如 `Math.abs(a - b) < 1e-9`） |
+| `sort` | 排序结果不是数值顺序，原数组还被改乱 | 默认按 `String()` 字典序比较（`[10,2,1].sort()` 得 `[1,10,2]`）且原地修改；显式传比较器 `(a, b) => a - b`，要保留原数组就先 `[...arr].sort()` |
+| 循环中的闭包 | `for` 里注册的回调全打印同一个最终值 | `var` 只有一个函数级绑定，回调捕获的是循环结束后的值；改用 `let`（每轮独立绑定），或在回调工厂里用函数参数固定当轮值 |
+| `NaN` 判断 | `NaN === NaN` 恒为假，`Object.is` 又能区分符号零 | 判 `NaN` 用 `Number.isNaN`（不做参数强转）；要区分 `+0`、`-0` 与 `NaN` 相等用 `Object.is`，其余全等判断仍用 `===` |
+| 原型污染 | 合并用户传入的 JSON 后，整份对象行为异常 | 合并前用 `Object.hasOwn` 校验并过滤 `__proto__`、`constructor`、`prototype` 键，或让字典用 `Object.create(null)`，拒绝把外部输入直接铺进原型 |
+| 深拷贝 | `JSON.parse(JSON.stringify(obj))` 后 `Date` 变字符串、遇循环引用直接抛错 | 该方案只搬 JSON 安全子集，会丢 `undefined`、函数、`Symbol` 与原型；改用 `structuredClone`（支持循环引用与 `Map`、`Set`、`Date`），或按需写递归克隆 |
+| 日期与时区 | `new Date('2026-10-20')` 在东八区显示成前一天 | 纯日期字符串被按 UTC 解析；改用 `new Date(y, m - 1, d)` 或带时区的 ISO 串，显示时用 `Intl.DateTimeFormat` 显式指定 `timeZone` |

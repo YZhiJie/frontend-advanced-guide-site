@@ -1,0 +1,608 @@
+# 第五部分：状态管理方案（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/05-state-management
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第五部分：状态管理方案
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[框架深入理解](./04-frameworks.md)｜下一篇：[网络请求优化](./06-network.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-5" target="_blank" rel="noopener">EP.05《状态管理思想》</a>
+
+## 本部分内容
+
+- [5.1 状态管理设计思想](#_5-1-状态管理设计思想)
+- [5.2 Redux 思想与 RTK](#_5-2-redux-思想与-rtk)
+- [5.3 Zustand 轻量方案](#_5-3-zustand-轻量方案)
+- [5.4 Pinia 与 Vue3](#_5-4-pinia-与-vue3)
+- [5.5 服务端状态管理 TanStack Query](#_5-5-服务端状态管理-tanstack-query)
+- [5.6 状态管理选型对比](#_5-6-状态管理选型对比)
+- [5.7 状态持久化与版本迁移](#_5-7-状态持久化与版本迁移)
+- [5.8 自测题](#_5-8-自测题)
+- [5.9 本章避坑清单](#_5-9-本章避坑清单)
+
+---
+
+## 5.1 状态管理设计思想
+
+#### 概念解析
+
+状态管理先分类，再选型——**不同状态有不同的家**：
+
+| 状态类型 | 例子 | 应该放在哪里 |
+| -------- | ---- | ------------ |
+| 本地 UI 状态 | 弹窗开关、输入框值 | 组件 useState/ref |
+| 跨组件共享状态 | 主题、登录用户、购物车 | 全局 store |
+| 服务端状态 | 列表数据、详情数据 | 数据请求库（缓存语义），见 [5.5](./05-state-management.md#_5-5-服务端状态管理-tanstack-query) |
+| URL 状态 | 筛选条件、页码、tab | 路由参数（可分享、可回退） |
+
+**Redux 三原则**（理解思想比记住 API 重要）：单一数据源、状态只读（只能通过 dispatch action 修改）、用纯函数（reducer）执行修改。
+
+```mermaid
+flowchart LR
+    A["View 组件"] -- "dispatch(action)" --> B["Reducer<br/>纯函数: (旧状态, action) → 新状态"]
+    B --> C["Store<br/>单一数据源"]
+    C -- "subscribe 通知 + getState" --> A
+```
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/05-01-mini-redux.ts
+// ============ 手写 30 行 Redux:理解"可预测状态容器"============
+
+type Action = { type: string; payload?: unknown };
+type Reducer<S> = (state: S, action: Action) => S;
+
+function createStore<S>(reducer: Reducer<S>, preloadedState?: S) {
+    let state = preloadedState as S;
+    const listeners = new Set<() => void>();
+
+    return {
+        getState: () => state,
+        dispatch(action: Action) {
+            state = reducer(state, action); // ① 纯函数计算新状态
+            listeners.forEach((l) => l());  // ② 通知所有订阅者
+            return action;
+        },
+        subscribe(listener: () => void) {
+            listeners.add(listener);
+            return () => listeners.delete(listener); // 返回取消订阅
+        },
+    };
+}
+
+// ---- 使用:计数器 ----
+type CounterState = { value: number };
+const initialState: CounterState = { value: 0 };
+
+function counterReducer(state: CounterState = initialState, action: Action): CounterState {
+    switch (action.type) {
+        case 'increment':
+            return { ...state, value: state.value + 1 }; // 不可变更新,纯函数
+        case 'add':
+            return { ...state, value: state.value + (action.payload as number) };
+        default:
+            return state; // 未知 action 返回原状态
+    }
+}
+
+const store = createStore(counterReducer);
+const unsubscribe = store.subscribe(() => console.log('状态变化:', store.getState()));
+
+store.dispatch({ type: 'increment' });       // { value: 1 }
+store.dispatch({ type: 'add', payload: 10 }); // { value: 11 }
+unsubscribe();
+store.dispatch({ type: 'increment' });        // 不再打印,但状态仍在变化
+console.log('最终:', store.getState());
+```
+
+> 运行方式：`npx tsx examples/05-01-mini-redux.ts`
+
+#### 最佳实践
+
+- ✅ 能放组件内的状态不升级为全局；能放 URL 的筛选条件不放 store；
+- ✅ 服务端数据（列表/详情）**优先考虑请求库的缓存能力**，手动同步 store 是 90% 状态管理复杂度的来源；
+- ⚠️ "全局 store 一把梭"会让组件无法复用、测试需要初始化一堆环境。
+
+## 5.2 Redux 思想与 RTK
+
+#### 概念解析
+
+手写 Redux 理解思想后，实际项目直接用 **Redux Toolkit（RTK）**：`createSlice` 合并 action/reducer 定义、内置 Immer 允许"可变写法"、`createAsyncThunk` 处理异步、`configureStore` 自动接入 DevTools 与中间件。
+
+#### 完整代码示例
+
+```typescript
+// 文件: src/store/counterSlice.ts —— RTK 标准写法
+import { createSlice, configureStore, createAsyncThunk, createSelector } from '@reduxjs/toolkit';
+
+// ---- 异步 thunk:请求的三态自动派发(需先于 slice 声明) ----
+interface User { id: string; name: string }
+const fetchUser = createAsyncThunk<User, string>('counter/fetchUser', async (userId) => {
+    const res = await fetch(`/api/user/${userId}`);
+    return (await res.json()) as User;
+});
+
+// ---- Slice:一个业务域的状态 + reducers + actions 一站式定义 ----
+interface CounterState {
+    value: number;
+    loading: boolean;
+    user: User | null;
+}
+
+const counterSlice = createSlice({
+    name: 'counter',
+    initialState: { value: 0, loading: false, user: null } as CounterState,
+    reducers: {
+        // 看似"可变",实际 Immer 在底层生成不可变更新 —— 心智负担大幅降低
+        increment(state) {
+            state.value += 1;
+        },
+        addAmount(state, action: { payload: number }) {
+            state.value += action.payload;
+        },
+    },
+    // extraReducers:监听异步 thunk 的生命周期(pending/fulfilled/rejected)
+    extraReducers: (builder) => {
+        builder
+            .addCase(fetchUser.pending, (state) => {
+                state.loading = true;
+            })
+            .addCase(fetchUser.fulfilled, (state, action) => {
+                state.loading = false;
+                state.user = action.payload;
+            });
+    },
+});
+
+export const { increment, addAmount } = counterSlice.actions;
+
+// ---- 组合 selector:记忆化,依赖不变不重算 ----
+export const selectDouble = createSelector(
+    [(state: { counter: { value: number } }) => state.counter.value],
+    (value) => value * 2,
+);
+
+// ---- Store ----
+export const store = configureStore({
+    reducer: { counter: counterSlice.reducer },
+});
+
+// 组件中使用:const value = useSelector((s: RootState) => s.counter.value)
+//             const dispatch = useDispatch()
+//             dispatch(increment())
+```
+
+> 运行方式：`npm i @reduxjs/toolkit react-redux`，放入 React 项目后通过 `<Provider store={store}>` 接入。
+
+#### 最佳实践
+
+- ✅ 现代 Redux 项目 = RTK + `useSelector`/`dispatch` + selector 记忆化，不要再手写 actionType 常量与 switch 大文件；
+- ✅ 需要强审计能力（每个变更可回放、时间旅行调试）的中大型系统才选 Redux；轻量场景用 Zustand；
+- ⚠️ 服务端数据不要塞进 Redux——那是 RTK Query / TanStack Query 的领域。
+
+## 5.3 Zustand 轻量方案
+
+#### 概念解析
+
+Zustand 的核心是"**一个 hook 即 store**"：无 Provider、无样板代码、基于 `useSyncExternalStore` 实现精确订阅（组件只订阅用到的切片）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: src/store/useCartStore.ts
+import { create } from 'zustand';
+
+interface CartItem { id: string; name: string; price: number }
+
+interface CartState {
+    items: CartItem[];
+    coupon: string | null;
+    addItem: (item: CartItem) => void;
+    removeItem: (id: string) => void;
+    setCoupon: (coupon: string | null) => void;
+}
+
+export const useCartStore = create<CartState>()((set) => ({
+    items: [],
+    coupon: null,
+
+    addItem: (item) =>
+        set((state) => ({ items: [...state.items, item] })), // 函数式更新,不可变
+    removeItem: (id) =>
+        set((state) => ({ items: state.items.filter((it) => it.id !== id) })),
+    setCoupon: (coupon) => set({ coupon }), // 直接部分覆盖
+}));
+
+// 派生值:在组件里用 useMemo,或抽成普通函数(在组件里调用)
+export const selectTotal = (state: CartState) =>
+    state.items.reduce((sum, it) => sum + it.price, 0);
+```
+
+```tsx
+// 文件: src/demo/CartDemo.tsx —— 精确订阅是 Zustand 的性能核心
+import { useCartStore, selectTotal } from '@/store/useCartStore';
+
+export function CartBadge() {
+    // ✅ 只订阅 total 这一个切片:items 变化但总价不变时,本组件不会重渲染
+    const total = useCartStore(selectTotal);
+    console.log('Badge 渲染', total);
+    return <span>总计 ¥{total}</span>;
+}
+
+export function CartPanel() {
+    const items = useCartStore((s) => s.items);
+    const removeItem = useCartStore((s) => s.removeItem); // actions 引用稳定,永远不引起重渲染
+
+    return (
+        <ul>
+            {items.map((it) => (
+                <li key={it.id}>
+                    {it.name}
+                    <button onClick={() => removeItem(it.id)}>删除</button>
+                </li>
+            ))}
+        </ul>
+    );
+}
+// 组件外使用(如请求拦截器里改 store):
+// useCartStore.getState().setCoupon('VIP9');
+```
+
+> 运行方式：`npm i zustand`，放入 React 项目运行。
+
+#### 最佳实践
+
+- ✅ selector 颗粒度尽量细，或返回**原始值**（对象/数组返回值需配合 `useShallow` 浅比较）；
+- ✅ 组件外读写用 `useStore.getState()` / `useStore.setState()`，配合请求层非常顺手；
+- ⚠️ 中间件按需加：`persist`（本地持久化）、`devtools`（调试），默认保持裸 store。
+
+## 5.4 Pinia 与 Vue3
+
+#### 概念解析
+
+Pinia 是 Vue3 官方推荐：**没有 mutation、天然 TypeScript、支持 setup 写法**。它直接复用 Vue 的响应式系统（`ref`/`computed`），所以心智模型与组件内完全一致。
+
+#### 完整代码示例
+
+```typescript
+// 文件: src/stores/counter.ts —— Setup Store 写法(推荐)
+import { computed, ref } from 'vue';
+import { defineStore } from 'pinia';
+
+export const useCounterStore = defineStore('counter', () => {
+    // state → ref
+    const count = ref(0);
+    // getter → computed(自带缓存)
+    const double = computed(() => count.value * 2);
+    // action → 普通函数,支持 async
+    async function incrementAsync() {
+        await new Promise((r) => setTimeout(r, 500));
+        count.value++;
+    }
+    function reset() {
+        count.value = 0;
+    }
+
+    return { count, double, incrementAsync, reset };
+});
+```
+
+```vue
+<!-- 文件: src/components/Counter.vue -->
+<script setup lang="ts">
+import { storeToRefs } from 'pinia';
+import { useCounterStore } from '@/stores/counter';
+
+const store = useCounterStore();
+// ⚠️ 关键:从 store 解构响应式状态必须用 storeToRefs
+// 直接解构会丢失响应性(const { count } = store ❌)
+const { count, double } = storeToRefs(store);
+// action 是普通函数,可直接解构
+const { incrementAsync } = store;
+</script>
+
+<template>
+    <p>{{ count }} × 2 = {{ double }}</p>
+    <button @click="store.count++">直接改(小项目可行)</button>
+    <button @click="incrementAsync">异步 +1</button>
+    <button @click="store.$patch({ count: 99 })">批量修改($patch 合并)</button>
+    <button @click="store.$reset()">重置</button>
+</template>
+```
+
+> 运行方式：`npm i pinia`，在 `main.ts` 中 `app.use(createPinia())` 后运行。
+
+#### 最佳实践
+
+- ✅ 解构状态必用 `storeToRefs`，这是 Pinia 最高频的坑；
+- ✅ 跨 store 组合：在 setup store 里直接调用另一个 `useXxxStore()`，天然组合复用；
+- ⚠️ `$reset` 在 Setup Store 中需自己实现（重置各 ref 为初始值）。
+
+## 5.5 服务端状态管理 TanStack Query
+
+#### 概念解析
+
+**服务端状态的三个本质难题**：缓存、失效、并发同步。手写 `loading`/`data`/`error` 三件套永远处理不完这些边界。TanStack Query（Vue/React 通用）把它们变成声明式配置：**QueryKey 是缓存的身份证，数据陈旧时自动重新拉取**。
+
+#### 完整代码示例
+
+```tsx
+// 文件: src/demo/QueryDemo.tsx
+import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            staleTime: 60_000,   // 60s 内视为新鲜,不重复请求(默认 0)
+            retry: 2,            // 失败自动重试 2 次
+            refetchOnWindowFocus: false, // 按需关闭聚焦刷新
+        },
+    },
+});
+
+// ---- 查询:key 是缓存与失效的钥匙 ----
+function TodoList({ page }: { page: number }) {
+    const { data, isPending, error } = useQuery({
+        queryKey: ['todos', page], // 分页数据 key 带页码 → 每页独立缓存
+        queryFn: async () => {
+            const res = await fetch(`/api/todos?page=${page}`);
+            if (!res.ok) throw new Error('请求失败');
+            return res.json() as Promise<{ list: { id: number; title: string }[] }>;
+        },
+        placeholderData: (prev) => prev, // 翻页时保留上一页数据,避免闪空
+    });
+
+    if (isPending) return <p>加载中...</p>;
+    if (error) return <p>出错了:{error.message}(已自动重试 2 次)</p>;
+    return <ul>{data.list.map((t) => <li key={t.id}>{t.title}</li>)}</ul>;
+}
+
+// ---- 变更:成功后精确失效相关缓存 ----
+function AddTodo() {
+    const queryClient = useQueryClient();
+    const mutation = useMutation({
+        mutationFn: (title: string) =>
+            fetch('/api/todos', { method: 'POST', body: JSON.stringify({ title }) }).then((r) => r.json()),
+        onSuccess: () => {
+            // 新增成功 → 所有 todos 相关查询标记为陈旧 → 挂载中的自动重新拉取
+            void queryClient.invalidateQueries({ queryKey: ['todos'] });
+        },
+    });
+
+    return (
+        <button
+            onClick={() => mutation.mutate('新任务')}
+            disabled={mutation.isPending}
+        >
+            {mutation.isPending ? '提交中...' : '新增任务'}
+        </button>
+    );
+}
+
+export function App() {
+    return (
+        <QueryClientProvider client={queryClient}>
+            <TodoList page={1} />
+            <AddTodo />
+        </QueryClientProvider>
+    );
+}
+```
+
+> 运行方式：`npm i @tanstack/react-query`（Vue 项目用 `@tanstack/vue-query`），放入项目运行。
+
+#### 最佳实践
+
+- ✅ 用 `staleTime` 表达业务的数据新鲜度要求，而不是全局 0（默认每次挂载都请求）；
+- ✅ QueryKey 用**数组分层**（`['todos', filters, page]`），失效时按前缀 `invalidateQueries`；
+- ✅ 提交类操作用 `useMutation` + `onSuccess` 精确失效，避免"提交后手动 refetch 全列表"的土法；
+- ⚠️ 不要把"登录用户"这类会话状态也交给 Query——它属于全局 store，两套系统各司其职。
+
+## 5.6 状态管理选型对比
+
+| 方案 | 生态 | 体积 | 心智负担 | 适用场景 |
+| ---- | ---- | ---- | -------- | -------- |
+| Redux Toolkit | React | 中 | 中（概念多但 RTK 已简化） | 大型应用、需要强审计/时间旅行 |
+| Zustand | React | 极小 | 低 | 中小型 React 应用的默认选择 |
+| Jotai/Recoil | React | 小 | 低（原子化） | 细粒度状态、派生关系复杂 |
+| Pinia | Vue | 极小 | 低 | Vue3 项目唯一推荐 |
+| TanStack Query | 双栈 | 小 | 中（缓存概念） | 一切服务端状态 |
+| XState | 双栈 | 中 | 高（状态机） | 复杂流程（审批流、向导） |
+
+**推荐组合**（2026 年主流）：
+
+- React：**Zustand（客户端状态）+ TanStack Query（服务端状态）+ URL（筛选状态）**；
+- Vue：**Pinia + VueUse + TanStack Query**；
+- 只有在"变更需要被审计/回放"或团队已有 Redux 资产时才引入 Redux。
+
+---
+
+## 5.7 状态持久化与版本迁移
+
+#### 概念解析
+
+刷新页面时 store 会随内存一起消失，但用户偏好、草稿、购物车这类状态，用户默认"下次打开还在"。持久化就是把这部分状态序列化进 storage、启动时回填（rehydrate）。看着只是 `JSON.stringify` 加 `localStorage.setItem`，真正会翻车的是三个边界：
+
+- **序列化边界**：`JSON.stringify` 的往返是有损的——函数、`undefined`、`Date`、`Map`/`Set` 都会变形（详见 [1.17 JSON 序列化深入](./01-javascript-advanced.md#_1-17-json-序列化深入)），所以只持久化能安全往返的纯数据；
+- **版本迁移**：产品迭代后，用户浏览器里躺着的是**上一版结构**的数据。没有版本号就只能"读不懂就清空"，等于替用户丢掉草稿和购物车；正确做法是给落盘数据带上 `version`，并保留一条逐级升级（`0→1→2`）的迁移链；
+- **水合时机**：首屏渲染必须与"未持久化时的初始状态"一致，否则 SSR/SSG 下会 hydration mismatch。回填要放在挂载后（`useEffect` / `onMounted`），或用 `skipHydration` 显式控制，而不是在渲染函数里直接读 storage。
+
+5.3 里提到的 `persist` 中间件，正是把这三点打包成配置（`name` / `version` / `migrate` / `partialize` / `storage`）——理解上面的边界，才知道每一项配置在防什么。
+
+#### 典型应用场景
+
+- 用户偏好：主题、语言、侧边栏折叠状态；
+- 表单草稿与未提交的编辑内容（最怕切页面 / 刷新丢失）；
+- 购物车、最近浏览等**低频变更**的客户端状态；
+- ⚠️ 不适合：服务端数据（交给 [5.5](./05-state-management.md#_5-5-服务端状态管理-tanstack-query) 的缓存语义）、筛选条件（应放 URL，可分享、可回退）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/05-02-persist-migrate.ts
+// ============ store 持久化:序列化信封 + 版本迁移链 + 坏数据容错 ============
+
+/** 存储适配器:localStorage / sessionStorage / 内存 mock 都满足这个形状 */
+interface StorageLike {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+}
+
+/** Node/测试用的内存实现(浏览器里直接传 localStorage 即可) */
+class MemoryStorage implements StorageLike {
+    private map = new Map<string, string>();
+
+    getItem(key: string): string | null {
+        return this.map.has(key) ? (this.map.get(key) as string) : null;
+    }
+
+    setItem(key: string, value: string): void {
+        this.map.set(key, value);
+    }
+
+    removeItem(key: string): void {
+        this.map.delete(key);
+    }
+}
+
+// ---- 当前 schema(v2):主题 + 带数量的购物车 ----
+interface RootState {
+    theme: 'light' | 'dark';
+    cart: { id: string; qty: number }[];
+}
+
+const KEY = 'fag-cart';
+const CURRENT_VERSION = 2;
+
+/** 迁移函数:输入上一版结构,输出下一版结构 */
+const migrations: Record<number, (old: any) => any> = {
+    // v0 → v1:布尔 darkMode 改名成 theme
+    0: (old) => ({ theme: old.darkMode ? 'dark' : 'light', cart: old.cart }),
+    // v1 → v2:cart 从 string[](只存 id)升级成 { id, qty }[],数量默认 1
+    1: (old) => ({
+        theme: old.theme,
+        cart: (old.cart as string[]).map((id) => ({ id, qty: 1 })),
+    }),
+};
+
+function migrate(raw: { version: number; data: any }): RootState | null {
+    let version = raw.version;
+    let data = raw.data;
+    if (version > CURRENT_VERSION) return null; // 用户回滚了代码,旧代码读不懂新数据
+    while (version < CURRENT_VERSION) {
+        const step = migrations[version];
+        if (!step) return null; // 缺迁移函数:宁可放弃,不可瞎猜
+        data = step(data);
+        version++;
+        console.log(`  ↳ 迁移 v${version - 1} → v${version}`);
+    }
+    return data as RootState;
+}
+
+function createPersist(storage: StorageLike) {
+    return {
+        save: (state: RootState) =>
+            storage.setItem(
+                KEY,
+                JSON.stringify({ version: CURRENT_VERSION, data: state }),
+            ),
+        load: (): RootState | null => {
+            const text = storage.getItem(KEY);
+            if (!text) return null;
+            try {
+                return migrate(JSON.parse(text));
+            } catch {
+                return null; // 存储被污染(手改 / 半截写入):当无数据,绝不崩首屏
+            }
+        },
+    };
+}
+
+// ---- 场景:老用户浏览器里躺着 v0 数据 ----
+const storage = new MemoryStorage();
+storage.setItem(
+    KEY,
+    JSON.stringify({ version: 0, data: { darkMode: true, cart: ['s-1', 's-2'] } }),
+);
+
+const persist = createPersist(storage);
+console.log('恢复结果:', persist.load()); // v0 逐级迁移到 v2
+
+persist.save({ theme: 'dark', cart: [{ id: 's-1', qty: 2 }] });
+console.log('落盘:', storage.getItem(KEY)); // 信封带上了当前版本号
+
+// ---- 坏数据不崩首屏 ----
+storage.setItem(KEY, '{ 半截写入');
+console.log('坏数据恢复:', persist.load());
+```
+
+> 运行方式：`npx tsx examples/05-02-persist-migrate.ts`
+
+实测输出：读到 v0 旧数据时依次打印 `↳ 迁移 v0 → v1`、`↳ 迁移 v1 → v2`，恢复结果是 `theme: 'dark'` + 两条 `qty` 补成 1 的购物车项；落盘后被改坏的字符则返回 `null`，首屏照常渲染。
+
+#### 最佳实践
+
+- ✅ 只持久化 `partialize` 选出的纯数据子集，别把整个 store 落盘（函数、派生值、临时 loading 态都没有持久化的意义）；
+- ✅ 落盘数据一律带 `version` + 迁移函数，让旧结构能被升级，而不是被清空；
+- ✅ 存储键加项目 / 账号前缀（如 `fag-cart:${userId}`），避免同域多应用、多账号互相覆盖；
+- ⚠️ `JSON.parse` 必须包 `try/catch`：storage 里的数据随时可能被手改、半截写入或撞上容量配额，解析失败应回退到初始状态，而不是抛错崩溃。
+
+---
+
+## 5.8 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】Redux 的三原则是什么?</b></summary>
+
+① 单一数据源:整个应用一个 store;② 状态只读:唯一修改方式是 dispatch action;③ 纯函数修改:reducer 接收旧状态与 action 返回新状态,不可变更新。
+</details>
+
+<details>
+<summary><b>2. 【进阶】服务端状态为什么不适合放进全局 store?</b></summary>
+
+它的本质是"远端数据的缓存",天然带有陈旧性、失效时机、并发同步(重试/去重/翻页)等问题,手写 loading/data/error 三件套永远处理不完。TanStack Query 用 QueryKey + staleTime 把这些变成声明式配置。
+</details>
+
+<details>
+<summary><b>3. 【进阶】Pinia 里解构状态为什么必须用 storeToRefs?</b></summary>
+
+store 是 reactive 代理,直接解构 const { count } = store 得到的是当次快照普通值,响应性断裂。storeToRefs 把每个 state/getter 包成 ref,解构后依然是响应式引用。
+</details>
+
+<details>
+<summary><b>4. 【进阶】Zustand 如何做到组件不相关就不重渲染?</b></summary>
+
+组件通过 selector 只订阅状态的一个切片,内部基于 useSyncExternalStore 做浅比较,切片不变就不触发该组件更新。所以 selector 要尽量细、返回原始值。
+</details>
+
+<details>
+<summary><b>5. 【进阶】持久化状态为什么不能直接在首屏渲染时读取并回填?</b></summary>
+
+服务端 / 预渲染阶段没有 storage,若渲染函数直接读 localStorage 回填,客户端首次渲染会与 HTML 不一致,触发 hydration mismatch。正确做法是回填放在挂载后(useEffect / onMounted),或使用 skipHydration 显式控制时机,避免首屏两套状态打架。
+</details>
+
+<details>
+<summary><b>6. 【挑战】持久化数据的结构随版本变化后,为什么不能直接清空重来?迁移方案的关键点是什么?</b></summary>
+
+清空等于替用户丢掉草稿、购物车等有价值数据,升级即数据丢失。迁移方案的关键点:① 落盘数据带 version,读取时才能判断新旧;② 迁移函数按版本逐级升级(0→1→2),保证任意旧版本都能走到当前结构;③ 版本超前(用户回滚了代码)或缺迁移函数时,宁可当无数据处理,也不要用坏数据污染内存;④ 迁移后再落盘,避免每次启动重复迁移。
+</details>
+
+---
+
+## 5.9 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 直接 mutate 状态 | 改完 `state.list.push(x)`，界面纹丝不动 | Redux、Zustand 靠引用变化判断更新，原地改不产生新引用；用不可变更新（展开或 `immer`）返回新对象 |
+| selector 返回新对象 | 组件莫名无限重渲染 | selector 每次返回新的对象、数组，浅比较永远判不等；让 selector 只返回原始值切片，或用 `useShallow` 比较 |
+| Context 全量重渲染 | 一个值变化，带动全部消费组件一起渲染 | Context 值一变，所有消费者同步更新；拆分多个 Context，或改用 Zustand、`useSyncExternalStore` 做细粒度订阅 |
+| 中间件顺序 | 加了 devtools 或持久化后，日志缺失、持久化失效 | 中间件顺序即洋葱模型，谁在外层决定执行次序；按 `devtools → persist → thunk` 这类既定顺序放置 |
+| 持久化敏感数据 | token 写进 `localStorage`，一次 XSS 全泄露 | `localStorage` 可被任意脚本读取；token 放 httpOnly Cookie，持久化只存非敏感的 UI 偏好 |
+| `useEffect` 里派生 state | 把 props 抄进 state，出现两套真相 | 能由 props 或其他 state 直接算出的值就就地计算，别用 effect 同步；确需缓存用 `useMemo` |
+| 服务端状态塞进 store | 列表、详情全放全局 store，缓存与失效全靠手写 | 远端数据本质是带陈旧性的缓存（见 [5.5](./05-state-management.md#_5-5-服务端状态管理-tanstack-query)）；交给 TanStack Query 声明式管理 |

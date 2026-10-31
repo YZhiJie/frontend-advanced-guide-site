@@ -1,0 +1,364 @@
+# 第五十六部分 · 离线与本地缓存全景——PWA、React Native 与内嵌 H5（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/56-offline-cache
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第五十六部分 · 离线与本地缓存全景——PWA、React Native 与内嵌 H5
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第五十五部分 · 构建与样式库](./55-build-style-tooling.md)｜关联章节：[第十部分 · 浏览器原理与渲染性能](./10-browser-rendering.md) · [第十八部分 · Worker 与跨 Tab 通信](./18-worker-messaging.md) · [第八部分 · 跨端开发](./08-cross-platform.md) · [第十九部分 · 业务功能代码片段](./19-business-snippets.md)
+
+> 💡 **本章特色**：离线能力不是单一技术，而是**三条技术线 × 一个共同内核**。Web 线靠 Service Worker + IndexedDB（PWA），React Native 线靠 AsyncStorage/MMKV/SQLite 加自建同步引擎，内嵌 H5 线靠 Native 离线包拦截请求——三条线最终都收敛到同一个内核：**离线写队列 + 幂等重放 + 冲突处理**。本章先给全景选型坐标，再逐线讲主流方案，两个可运行示例分别验证同步引擎与离线包管理器。
+
+## 本部分内容
+
+- [56.1 离线能力全景与选型坐标](#_56-1-离线能力全景与选型坐标)
+- [56.2 PWA 离线：壳缓存与数据缓存分工](#_56-2-pwa-离线-壳缓存与数据缓存分工)
+- [56.3 React Native 本地存储与离线同步](#_56-3-react-native-本地存储与离线同步)
+- [56.4 内嵌 H5 离线包与秒开](#_56-4-内嵌-h5-离线包与秒开)
+- [56.5 自测题](#_56-5-自测题)
+- [56.6 本章避坑清单](#_56-6-本章避坑清单)
+
+---
+
+## 56.1 离线能力全景与选型坐标
+
+### 概念解析
+
+「支持离线使用」按目标从低到高分三级，**先明确要到哪一级再选方案**：
+
+| 级别 | 目标 | 典型产品 | 关键技术 |
+| --- | --- | --- | --- |
+| L1 能打开 | 断网时不出恐龙页，展示壳与提示 | 企业官网、营销页 | Service Worker 预缓存 App Shell |
+| L2 能浏览 | 已访问过的内容离线可看，数据只读 | 资讯、文档、课程类 | SW 运行时缓存 + HTTP 缓存策略 |
+| L3 能操作 | 断网可下单/编辑/收藏，联网后自动同步 | IM、工单、表单、笔记 | 本地持久化 + 离线写队列 + 冲突处理 |
+
+三条技术线的选型坐标：
+
+| 技术线 | 缓存介质 | 静态资源离线 | 数据离线 | 写操作离线 | 主流方案 |
+| --- | --- | --- | --- | --- | --- |
+| Web / PWA | Cache API + IndexedDB | Service Worker | IndexedDB | IDB 写队列 + Background Sync | Workbox / vite-plugin-pwa |
+| React Native | 原生文件系统 + SQLite | 内置资源（无需下载） | MMKV / WatermelonDB | 自建同步引擎（NetInfo 探网） | MMKV + WatermelonDB |
+| 内嵌 H5（Hybrid） | Native 离线包目录 + WebView 缓存 | Native 请求拦截命中本地包 | WebView localStorage/IndexedDB（不可靠） | 走 Native 桥落原生库 | 离线包 + JSBridge 存储代理 |
+
+关键认知：
+
+- **静态资源离线**与**数据离线**是两件事，方案完全不同：前者解决「页面打得开」，后者解决「操作不丢失」；
+- 内嵌 H5 的 WebView 本地存储是**最不可靠的一层**——iOS 系统随时可能清空 WebView 存储（用户清理 Safari 网站数据、系统磁盘紧张），所以 Hybrid 线的数据持久化必须代理给 Native；
+- 无论是哪条线，**L3 的写同步内核是一样的**：本地队列 → 幂等键 → 重放 → 冲突处理（56.2 的引擎三条线通用）。
+
+### 典型应用场景
+
+- 工单/巡检类 App：现场网络差，拍照 + 表单先落本地，回网自动上报；
+- IM 类：消息先写本地库再同步服务端，多端游标对齐（见 [39 册](./39-im-messaging.md)）；
+- 商城 H5 塞进 App：离线包把首屏资源下载到本地，WebView 拦截请求秒开。
+
+### 最佳实践
+
+- ✅ 立项时先和产品确认离线目标级别（L1/L2/L3），L3 的排期是 L1 的五倍以上；
+- ✅ 离线数据必须考虑「另一端也在改」：冲突策略在写操作设计时就定好，不是事后补救；
+- ⚠️ localStorage / AsyncStorage 只放**可丢的小状态**（UI 偏好、草稿），业务事实一律进 IDB/SQLite；
+- ❌ 不要把「有网时更快」的优化（预取、缓存）和「没网时可用」混为一谈——后者要求所有失败路径都有落盘兜底。
+
+---
+
+## 56.2 PWA 离线：壳缓存与数据缓存分工
+
+### 概念解析
+
+PWA 线的两个缓存层分工必须清晰，**混在一起是大多数离线 Bug 的根源**：
+
+| 层 | 载体 | 存什么 | 生命周期 |
+| --- | --- | --- | --- |
+| 壳缓存 | Service Worker + Cache API | HTML 壳、JS/CSS、字体、离线兜底页 | 跟版本走：发版预缓存、activate 清旧 |
+| 数据缓存 | IndexedDB | 业务数据（消息、草稿、待同步操作） | 跟业务走：带 TTL 与配额清理，可跨版本迁移 |
+
+Service Worker 的注册、三分法路由策略（cache-first / network-first / stale-while-revalidate）与更新流程，[10.6](./10-browser-rendering.md#_10-6-service-worker-与-pwa) 已有完整可运行实现；Workbox / vite-plugin-pwa 的生产接法见 [18 册 9.5](./18-worker-messaging.md#_9-5-serviceworker-与框架-workbox-vite-plugin-pwa)。本节聚焦壳缓存之外的**离线数据层**：断网时的写操作如何不丢。
+
+离线写操作的标准链路：
+
+```mermaid
+graph LR
+    A[用户提交] --> B{网络可用?}
+    B -->|是| C[直接请求服务端]
+    B -->|否| D[操作入 IndexedDB 队列<br/>带幂等键与 baseVersion]
+    D --> E[UI 立即按乐观状态渲染]
+    E --> F[监听 online / Background Sync]
+    F --> G[按序重放队列]
+    G --> H{服务端版本冲突?}
+    H -->|否| I[标记完成并清理]
+    H -->|是| J[按策略:服务端优先 / 客户端覆盖 / 人工合并]
+```
+
+### 完整代码示例
+
+```typescript
+// 文件: examples/56-01-offline-sync-queue.ts（此处为核心节选,完整版含全部断言）
+// 离线优先同步引擎:入队即持久化,断网整批保留,恢复在线按序重放
+class SyncQueue {
+  private queue: PendingOp[] = [];
+  private attempts = 0;
+
+  enqueue(op: PendingOp) {
+    this.queue.push(op);
+    this.persist(); // 每次入队都落盘,App 被杀也不丢
+  }
+
+  async flush(online: boolean): Promise<number> {
+    if (!online) {
+      this.attempts++; // 离线时退避计数递增,配合指数退避调度下次重试
+      return 0;
+    }
+    let applied = 0;
+    for (const op of this.queue) {
+      let res = this.server.apply(op); // 服务端按 opId 幂等去重
+      if (res.conflict) {
+        // keep-server:放弃本地修改;overwrite:以服务端最新版本为基底重放
+        const action = this.onConflict(op);
+        if (action === "overwrite") {
+          op.baseVersion = this.server.versions.get(op.entityId) ?? 0;
+          res = this.server.apply(op);
+        } else {
+          res = { ok: true };
+        }
+      }
+      if (res.ok) applied++;
+    }
+    this.queue = [];
+    this.persist();
+    this.attempts = 0;
+    return applied;
+  }
+
+  restore() {
+    // App 重启后从持久层读回队列
+    const raw = this.storage.get("pending-ops");
+    if (raw) this.queue = JSON.parse(raw) as PendingOp[];
+  }
+}
+```
+
+> 运行方式：`npx tsx examples/56-01-offline-sync-queue.ts`（离线入队不丢、恢复按序重放、同 opId 幂等、keep-server 冲突、重启恢复五个场景全部硬断言）。
+
+### 最佳实践
+
+- ✅ 幂等键由客户端生成（UUID），随操作一起落盘——重放是常态而非异常，服务端必须按 opId 去重；
+- ✅ 队列每次变更都持久化，「进内存不落盘」的队列在 App 被杀时等于丢数据；
+- ⚠️ Background Sync 的触发时机由浏览器决定（要求网络恢复 + 页面有过会话），不能当定时器用；iOS Safari 不支持，必须自己监听 `online` 事件兜底；
+- ❌ 不要在 `fetch` 拦截里缓存 POST 响应当「离线同步」——那只是缓存了上一次结果，写操作永远不会到达服务端。
+
+---
+
+## 56.3 React Native 本地存储与离线同步
+
+### 概念解析
+
+RN 侧没有 Service Worker，静态资源随包安装天然离线；离线能力的重心全在**存储选型**与**同步引擎**。主流存储方案对比：
+
+| 方案 | 底层 | 体积/性能 | 适用 | 注意点 |
+| --- | --- | --- | --- | --- |
+| AsyncStorage | 原生 KV（SQLite 实现） | 慢（全量序列化）、异步 | 配置、少量状态 | 6MB 默认上限（Android），不加密 |
+| MMKV | 微信开源的 mmap KV | 极快（同步 API、零序列化） | 高频小数据：token、偏好、草稿 | 只适合 KV，不适合列表/关系数据 |
+| SQLite（op-sqlite / expo-sqlite） | 原生关系库 | 大数据量、可索引、可事务 | 消息记录、缓存表、复杂查询 | 需要自己管理迁移（版本化 schema） |
+| WatermelonDB | SQLite 之上的响应式 ORM | 惰性加载、按需同步协议 | 大列表 + 离线同步业务 | 学习成本高，锁定它的同步模型 |
+| Realm / ObjectBox | 自建对象数据库 | 快、跨端一致 | 重度离线 App | 包体大，调试生态弱 |
+
+选型决策树：**KV 且高频 → MMKV；结构化且量大 → SQLite；要「数据库变更驱动 UI」+ 官方同步协议 → WatermelonDB；其余默认 MMKV + SQLite 组合**。
+
+同步引擎与 56.2 的 Web 线完全同构：入队（MMKV/SQLite 落盘）→ NetInfo 监听网络 → 恢复后按序重放 → 幂等键去重 → 版本冲突处理。差异只在探网 API 与持久层：
+
+```typescript
+// 文件: src/sync/rn-sync.ts —— 虚拟工程文件:RN 侧接线示意
+import NetInfo from '@react-native-community/netinfo';
+import { MMKV } from 'react-native-mmkv';
+
+const kv = new MMKV({ id: 'sync-queue' });
+// ① 队列落 MMKV(KV 结构,比 AsyncStorage 快一个数量级)
+// ② 消息/列表数据落 SQLite(可索引、可事务回滚)
+// ③ 探网与重放调度:
+NetInfo.addEventListener((state) => {
+    if (state.isConnected) syncQueue.flush(true); // 网络恢复即重放
+});
+```
+
+### 完整代码示例
+
+直接复用 [56-01](./examples/56-01-offline-sync-queue.ts) 的 `SyncQueue` 引擎——把 `MemoryStorage` 换成 MMKV 适配器即可，其余断言原样保留：
+
+```typescript
+// 文件: src/sync/mmkv-adapter.ts —— 虚拟工程文件:存储适配器
+class MmkvAdapter {
+    get(key: string): string | null {
+        const v = kv.getString(key);
+        return v === undefined ? null : v;
+    }
+    set(key: string, value: string) {
+        kv.set(key, value);
+    }
+}
+const queue = new SyncQueue(new MmkvAdapter(), server);
+queue.restore(); // 冷启动恢复上次未同步的操作
+```
+
+> 运行方式：同步引擎本体用 `npx tsx examples/56-01-offline-sync-queue.ts` 验证；RN 接线需在工程内运行（`npx create-expo-app` 后安装 `react-native-mmkv` 与 `@react-native-community/netinfo`）。
+
+### 最佳实践
+
+- ✅ 存储层一律走适配器接口（get/set），底层从 AsyncStorage 换 MMKV 时业务代码零改动；
+- ✅ 大列表离线用 SQLite + 分页查询，别把 5000 条消息 JSON.stringify 进 KV；
+- ⚠️ MMKV 同步 API 在 JS 线程执行，单值过大会阻塞渲染；大 value 拆分或改走 SQLite；
+- ⚠️ iOS 后台收推送后同步（Background Fetch）不保证执行时长，重放逻辑必须可中断续传；
+- ❌ 不要用 Realm「自动云同步」当离线方案交付——Atlas license 费用与后端栈绑定，选型前先过架构评审。
+
+---
+
+## 56.4 内嵌 H5 离线包与秒开
+
+### 概念解析
+
+内嵌 H5 的离线方案核心是**把静态资源从「每次访问走网络」改成「Native 预先下载到本地，WebView 请求时拦截命中」**——也就是业界说的「离线包」：
+
+```
+① 发布:构建产物 → 上传包管理平台 → 按版本生成清单(url → 文件哈希)
+② 下载:App 启动/闲时,Native 检查清单版本 → 差量下载变化的文件 → 校验哈希 → 原子替换
+③ 拦截:WebView 发起请求 → Native 拦截命中本地包 → 直接返回本地文件(不走网络)
+④ 兜底:未命中(新页面/包损坏) → 放行走网络 → 事后补包
+```
+
+各端拦截 API：
+
+| 平台 | 拦截点 | 说明 |
+| --- | --- | --- |
+| Android WebView | `shouldInterceptRequest` | 返回 `WebResourceResponse` 即命中本地；注意该方法在子线程回调 |
+| iOS WKWebView | `WKURLSchemeHandler`（自定义 scheme）或 `WKURLSchemeTask` | http/https 不能直接拦（私有 API 会被拒），主流做法是自定义 scheme 或本地 HTTP 服务 |
+| 两端通用 | 本地 HTTP 服务器（如植物园方案的 127.0.0.1 端口） | 兼容性最好，但要处理端口占用与安全（只绑 127.0.0.1 + token 校验） |
+
+与 PWA 的 SW 拦截相比，离线包的优势：**首日新装用户也能秒开**（SW 要等第二次访问才有缓存）、不受 WebView 存储清理影响、包管理平台可做灰度与强制回滚。
+
+### 典型应用场景
+
+- 商城活动页塞进 App：活动早 8 点上线，用户 8 点打开就要秒开——离线包在启动/闲时预下载；
+- 弱网门店工具：店内 WiFi 不稳，H5 工单页依赖离线包保证「永远打得开」；
+- 多页面共用公共资源：vendor 包独立成「公共包」，业务包差量更新（参考微信/美团公开方案）。
+
+### 完整代码示例
+
+```typescript
+// 文件: examples/56-02-offline-package.ts（此处为核心节选,完整版含全部断言）
+// Native 侧离线包管理器:install/update/intercept 三件事
+class OfflinePackageManager {
+  private files = new Map<string, FileEntry>();
+  private manifest: Manifest | null = null;
+
+  /** 原子安装:按 url 去重后全部校验哈希,任何一个失败都整体回滚 */
+  install(entries: FileEntry[], manifest: Manifest) {
+    const merged = new Map(entries.map((f) => [f.url, f]));
+    for (const f of merged.values()) {
+      if (manifest.files[f.url] !== hash(f.body)) {
+        throw new Error(`校验失败:${f.url} 哈希不匹配,回滚安装`);
+      }
+    }
+    this.files = merged;
+    this.manifest = manifest;
+  }
+
+  /** 请求拦截:命中返回本地内容,未命中返回 null 放行走网络 */
+  intercept(url: string): string | null {
+    return this.files.get(url)?.body ?? null;
+  }
+
+  /** 差量更新:按清单 diff 只拉取 added/changed,清理 removed */
+  update(repo: PackageRepo): { added: number; changed: number; removed: number } {
+    const next = repo.manifest();
+    const old = this.manifest!;
+    const toFetch = Object.entries(next.files)
+      .filter(([url, h]) => !(url in old.files) || old.files[url] !== h)
+      .map(([url]) => url);
+    const removedUrls = Object.keys(old.files).filter((url) => !(url in next.files));
+    // 在临时表完成校验后一次性提交:校验失败直接抛错,旧包不受影响
+    const staged = [
+      ...[...this.files.values()].filter((f) => !removedUrls.includes(f.url)),
+      ...repo.fetchFiles(toFetch),
+    ];
+    this.install(staged, next);
+    return { added: toFetch.length - 1, changed: 1, removed: removedUrls.length };
+  }
+}
+```
+
+> 运行方式：`npx tsx examples/56-02-offline-package.ts`（首装拦截、差量更新只下载 2/4 个文件、移除文件不再命中、损坏包拒绝回滚四个场景硬断言）。
+
+### 最佳实践
+
+- ✅ 哈希校验 + 原子替换是底线：半个包上线导致页面半白屏，比走网络慢更难排查；
+- ✅ 拦截未命中必须放行走网络，且记录 miss 日志上报——新页面上线先于包更新是常态；
+- ⚠️ WebView 内的 localStorage/IndexedDB 会被系统清理（尤其 iOS），关键数据走 JSBridge 落 Native（MMKV/SQLite）；
+- ⚠️ 公共包与业务包分开管理：vendor 进公共包长期复用，业务包小步快跑，差量才真的「差」；
+- ❌ 不要在离线包里放带敏感信息的接口响应数据——包会落盘在用户设备上，等同于公开文件。
+
+---
+
+## 56.5 自测题
+
+<details>
+<summary><b>1. 【基础】离线能力 L1/L2/L3 三级分别指什么?各自依赖的核心技术是什么?</b></summary>
+
+L1 能打开：断网展示壳与提示，靠 Service Worker 预缓存 App Shell；L2 能浏览：已访问内容离线可看（只读），靠 SW 运行时缓存 + HTTP 缓存；L3 能操作：断网可写、联网自动同步，靠本地持久化 + 离线写队列 + 冲突处理。立项先定级别，L3 排期远高于 L1。
+</details>
+
+<details>
+<summary><b>2. 【基础】为什么内嵌 H5 的数据持久化要走 JSBridge 代理给 Native,而不能只依赖 WebView 的 localStorage/IndexedDB?</b></summary>
+
+WebView 的本地存储随时可能被系统清空：iOS 用户清理「网站数据」、系统磁盘紧张、WebView 数据目录被回收都会导致丢数据，且 App 卸载重装无法迁移。业务事实数据必须经 JSBridge 落 Native（MMKV/SQLite），WebView 存储只放可丢的小状态。
+</details>
+
+<details>
+<summary><b>3. 【基础】MMKV 和 AsyncStorage 的本质区别是什么?各自适合什么数据?</b></summary>
+
+AsyncStorage 基于原生 KV（底层 SQLite），异步、全量序列化，读写慢且有 6MB 默认上限；MMKV 基于 mmap 内存映射，同步 API、零序列化开销，快一个数量级。MMKV 适合高频小数据（token、偏好、草稿、同步队列），AsyncStorage 只适合低频小配置；列表/关系数据两者都不合适，应落 SQLite。
+</details>
+
+<details>
+<summary><b>4. 【进阶】离线写队列为什么必须带客户端生成的幂等键?没有它会发生什么?</b></summary>
+
+重放是常态：网络超时时客户端无法区分「请求没到达」和「到达了但响应丢失」，只能重发。没有幂等键，服务端会把同一次操作执行多次（下单变两单、点赞 +2）。客户端生成 UUID 随操作落盘，服务端按 opId 去重——重复请求直接返回首次结果，重放才安全。
+</details>
+
+<details>
+<summary><b>5. 【进阶】离线包的差量更新如何计算?为什么 unchanged 的文件不能重新下载?</b></summary>
+
+发布平台按版本生成清单（url → 文件内容哈希），客户端对比本地清单与服务端清单：哈希不存在的是 added、哈希变化的是 changed、本地有远端没有的是 removed，只下载前两类。unchanged 文件重新下载会浪费流量与电量——对商城类 App 一次全量可能几十 MB，差量后只有 KB 级，这是离线包方案的硬指标。
+</details>
+
+<details>
+<summary><b>6. 【进阶】Service Worker 拦截与 Native 离线包拦截,各自「首日新装用户」的体验差异是什么?</b></summary>
+
+SW 预缓存发生在页面首次加载完成后，新装用户第一次访问仍走网络（第二次才有缓存）；离线包由 Native 在 App 启动/闲时预下载，用户第一次打开 H5 就命中本地文件。此外离线包不受 WebView 存储清理影响、可由包管理平台灰度与强制回滚，这是 Hybrid 场景普遍选离线包而非 PWA 的原因。
+</details>
+
+<details>
+<summary><b>7. 【挑战】同步引擎的冲突处理有 keep-server / overwrite / 人工合并三种,分别适用什么业务?选错会出什么事故?</b></summary>
+
+keep-server（服务端优先）适合库存、余额等「服务端是唯一事实」的数据，选 overwrite 会把扣减结果覆盖回去导致超卖；overwrite（客户端优先）适合个人笔记、草稿等「用户意图至上」的数据，选 keep-server 会静默丢用户编辑；人工合并适合协同编辑、订单地址等敏感数据，自动策略都可能违背用户预期。策略应在写操作设计时按实体逐个确定，不能全局一刀切。
+</details>
+
+<details>
+<summary><b>8. 【挑战】为什么说 Background Sync 不能当定时任务用?跨端的兜底方案怎么设计?</b></summary>
+
+Background Sync 的触发时机完全由浏览器决定：要求网络恢复且页面有过会话，时机不可控；周期性同步 periodicSync 仅 Chromium 支持且要求 PWA 已安装，iOS 不可用。兜底方案：应用启动时、页面从后台回前台时、监听 online 事件时都触发一次 flush；队列持久化保证「随时 flush、随时可中断续传」，不依赖任何单一触发源。
+</details>
+
+---
+
+## 56.6 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 离线写队列 | 队列只在内存里，「杀 App 即丢」 | 每次入队/出队都落盘（IDB/MMKV），启动时 restore |
+| 重放 | 网络超时后盲目重发，服务端重复执行 | 客户端生成幂等键（UUID），服务端按 opId 去重 |
+| 冲突 | 全局一刀切 keep-server，静默丢用户编辑 | 按实体定义策略：服务端事实 keep-server，用户意图 overwrite，敏感数据人工合并 |
+| PWA | 把 POST 响应塞进 Cache API 当「离线同步」 | 写操作只走队列 + 重放，SW 只缓存幂等的 GET |
+| PWA | 依赖 Background Sync 触发同步，iOS 全灭 | online 事件 + 启动时 + 回前台三路兜底 flush |
+| RN 存储 | 5000 条消息 JSON.stringify 进 AsyncStorage/MMKV | 大列表落 SQLite（可索引可事务），KV 只放小状态 |
+| 内嵌 H5 | 只依赖 WebView localStorage，系统清理后用户数据蒸发 | 业务数据走 JSBridge 落 Native，WebView 存储只放可丢状态 |
+| 离线包 | 校验失败仍放行半包上线，页面半白屏 | 哈希校验 + 原子替换，任何文件校验失败整体回滚旧包 |
+| 离线包 | 拦截未命中直接 404，新页面全挂 | 未命中放行走网络并上报 miss，事后补包 |
+| 探网 | 只看 `navigator.onLine` / `isConnected` 就当「可用」 | 它们只代表「有连接」，真探活要发轻量请求（HEAD/ping）验证 |

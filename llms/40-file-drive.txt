@@ -1,0 +1,308 @@
+# 第四十部分 · 文件网盘系统（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/40-file-drive
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第四十部分 · 文件网盘系统
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第十八部分 · Worker 家族与跨标签页通信](./18-worker-messaging.md) · [第十九部分 · 业务功能代码片段](./19-business-snippets.md) · [第二十五部分 · 生产可用 Web API 手册](./25-prod-ready-web-apis.md)
+
+> 💡 **本章特色**：全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。网盘是「大文件 × 弱网络」的极致场景——分片上传、秒传、断点续传、并发队列、Range 下载，每个机制都是前端工程能力的试金石。本章用 5 个可运行示例拆解一条完整链路：切片 → hash → 队列调度 → 分块下载 → 文件树管理。
+
+## 本部分内容
+
+- [40.1 分片上传：切片 + 并发窗口 + 重试](#_40-1-分片上传-切片-并发窗口-重试)
+- [40.2 秒传与断点续传：hash 的角色](#_40-2-秒传与断点续传-hash-的角色)
+- [40.3 上传队列：暂停 / 恢复 / 取消 / 进度聚合](#_40-3-上传队列-暂停-恢复-取消-进度聚合)
+- [40.4 分块下载：Range 请求与合并](#_40-4-分块下载-range-请求与合并)
+- [40.5 文件树与回收站：路径、冲突、软删除](#_40-5-文件树与回收站-路径、冲突、软删除)
+- [40.6 安全与体验细节](#_40-6-安全与体验细节)
+- [40.7 自测题](#_40-7-自测题)
+- [40.8 本章避坑清单](#_40-8-本章避坑清单)
+
+```mermaid
+flowchart LR
+    A[选择文件] --> B[hash 计算<br/>Worker 不卡 UI]
+    B --> C{precheck}
+    C -->|服务端已有| D[秒传：0 字节上传]
+    C -->|部分已传| E[断点续传：跳过已收片]
+    C -->|全新| F[切片 + 并发窗口上传]
+    F --> G[单片失败重试<br/>指数退避]
+    G --> H[merge 合并接口]
+    I[下载] --> J[HEAD 探测大小<br/>Accept-Ranges]
+    J --> K[Range 并发分块下载]
+    K --> L[ETag 校验 + 合并]
+    H --> M[文件树 / 回收站]
+```
+
+---
+
+> 网盘系统的所有设计都围绕一个约束展开：**文件太大，网络不稳**。2GB 文件一次请求传完，超时、内存、断线三个问题任何都能杀死它。解法是把「文件」这个整体打散成「分片」——传输、去重、续传、下载全部以分片为单位运作，最后再拼回来。理解了这一点，网盘的前端一半就懂了。
+
+---
+
+## 40.1 分片上传：切片 + 并发窗口 + 重试
+
+### 40.1.1 概念解析
+
+分片上传三要素：
+
+1. **切片**：`File.slice(start, end)` 返回 Blob——注意这是**引用不读内存**，2GB 文件切片全程只占单片大小的内存；
+2. **并发窗口**：同时只传 N 片（3~5），完成一片补一片。并发太大挤占带宽、易触发网关限流，还让「哪片失败」更难定位；
+3. **单片重试**：失败片指数退避重试（与 39.2 的 IM 重发同构），全部片成功后调 merge 接口让服务端按序拼接。
+
+分片大小是权衡：片太大 → 单片失败重传代价高；片太小 → 请求开销与管理成本上升。常见取 4~10MB。
+
+### 40.1.2 核心代码
+
+```ts
+// 文件: examples/40-01-chunk-upload.ts
+export interface ChunkTask {
+    index: number;
+    start: number;
+    end: number;
+    status: "pending" | "uploading" | "done" | "failed";
+    attempts: number;
+}
+
+/** 生成上传计划：切片清单 */
+export function planChunks(fileSize: number, chunkSize: number): UploadPlan;
+
+/** 并发窗口上传：同时最多 concurrency 片，完成即补位；单片最多 maxRetries 次重试 */
+export async function uploadWithWindow(plan, net, concurrency = 3, maxRetries = 3):
+    Promise<{ ok: boolean; doneChunks: number; failedChunks: number[]; timeline: string[] }>;
+```
+
+> 运行方式：`npx tsx examples/40-01-chunk-upload.ts`。
+
+### 40.1.3 应用实践
+
+- **进度按字节算**：单片进度 = 已传片字节和 / 总字节，大文件最后的单片占 20% 进度的体验问题靠更细的片内进度（XHR upload.onprogress）缓解。
+- **最后一片总是最慢**：并行窗口收尾时只剩 1~2 片在传，进度条「卡 90%」是正常现象，别为此加假进度。
+- **服务端合并要校验**：merge 请求带每片 hash 或总 hash，防止缺片拼出残缺文件。
+
+---
+
+## 40.2 秒传与断点续传：hash 的角色
+
+### 40.2.1 概念解析
+
+hash 是网盘一切「智能」的基石：
+
+- **秒传**：上传前算 hash，服务端已有相同 hash → 直接建立引用，**0 字节传输**。一个 2GB 文件瞬间「传完」；
+- **断点续传**：hash 定位「文件身份」，服务端返回已收到的分片账本，客户端只传缺的片。断网三小时回来，接着传而不是从头来。
+
+hash 策略的工程取舍：
+
+| 策略 | 耗时 | 碰撞风险 |
+| --- | --- | --- |
+| 全量 MD5/SHA-256 | 慢（1GB 数秒） | 极低 |
+| 抽样 hash（首中尾各 1MB） | 快（毫秒级） | 存在 |
+
+抽样快但有碰撞可能，所以**秒传必须服务端二次校验**——命中后对已存文件做全量 hash 比对确认。跳过这步，抽样碰撞 + 恶意构造可以让用户 A「秒传」出用户 B 的文件内容（越权读取）。
+
+### 40.2.2 核心代码
+
+```ts
+// 文件: examples/40-02-instant-upload.ts
+export type PreCheckResult =
+    | { mode: "instant"; message: string }
+    | { mode: "resume"; skipChunks: number[]; message: string }
+    | { mode: "full"; message: string };
+
+/** 上传前探测 */
+export function precheck(ledger: UploadLedger, hash: string, totalChunks: number): PreCheckResult;
+```
+
+> 运行方式：`npx tsx examples/40-02-instant-upload.ts`。
+
+### 40.2.3 应用实践
+
+- **hash 放 Web Worker**（第 18 册）：全量 hash 读取大文件会卡 UI，Worker 里用 `crypto.subtle.digest` 分块计算，主线程只收进度。
+- **分片 hash 双份存**：每片算 hash（单片完整性）+ 整文件 hash（秒传/合并校验），成本可控价值大。
+- **precheck 是上传协议第一步**：先探测再传输，这是网盘和普通表单上传的本质区别。
+
+---
+
+## 40.3 上传队列：暂停 / 恢复 / 取消 / 进度聚合
+
+### 40.3.1 概念解析
+
+多文件上传是调度问题。队列消费一组任务，核心机制：
+
+1. **并发上限**：全局同时上传的文件数（不是分片数），与 40.1 的分片窗口是两层并发；
+2. **优先级**：小文件先传——10 个文件里先完成 5 个小的，「整体完成感」远好于按顺序卡在第一个大文件；
+3. **暂停/恢复**：暂停 = 停止取新分片 + 已传分片账本保留（服务端 Ledger 还在），恢复后 precheck 秒变续传；
+4. **取消**：清理本地任务 + 通知服务端作废分片账本，否则服务端残留半成品。
+
+进度聚合按**字节加权和**：`sum(已传字节) / sum(总字节)`，被取消的文件从分母剔除——按文件数平均进度是常见 bug（1KB 和 1GB 同权重）。
+
+### 40.3.2 核心代码
+
+```ts
+// 文件: examples/40-03-upload-queue.ts
+export type TaskStatus = "waiting" | "uploading" | "paused" | "done" | "canceled" | "failed";
+
+export class UploadQueue {
+    add(name: string, size: number, priority?: number): UploadTask;
+    tick(bytesPerTick: number): void;      // 调度一轮（真实实现为事件驱动）
+    pause(id: string) / resume(id: string) / cancel(id: string): void;
+    /** 整体进度：按字节加权和，取消/失败不计入分母 */
+    overallProgress(): number;
+}
+```
+
+> 运行方式：`npx tsx examples/40-03-upload-queue.ts`。
+
+### 40.3.3 应用实践
+
+- **页面刷新不丢队列**：任务清单（含已传分片账本引用）持久化，重开页面 precheck 后自动续传。
+- **失败任务自动降级**：重试 3 次仍失败的任务标记 failed 并可手动重试，不要无限重试占住并发窗口。
+- **取消要发到服务端**：服务端 Ledger 里的半成品分片不清理，存储成本静默上涨。
+
+---
+
+## 40.4 分块下载：Range 请求与合并
+
+### 40.4.1 概念解析
+
+下载与上传对称：
+
+1. **HEAD 探测**：`Content-Length`（总大小）+ `Accept-Ranges: bytes`（是否支持分块）+ `ETag`（文件版本指纹）；
+2. **Range 请求**：`Range: bytes=start-end`，服务端回 `206 Partial Content`，按块并发拉取（浏览器同域并发限制下实际 4~6 路）；
+3. **合并校验**：全部块完成后校验「起点连续 + 总长吻合」再拼接——缺一块拼出来的文件是损坏的；
+4. **ETag 变化检测**：下载中途文件被替换，Range 块来自不同版本，拼起来必错位——ETag 不一致则全部作废重来。
+
+不支持 `Accept-Ranges` 的服务端只能整体下载（降级路径要保留）。
+
+### 40.4.2 核心代码
+
+```ts
+// 文件: examples/40-04-ranged-download.ts
+export function parseHead(headers: Record<string, string>): HeadInfo;
+export function planRanges(total: number, partSize: number): DownloadRange[];
+/** 合并校验：块覆盖连续且总字节数吻合才允许拼接 */
+export function verifyAndMerge(ranges: readonly DownloadRange[], total: number): { ok: boolean; reason?: string };
+export function isStale(latestEtag: string, plannedEtag: string): boolean;
+```
+
+> 运行方式：`npx tsx examples/40-04-ranged-download.ts`。
+
+### 40.4.3 应用实践
+
+- **失败只重试该块**：断点续下的核心——块状态机与上传分片对称。
+- **合并产物走 Blob**：`new Blob(parts)` 拼接后 `URL.createObjectURL` + `<a download>` 触发保存；超大文件用 File System Access API 直接写盘。
+- **视频场景直接交给 `<video>`**：流媒体有 moov atom 与 Range 探测的专门玩法，别手搓下载器。
+
+---
+
+## 40.5 文件树与回收站：路径、冲突、软删除
+
+### 40.5.1 概念解析
+
+文件管理三机制：
+
+1. **树结构**：节点挂 `parentId`，路径由祖先链拼接。移动操作必须**防环**——把文件夹移进自己的子目录会让树变成环，路径解析死循环；
+2. **冲突策略**：同目录重名自动改名（`file(1).txt`）或提示选择，两种都要支持——批量上传时自动改名，拖拽覆盖时提示用户；
+3. **回收站**：软删除（标 `deleted` 保留数据），**级联标记**子节点；恢复时原名被占则自动改名落地；`purge` 才真正清数据。
+
+### 40.5.2 核心代码
+
+```ts
+// 文件: examples/40-05-file-tree-recycle.ts
+export class DriveStore {
+    /** 自动改名：file.txt → file(1).txt → file(2).txt */
+    uniqueName(parentId: string | null, name: string): string;
+    /** 移动：防环——目标不能是自己或自己的子孙 */
+    move(id: string, targetParentId: string | null): { ok: boolean; reason?: string };
+    /** 软删除（级联）/ 恢复（原名被占自动改名）/ 彻底删除 */
+    softDelete(id: string): number;
+    restore(id: string): string;
+    purge(id: string): void;
+}
+```
+
+> 运行方式：`npx tsx examples/40-05-file-tree-recycle.ts`。
+
+### 40.5.3 应用实践
+
+- **大目录分页加载**：万级文件的目录树不能一次拉全，按 parentId 分页 + 懒展开。
+- **回收站有保留期**：30 天后自动 purge（服务端定时任务），前端展示剩余天数。
+- **重命名也是冲突点**：改名后的唯一性校验与 uniqueName 同一套逻辑。
+
+---
+
+## 40.6 安全与体验细节
+
+### 40.6.1 上传安全
+
+1. **类型校验看魔数**：扩展名与 MIME 都可伪造，读文件头部字节比对魔数（`FF D8 FF` = JPEG、`25 50 44 46` = PDF）；客户端校验是体验（提前拦截），服务端必须再验一次；
+2. **大小前置拦截**：`file.size` 在选择文件时立刻判断，超限提示而不是传到一半失败；
+3. **病毒扫描钩子**：merge 后异步扫描，扫出问题标记文件并通知——上传流程不被扫描阻塞。
+
+### 40.6.2 体验细节
+
+- **拖拽上传**：`drop` 事件拿 `DataTransferItem.webkitGetAsEntry()` 支持文件夹递归遍历；
+- **粘贴上传**：`paste` 事件读 `clipboardData.files`，截图直接传；
+- **下载不跳转**：`<a download>` 或 fetch + Blob，避免点击「下载」打开新标签页闪一下。
+
+### 40.6.3 一句话总结
+
+> 上传靠「分片 + hash」把大文件打散成可管理的小块，下载靠「Range + ETag」做对称的分块与校验，队列把多文件变成可调度资源，文件树用「parentId + 防环 + 软删除」管住结构——四块拼起来就是网盘前端的全部主干。
+
+---
+
+## 40.7 自测题
+
+1. 为什么 `File.slice` 切 2GB 文件不会占 2GB 内存？
+
+<details><summary>查看答案</summary>
+
+`File.slice` 返回的是 Blob 引用，描述「原文件的第 start 到 end 字节区间」，不复制数据进内存。真正读入内存只发生在把分片交给 FormData/fetch 发送时，且只有当前分片（几 MB）在读。所以分片上传的内存占用是 O(单片大小) 而非 O(文件大小)。
+</details>
+
+2. 抽样 hash 快但有碰撞风险，秒传怎么做才安全？
+
+<details><summary>查看答案</summary>
+
+秒传命中后服务端必须对已存文件做全量 hash 二次比对：抽样 hash 只当「快速初筛」，全量 hash 才是唯一身份判定。跳过二次校验时，恶意构造的碰撞文件能通过 precheck 直接建立引用，读到他人的文件内容（越权读取）。
+</details>
+
+3. 上传队列的整体进度为什么按字节加权而不是按文件数平均？
+
+<details><summary>查看答案</summary>
+
+文件大小差异巨大时（1KB 图标 vs 1GB 视频），按文件数平均意味着传完小文件进度只动 1/N，而它几乎没占流量；且大文件传一半进度可能比实际流量进度低很多。字节加权 `sum(uploaded)/sum(total)` 与真实传输量线性对应，被取消/失败的文件从分母剔除防止进度永远到不了 100%。
+</details>
+
+4. 下载中途服务端上的文件被替换了，继续用旧 Range 块合并会发生什么？怎么防？
+
+<details><summary>查看答案</summary>
+
+Range 块来自新旧两个版本，按字节位拼接会错位，产出损坏文件（对二进制格式是彻底坏档）。防护：HEAD 时记录 ETag，每个 Range 响应头里 ETag 不一致即全部作废重来；或用 If-Range 头让服务端在 ETag 变化时直接回 200 全量而非 206 分块。
+</details>
+
+5. 把「项目」文件夹移动到「项目/文档」下面，为什么必须被拒绝？
+
+<details><summary>查看答案</summary>
+
+这会形成环：项目 → 文档 → 项目 → …，路径解析（沿 parentId 上溯拼路径）进入死循环，子树遍历也永不终止。移动前沿目标的祖先链上溯检查是否遇到自己，遇到即拒绝并提示。
+</details>
+
+---
+
+## 40.8 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 大文件一次请求上传 | 超时/内存/断线三杀，失败全重来 | 分片上传：slice 引用切片 + 并发窗口 + 单片重试 |
+| 并发片数开太高 | 带宽挤占 + 网关限流 + 失败定位难 | 并发 3~5 片，完成补位 |
+| 进度条按文件数平均 | 大小文件同权重，进度与流量脱节 | 字节加权和，取消文件剔除分母 |
+| hash 计算放主线程 | 大文件全量 hash 卡死 UI | Web Worker 分块计算 + 进度上报 |
+| 秒传不做服务端二次校验 | 抽样 hash 碰撞可越权读他人文件 | 命中后全量 hash 确认再建引用 |
+| 断点续传不清理服务端账本 | 半成品分片静默堆积，存储成本上涨 | 取消/过期时通知服务端作废 Ledger |
+| 合并前不校验块完整性 | 缺片/错位拼出损坏文件 | 起点连续 + 总长吻合 + 分片 hash 校验后才 merge |
+| 下载不看 Accept-Ranges | 服务端不支持分块时请求挂掉 | HEAD 探测 + 降级整体下载 |
+| 忽略 ETag 变化 | 文件被替换后块拼接错位 | If-Range 或 ETag 不一致全量作废 |
+| 类型校验只看扩展名 | 伪造后缀上传恶意文件 | 客户端读魔数预检 + 服务端强校验 |
+| 文件夹移动不防环 | 路径解析死循环，页面卡死 | 移动前沿目标祖先链检查是否含自身 |
+| 回收站恢复不查重名 | 恢复文件覆盖同名现有文件 | 恢复时 uniqueName 自动改名落地 |

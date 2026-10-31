@@ -1,0 +1,721 @@
+# 第三十部分：Lodash 工具库实战——从 API 到工程治理（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/30-lodash
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第三十部分：Lodash 工具库实战——从 API 到工程治理
+
+> **导航**：[返回总目录](./README.md) · [上一篇：RxJS](./29-rxjs.md) · [下一篇：XLSX](./31-xlsx.md) · [学习路线](./libraries-learning-path.md)
+>
+> **实验室**：`libraries/packages/lodash-lab/`　**技术基线**：lodash-es 4.17 + TypeScript 5.x + Node 24
+
+---
+
+## 30.1 定位、版本与学习路线
+
+### 概念解析
+
+Lodash 是「一致性优先」的 JavaScript 工具库：它把集合、数组、对象、字符串、函数控制等高频操作收敛成一套命名稳定、边界行为明确的 API。前端工程里它的价值不在「原生做不到」，而在**跨项目、跨同事、跨年份的行为可预期**——尤其是空值、稀疏数组、路径读取、深合并这些原生语义容易分叉的地方。
+
+两个包名必须分清：
+
+- `lodash`：CJS/UMD 构建，`require` 与旧工具链友好，但整体是 CommonJS，打包器很难按函数摇树；
+- `lodash-es`：同一套源码的 ESM 构建，`sideEffects: false`，支持具名导入后按函数裁剪。
+
+版本上，`4.17.21` 是当前长期安全基线，修复了历史上多起原型污染与命令注入漏洞。低于该补丁号的版本不应进入新项目。维护节奏上 4.x 已进入维护模式，新代码可以评估 `es-toolkit`（API 高度兼容、体积更小、TypeScript 类型更现代），但存量项目不必为了「新」而全量迁移。
+
+学习路线建议按「会用 → 用对 → 用稳 → 用省」四步走：
+
+1. 先掌握高频集合/对象 API 与 iteratee 简写；
+2. 再处理类型安全、深拷贝、深合并这些边界；
+3. 然后掌握 debounce/throttle、memoize、FP 组合等控制能力；
+4. 最后做体积治理与原生/es-toolkit 的替代评估。
+
+### 典型应用场景
+
+- 中后台表格：后端扁平列表 → 按大区/状态分组、组内排序、计算小计；
+- 配置中心：默认配置与远端配置逐层合并，且必须防原型污染；
+- 表单/草稿：输入停止后自动保存，页面卸载时立即落盘或丢弃；
+- 老项目兼容：需要覆盖旧浏览器、又不想手写一堆边界判断时，lodash 仍比自研稳。
+
+反过来，下列情况不该引入 lodash：一个 `Array.prototype.map` 就能表达的转换；首屏体积极度敏感的 C 端页面；只需要 `?.` 的静态路径读取。工具库不是「写了就专业」，而是「边界多到值得统一」时才划算。
+
+### 可运行代码示例
+
+先看导入方式对打包结果的影响：
+
+```ts
+// 推荐：具名导入，打包器能按函数摇树
+import { groupBy, orderBy } from 'lodash-es';
+// 反例：默认导入需要完整命名空间对象，整包都会进依赖图
+import _ from 'lodash-es';
+// CJS 版 lodash 只能靠子路径做到「按需」
+import groupByCjs from 'lodash/groupBy';
+```
+
+实验室包把本章的核心函数都做成了可测试的纯函数，运行方式固定为：
+
+```bash
+cd libraries && pnpm --filter @fag/lodash-lab test
+```
+
+`src/index.ts` 导出 `groupOrders`、`pickSafe`、`uniqueBy`、`cloneSnapshot`、`deepMergeSafe`、`createDebouncedSaver` 与 `paginate`，每个都能在 `test/index.test.ts` 找到对照用例。
+
+### 最佳实践
+
+- 新项目统一使用 `lodash-es` + 具名导入，禁止默认导入；
+- 同一仓库不要同时安装 `lodash` 与 `lodash-es`，否则会出现双份体积与两套类型；
+- 在业务与 lodash 之间留一层 `utils/` 封装，未来替换 `es-toolkit` 或原生 API 时只改一层；
+- 用打包分析器确认「实际入包的函数」，不要凭感觉判断 tree-shaking 生效。
+
+### 自测题
+
+<details>
+<summary><b>1. 【基础】`lodash` 与 `lodash-es` 的本质区别是什么？</b></summary>
+
+`lodash` 是 CJS/UMD 构建，整体以 CommonJS 形式发布，打包器难以按函数裁剪；`lodash-es` 是同一套源码的 ESM 构建，声明了 `sideEffects: false`，具名导入后可以按函数 tree-shaking。功能 API 基本一致，差异主要在模块格式、体积与构建工具兼容性。
+</details>
+
+<details>
+<summary><b>2. 【进阶】为什么 `import _ from 'lodash-es'` 仍然可能把整包带进产物？</b></summary>
+
+默认导入要求得到一个包含全部方法的命名空间对象，打包器无法证明「哪些属性不会被访问」，因此不能安全删除未使用的函数。具名导入把依赖表达成静态绑定，配合 ESM 的 `sideEffects: false` 才能逐函数裁剪。另一个隐形风险是某些打包器对 CJS interop 的处理会退化成整包引入。
+</details>
+
+<details>
+<summary><b>3. 【挑战】老项目从 `lodash` 迁移到 `lodash-es` 或 `es-toolkit`，如何分阶段降低风险？</b></summary>
+
+第一步统一入口：把散落各处的 `import _ from 'lodash'` 收敛到项目自己的 `utils/` 封装层；第二步换模块格式：封装层内部改为 `lodash-es` 具名导入，保持对外函数签名不变；第三步做体积分析，找出入包最大的函数；第四步按调用频率逐个替换为原生 API 或 `es-toolkit`，每替换一批跑一次回归与体积对比；最后清理旧依赖。不要一次性全量替换，尤其注意 `lodash/fp`、`chain` 与 `merge` 的语义差异。
+</details>
+
+---
+
+## 30.2 入门：高频 API 与 iteratee
+
+### 概念解析
+
+日常 80% 的调用集中在四组 API：
+
+- 集合：`map`、`filter`、`reduce`、`groupBy`、`keyBy`、`orderBy`、`partition`；
+- 数组：`chunk`、`uniq`、`uniqBy`、`differenceBy`、`intersectionBy`、`flattenDeep`；
+- 对象：`get`、`set`、`has`、`pick`、`omit`、`mapValues`、`merge`；
+- 字符串：`camelCase`、`kebabCase`、`snakeCase`、`truncate`、`escape`。
+
+其中 `groupBy` 与 `keyBy` 最容易被混用：前者把「同键多项」收成一个数组，后者只保留「同键最后一项」。做报表聚合必须用 `groupBy`，做 ID 索引才用 `keyBy`。
+
+iteratee 简写是 lodash 的另一条主线，常见三种形式：
+
+- 属性名/路径：`groupBy(users, 'role')`；
+- 匹配属性对：`filter(users, ['active', true])`；
+- 对象匹配：`filter(users, { active: true, role: 'admin' })`。
+
+简写让代码短，但 TypeScript 对字符串路径的校验很弱；复杂条件或需要类型推断时，应写具名回调。
+
+### 典型应用场景
+
+- 订单看板：按大区 `groupBy`，组内 `orderBy` 多字段排序，再 `mapValues` 算小计；
+- 多选筛选：`differenceBy` 求「已选但不在当前列表」的项，`intersectionBy` 求交集。
+
+### 可运行代码示例
+
+```ts
+import {
+    chunk,
+    differenceBy,
+    groupBy,
+    keyBy,
+    mapValues,
+    orderBy,
+    uniqBy,
+} from 'lodash-es';
+interface User {
+    id: string;
+    name: string;
+    role: 'admin' | 'editor';
+    score: number;
+}
+
+const users: User[] = [
+    { id: 'u-1', name: 'Ada', role: 'admin', score: 92 },
+    { id: 'u-2', name: 'Bob', role: 'editor', score: 88 },
+    { id: 'u-3', name: 'Cid', role: 'admin', score: 95 },
+];
+const byRole = groupBy(users, 'role');
+const ranked = mapValues(byRole, (list) => orderBy(list, ['score'], ['desc']));
+const byId = keyBy(users, 'id');
+const topThree = chunk(users, 2)[0] ?? [];
+const active = users.filter((user) => user.score >= 90);
+const stale = differenceBy(active, users.slice(0, 1), 'id');
+const uniqueRoles = uniqBy(users, (user) => user.role);
+```
+
+### 最佳实践
+
+- 简单取值用属性名简写，复杂逻辑用具名回调；可读性与类型推断通常比「少写几个字符」重要；
+- `groupBy` 的键最终会变成字符串，对象/数字键要先显式序列化，避免所有值都落进 `[object Object]`；
+- `keyBy` 遇到重复键时后者覆盖前者，需要保留全部数据时改用 `groupBy`；
+- 去重先明确「按引用、按值还是按业务键」：`uniq` 按 SameValueZero，`uniqWith` 自定义比较，`uniqBy` 按业务键。
+
+### 自测题
+
+<details>
+<summary><b>4. 【基础】`groupBy` 与 `keyBy` 的返回值有什么区别？</b></summary>
+
+`groupBy` 把每个键对应的所有元素收集成数组，返回值形如 `Record<string, T[]>`；`keyBy` 只保留每个键的最后一项，返回值形如 `Record<string, T>`。聚合、分组统计用 `groupBy`；按主键建索引、快速查找用 `keyBy`。
+</details>
+
+<details>
+<summary><b>5. 【进阶】iteratee 简写有哪三种常见形式？各自适合什么场景？</b></summary>
+
+①属性名或路径，如 `groupBy(users, 'role')`、`get(obj, 'a.b')`；②属性对数组，如 `filter(users, ['active', true])`，表示按某个属性等于某值筛选；③对象匹配，如 `filter(users, { active: true, role: 'admin' })`，多条件同时满足。简写适合简单、固定的取值；涉及运算、类型收窄或复杂条件时，写具名回调更稳。
+</details>
+
+<details>
+<summary><b>6. 【挑战】业务去重应该选 `uniq`、`uniqBy` 还是 `uniqWith`？请结合对象数组说明。</b></summary>
+
+`uniq` 用 SameValueZero 比较，对象数组里两个内容相同的对象仍是不同引用，无法按业务字段去重；`uniqBy` 接收 iteratee，按业务键（如 `user.email` 或 `order.id`）保留首次出现，最适合接口列表去重；`uniqWith` 接收比较函数，适合「忽略大小写」「按区间归一」等自定义相等语义。若需要后者优先，先 `reverse` 或用 `reduceRight` 重建，不要假设 `uniqBy` 会覆盖前值。
+</details>
+
+---
+
+## 30.3 进阶：安全边界与异步控制
+
+### 概念解析
+
+**`get` 与类型安全。** `_.get(object, path, defaultValue)` 支持动态路径，默认值只在解析结果为 `undefined` 时生效；如果路径存在但值是 `null`，返回值就是 `null`，不会被默认值替换。这一点与很多人对「兜底」的直觉不同。
+
+静态路径应优先用可选链：`user?.profile?.name` 既有类型收窄，又不引入运行时依赖。只有在路径来自配置、表单字段名、后端下发的字符串时，`get` 的「字符串路径」能力才不可替代。为了类型安全，入口处把 `unknown` 收窄成明确接口，再给 `get` 的结果补泛型或包装成 `pickSafe` 这类显式返回 `T | undefined` 的函数。
+
+`has` 检查的是**自有属性路径**，因此 `has(obj, 'toString')` 返回 `false`，可以挡住从原型链冒出来的字段；`get` 则会沿原型链读取。安全读取应当 `has` + `get` 配对，而不是只信 `get`。
+
+**`cloneDeep` 的边界。** 它擅长纯数据：普通对象、数组、`Date`、`RegExp`、`Map`、`Set`，并用内部栈处理循环引用。但它不是万能克隆：
+
+- 函数不会被复制成新函数，顶层克隆甚至可能得到空对象；
+- DOM 节点不保证可用，正确工具是 `node.cloneNode(true)`；
+- 自定义类实例会丢失原型，变成普通对象；
+- getter 会被求值成普通属性，不可枚举属性与属性描述符不会保留。
+
+**`merge` 的原型污染。** `_.merge` 会递归合并对象，历史上多次因 `__proto__`、`constructor.prototype` 路径导致 `Object.prototype` 被污染。即使当前补丁版本已有防护，也不应把不可信 JSON 直接交给 `merge`：防御要放在业务入口，而不是赌库的实现细节。实验室的 `deepMergeSafe` 先递归丢弃 `__proto__`、`constructor`、`prototype` 三个键，再合并。
+
+**`debounce` 与 `throttle`。** `debounce` 在最后一次调用后等待 `wait` 才执行；`throttle` 保证每个窗口最多执行一次。两者都支持 `leading`/`trailing`，`debounce` 额外支持 `maxWait`。返回的函数带 `cancel()` 与 `flush()`：前者丢弃待执行任务，后者立即执行并清空计时器。组件卸载、路由切换、放弃草稿时必须 `cancel`；页面关闭、提交前需要立即落盘时用 `flush`。
+
+### 典型应用场景
+
+- 后端字段名不确定：用配置驱动的 `path` 读取，避免手写多层 `if`；
+- 远程配置合并：默认配置 + 租户配置 + 用户配置逐层覆盖，必须过滤危险键；
+- 搜索框联想：输入停止后再请求，使用 `debounce`；
+- 自动保存：`debounce` + `flush`/`cancel` 组成可控的保存生命周期。
+
+### 可运行代码示例
+
+动态路径读取与类型包装：
+
+```ts
+import { get, has } from 'lodash-es';
+
+interface User {
+    profile: { name: string; age?: number };
+}
+const payload: unknown = JSON.parse('{"profile":{"name":"Ada"}}');
+const user = payload as User;
+const name = get(user, 'profile.name', '匿名'); // string
+const age = get(user, 'profile.age'); // number | undefined
+const hasAge = has(user, 'profile.age'); // false，不会回退到原型链
+const inherited = has(user, 'toString'); // false
+```
+
+深拷贝与「不可信合并」的对照：
+
+```ts
+import { cloneDeep, merge } from 'lodash-es';
+
+const snapshot = cloneDeep(user);
+// snapshot.profile 与 user.profile 已解耦，可安全修改
+const untrusted = JSON.parse('{"__proto__":{"polluted":true}}') as object;
+merge({}, untrusted);
+// 旧版本或特定路径下可能污染 Object.prototype；
+// 生产代码应先清洗键，或改用 deepMergeSafe。
+```
+
+防抖保存与生命周期控制：
+
+```ts
+import { debounce } from 'lodash-es';
+
+const saveDraft = debounce(
+    (draft: string) => {
+        void fetch('/api/draft', { method: 'PUT', body: draft });
+    },
+    300,
+    { leading: false, trailing: true },
+);
+saveDraft('第一版');
+saveDraft('第二版'); // 只发送最后一次
+saveDraft.flush(); // 立即发送待执行的那次
+saveDraft.cancel(); // 丢弃，例如用户放弃草稿
+```
+
+### 最佳实践
+
+- 静态路径一律 `?.`，动态路径才用 `get`；不要在热循环里反复 `get` 同一个对象；
+- 安全读取统一走 `has` + `get` 的包装函数，避免原型链字段被当成业务数据；
+- `cloneDeep` 只用于纯数据；DOM 用 `cloneNode`，类实例写显式 `copy()`，函数保持引用；
+- 合并不可信输入时：先 schema 校验（如 Zod）→ 再清洗危险键 → 再合并 → 最后断言原型未被修改；
+- 防抖函数在模块级或 `useMemo` 中创建一次，卸载时 `cancel`，提交前按需 `flush`；
+- 需要「窗口内至少执行一次」用 `throttle`，不要把 `debounce` 硬当节流用。
+
+### 自测题
+
+<details>
+<summary><b>7. 【基础】`_.get` 的默认值在什么情况下不生效？为什么 `has` 更安全？</b></summary>
+
+只有当解析结果为 `undefined` 时默认值才生效；如果路径存在且值是 `null`、`0`、空字符串，默认值不会替换。`has` 只检查自有属性路径，原型链上的 `toString`、`constructor`、`__proto__` 不会被当成业务字段；`get` 会沿原型链读取，因此安全读取应 `has` + `get` 配对，或使用封装好的 `pickSafe`。
+</details>
+
+<details>
+<summary><b>8. 【进阶】`cloneDeep` 不能安全处理哪些值？分别应改用什么方案？</b></summary>
+
+函数不会被复制成新函数（嵌套时保留引用，顶层可能变空对象），应保持引用或显式绑定；DOM 节点应使用 `cloneNode(true)`；自定义类实例会丢失原型，应在类上实现 `copy()` 或工厂函数；getter、不可枚举属性与属性描述符不会保留，需要时用 `Object.getOwnPropertyDescriptors` 配合 `Object.create`；`WeakMap`、Promise、文件句柄等资源型对象不应进入快照。纯数据还可以考虑 `structuredClone`，但它同样不保留自定义原型。
+</details>
+
+<details>
+<summary><b>9. 【挑战】接收不可信 JSON 做深合并时，如何设计原型污染防御？为什么不能只依赖 lodash 版本修复？</b></summary>
+
+分四层：①入口用 schema 校验字段白名单，拒绝未知键；②递归清洗 `__proto__`、`constructor`、`prototype`，数组与普通对象都要遍历；③合并时使用 `mergeWith` 或不支持原型赋值的实现，必要时用 `Object.create(null)` 作为容器；④合并后断言 `Object.getPrototypeOf(result)` 仍是预期原型，并用测试覆盖 `constructor.prototype` 嵌套路径。不能只依赖版本修复，是因为污染路径变体多、升级滞后普遍，且业务入口的信任边界必须由业务自己负责；库的补丁只能算纵深防御的一层。
+</details>
+
+---
+
+## 30.4 精通：FP、性能与体积治理
+
+### 概念解析
+
+**`memoize` 的键与内存。** 默认实现用「第一个参数」作为缓存键，并通过字符串化落到对象属性上。对象参数会统一变成 `[object Object]`，不同对象互相命中；数组参数也有类似风险。正确做法是传 resolver 生成稳定且无碰撞的键，例如排序后的 ID 列表。`memoize` 暴露 `cache`（可换成 `Map`/`WeakMap`）与 `cache.clear()`，但没有 TTL 与容量上限，长期缓存请求参数会造成内存持续增长。
+
+**FP 模块。** `lodash/fp` 与 `lodash-es/fp` 提供 data-last、自动柯里化的版本：`curry` 把多参函数拆成可逐步传参的一元函数，`flow` 负责串成管道，例如 `map(fn)(list)`、`getOr(fallback, path)(obj)`。它适合把多个小函数组合成单向数据流，避免中间变量；FP 函数不修改入参，但 TypeScript 的泛型推断能力有限，复杂管道常需要显式标注。
+
+**惰性求值与性能。** `_.chain(...).filter(...).map(...).take(3).value()` 在 lodash 中会尝试惰性求值：`take` 可以让前面的 `filter`/`map` 提前短路，大数据集只遍历到够用为止。但 `chain` 会引入 wrapper 代码，且并非所有方法都参与惰性优化。简单的两三次转换，原生链式调用往往更小更快；百万级数据的热点循环，应优先考虑单次遍历或原生 `for`。
+
+**bundle 体积治理。** `lodash-es` 具名导入是基础；进一步要做的是：用打包分析器确认实际入包函数、给首屏设体积预算、把低频功能移到异步 chunk、用原生 API 或 `es-toolkit` 替换高频但实现简单的函数。注意 `Object.groupBy`、`Map.groupBy`、`structuredClone` 等原生能力已在现代运行时可用，但浏览器基线要按项目支持矩阵确认。
+
+**TypeScript 类型。** `@types/lodash-es` 提供完整声明，`Dictionary<T>`、`List<T>`、`Many<T>` 等类型在业务封装里很好用。局限是路径字符串不会被字面量校验，`get` 的重载在动态路径下会退化成 `any`，泛型推断也会在多层组合时失效；解决办法是把断言集中在 API 边界，对外只暴露明确类型。
+
+### 典型应用场景
+
+- 数据管道：`flow(filter(...), map(...), sortBy(...))` 组合多个转换；
+- 大列表首屏：`chain` + `take` 只取前 N 条，或改用单次遍历；
+- 体积优化：把 Excel 导出、图片压缩等低频能力拆到异步 chunk，把 lodash 调用替换为原生。
+
+### 可运行代码示例
+
+带稳定键的 `memoize`：
+
+```ts
+import { memoize } from 'lodash-es';
+interface Row {
+    id: string;
+}
+const buildIndex = memoize(
+    (rows: readonly Row[]) => new Map(rows.map((row) => [row.id, row])),
+    (rows: readonly Row[]) => rows.map((row) => row.id).join('|'),
+);
+const index = buildIndex([{ id: 'a' }, { id: 'b' }]);
+buildIndex.cache.clear(); // 切换租户或数据源时主动释放
+```
+
+用 FP 组合单向管道：
+
+```ts
+import { filter, flow, getOr, map } from 'lodash-es/fp';
+interface User {
+    name: string;
+    active: boolean;
+    profile?: { city?: string };
+}
+const activeNames = flow(
+    filter((user: User) => user.active),
+    map((user: User) => user.name),
+);
+const cityOf = getOr('未知', 'profile.city');
+```
+
+### 最佳实践
+
+- `memoize` 只缓存纯函数；resolver 必须稳定、无碰撞，并在租户/用户切换时 `cache.clear()`；
+- FP 用于「组合」而不是「炫技」，两三个函数没必要上 `flow`；
+- 大数据 + 短路才用 `chain`，普通列表用原生链式；性能结论必须来自 benchmark，不靠直觉；
+- 体积治理设两道闸：构建时 analyzer + 体积预算，代码评审时禁止默认导入与整包 `chain`；
+- 替换顺序：原生能覆盖的先用原生，其次 `es-toolkit`，最后才是 lodash 的复杂边界函数。
+
+### 自测题
+
+<details>
+<summary><b>10. 【基础】`memoize` 默认用什么做缓存键？对象参数会带来什么问题？</b></summary>
+
+默认用第一个参数作为键，并把键转成字符串挂在缓存对象上。对象参数会被统一转成 `[object Object]`，导致不同对象互相命中，返回错误结果；数组参数也可能出现类似碰撞。需要传 resolver 生成基于业务字段的稳定键。
+</details>
+
+<details>
+<summary><b>11. 【进阶】`memoize` 的缓存会泄漏吗？如何设计键与失效策略？</b></summary>
+
+会。默认缓存没有 TTL、容量上限与自动回收，长期以请求参数为键会持续增长；闭包还会持有参数引用。设计上：①resolver 用稳定且唯一的数据（如排序后的 ID 拼接、哈希）；②缓存对象换成 `WeakMap`（对象键）或有容量上限的 LRU；③在数据源、租户、用户切换时调用 `cache.clear()`；④只缓存可重算的纯计算，不缓存一次性请求结果。
+</details>
+
+<details>
+<summary><b>12. 【挑战】团队要治理 lodash 体积，如何决定「保留、替换原生、换 es-toolkit」？</b></summary>
+
+先量化：用分析器列出实际入包函数与字节数，按首屏/异步 chunk 拆分预算；再分类：①原生已有一行等价且基线满足的（`map`、`filter`、`Object.groupBy`、`structuredClone`）直接替换；②实现简单但原生缺失的（`uniqBy`、`chunk`、`camelCase`）评估 `es-toolkit`；③边界复杂、团队依赖其语义的（`merge`、`get`、`debounce` 高级选项）保留 lodash。每类替换都要有回归用例与体积对比，并禁止默认导入、整包 `chain` 回潮。最终目标不是「零 lodash」，而是体积预算内的最低复杂度。
+</details>
+
+---
+
+## 30.5 实战：订单看板工具箱
+
+### 概念解析
+
+把前面的能力组装成一个可复用的数据层：`groupOrders` 负责分组聚合，`pickSafe` 负责后端字段安全读取，`uniqueBy` 负责按业务键去重，`deepMergeSafe` 负责配置合并，`createDebouncedSaver` 负责草稿保存，`paginate` 负责列表分页。它们共同的原则是：**入参只读、返回新值、边界可预期**。
+
+这条数据流的价值在于把「页面里的临时拼装」变成「可单测的纯函数」。页面只负责取数与渲染，聚合、合并、分页这些容易出错的逻辑全部下沉到实验室包。
+
+### 典型应用场景
+
+- 订单/工单看板：按区域、状态分组，组内排序并计算金额小计；
+- 配置中心：默认配置、租户配置、用户偏好三层合并；
+- 草稿编辑：输入停止后自动保存，提交前强制落盘，离开时清理计时器。
+
+### 可运行代码示例
+
+一次完整的看板数据准备：
+
+```ts
+import {
+    deepMergeSafe,
+    groupOrders,
+    paginate,
+    pickSafe,
+    uniqueBy,
+    type Order,
+} from './src/index.js';
+const orders = (await loadOrders()) as Order[];
+const deduped = uniqueBy(orders, (order) => order.id);
+const grouped = groupOrders(deduped);
+const page = paginate(deduped, 2, 20);
+const defaultConfig = { theme: { color: 'blue', density: 'comfortable' } };
+const tenantConfig = JSON.parse('{"theme":{"color":"green"}}') as Record<string, unknown>;
+const config = deepMergeSafe(defaultConfig, tenantConfig);
+const ownerName = pickSafe<string>(grouped.east, 'orders.0.owner.name', '未知');
+```
+
+自动保存与生命周期控制：
+
+```ts
+import { createDebouncedSaver } from './src/index.js';
+
+const saver = createDebouncedSaver((draft: string) => {
+    localStorage.setItem('order-draft', draft);
+}, 300);
+saver('第二版草稿'); // 300ms 内只落盘最后一次
+saver.flush(); // 提交前立即落盘
+saver.cancel(); // 放弃草稿时丢弃待执行任务
+```
+
+### 最佳实践
+
+- 数据流保持单向：取数 → 去重 → 分组/聚合 → 分页 → 渲染，每一步都返回新值；
+- 页面不要直接 `sort` 原数组，`orderBy` 与 `paginate` 都不修改入参；
+- 只在 API 边界使用 `unknown` + `pickSafe`，进入业务层后使用明确接口；
+- `deepMergeSafe` 仍需配合 schema 校验，过滤危险键不等于字段合法；
+- 自动保存要区分 `flush`（必须落盘）与 `cancel`（主动放弃），并在卸载时清理监听器。
+
+### 自测题
+
+<details>
+<summary><b>13. 【进阶】自动保存场景下，`leading`、`trailing`、`cancel`、`flush` 应如何配合？</b></summary>
+
+输入过程用 `trailing: true`，保证停止输入后保存最后一次；需要「第一次输入立刻存一份」时加 `leading: true`，但要同时考虑尾部是否再存。用户点击提交时调用 `flush()`，立即执行待保存任务并清空计时器；用户放弃草稿或组件卸载时调用 `cancel()`，丢弃待执行任务。页面 `pagehide` 场景应 `flush` 而不是 `cancel`，否则最后一次输入会丢。
+</details>
+
+<details>
+<summary><b>14. 【基础】`paginate` 在空数组和越界页码下应返回什么？</b></summary>
+
+空数组时 `totalPages` 为 0、`items` 为空数组、`hasPrev`/`hasNext` 均为 `false`，页码归一为 1，调用方渲染空态即可；越界页码（如 99）应夹取到最后一页，`items` 返回最后一页数据，`hasNext` 为 `false`，而不是返回空数组或抛错。`paginate` 还应保证返回新数组，不修改入参数组。
+</details>
+
+<details>
+<summary><b>15. 【挑战】设计订单草稿的端到端自动保存，需要考虑哪些失败与并发场景？</b></summary>
+
+①输入防抖，避免每次按键发请求；②提交前 `flush`，保证最后一次输入不丢；③请求失败要有重试与本地兜底（先写 `localStorage`，再异步同步服务端）；④并发保存要按版本号或时间戳丢弃旧响应，避免后发先至覆盖新草稿；⑤切租户/切换订单时 `cancel` 旧计时器并清理缓存；⑥页面卸载用 `pagehide` + `flush`，不要依赖可能不触发的 `unload`；⑦给保存失败率、重试次数、最后保存时间加埋点，UI 明确展示「保存中/已保存/失败」。
+</details>
+
+### 实战案例：多维聚合报表（两级分组与汇总行）
+
+**业务背景。** 中后台报表经常要「区域 → 品类」两级汇总：区域内按品类算小计，区域整体算合计，两个维度都要按金额排序。手写双层 for 循环很容易把分组、排序、汇总搅在一起，还常常顺手把入参 sort 了。把整条报表管线写成 groupBy + mapValues + orderBy 的纯函数组合，输入只读、输出全新。
+
+```ts
+import { groupBy, mapValues, orderBy, sumBy } from 'lodash-es';
+
+interface OrderRecord {
+    region: string;
+    category: string;
+    amount: number;
+}
+
+interface RegionReport {
+    region: string;
+    grandTotal: number;
+    categories: { category: string; total: number }[];
+}
+
+function buildReport(records: readonly OrderRecord[]): RegionReport[] {
+    const byRegion = groupBy(records, (record) => record.region);
+    const reports = mapValues(byRegion, (regionRecords, region): RegionReport => {
+        const byCategory = groupBy(regionRecords, (record) => record.category);
+        const categories = orderBy(
+            mapValues(byCategory, (list, category) => ({
+                category,
+                total: sumBy(list, (record) => record.amount),
+            })),
+            ['total'],
+            ['desc'],
+        );
+        return { region, grandTotal: sumBy(regionRecords, (record) => record.amount), categories };
+    });
+    return orderBy(Object.values(reports), ['grandTotal'], ['desc']);
+}
+```
+
+**实现要点与取舍。**
+
+- 每一层 groupBy、mapValues、orderBy 都返回新对象、新数组，入参声明为 readonly：接口返回直接传入也不会被改写，上游缓存的列表始终安全；
+- 排序放在聚合之后：先分组，再对组内统计与区域汇总分别 orderBy，两个维度的排序互不干扰；先排序再分组只是白排一次；
+- 空数组输入时 groupBy 返回空对象，函数自然返回空报表，调用方无需特判；但 region 为 null 的脏数据会被归进 'null'、'undefined' 这样的字符串键，建分组键前要先过滤或用 `?? '未知'` 归一；
+- 踩坑点：不要为了「顺手整理」对入参调用 sort 或 splice——orderBy 返回新数组，而 Array.prototype.sort 是原地修改，混用一次上游列表就被污染一次；金额汇总还要另防浮点误差，用分（整数）存储或 decimal 库，lodash 不负责精度。
+
+### 实战案例：keyBy 关联两张表，把 O(n²) 的 find 换成 O(n)
+
+**业务背景。** 订单列表与用户列表来自两个接口，渲染时要把下单人姓名拼进订单行。直觉写法是 `orders.map((order) => users.find((user) => user.id === order.userId))`，千级订单就是百万次比较，列表一滚动就卡。先把用户列表用 keyBy 建索引，再逐单查表，复杂度从 O(n²) 降到 O(n)。
+
+```ts
+import { keyBy } from 'lodash-es';
+
+interface OrderRow {
+    id: string;
+    userId: string;
+    amount: number;
+}
+
+interface Account {
+    id: string;
+    name: string;
+    dept: string;
+}
+
+function joinOwnerInfo(orders: readonly OrderRow[], accounts: readonly Account[]) {
+    const accountById = keyBy(
+        accounts.filter((account) => account.id !== ''),
+        'id',
+    );
+    return orders.map((order) => {
+        const account = accountById[order.userId];
+        return {
+            ...order,
+            ownerName: account?.name ?? '已注销',
+            deptName: account?.dept ?? '未知部门',
+        };
+    });
+}
+```
+
+**实现要点与取舍。**
+
+- keyBy 只保留同键最后一项：账号接口可能返回重复 id，先 uniqBy 去重再建索引，否则「谁覆盖谁」取决于返回顺序，排查起来非常隐蔽；
+- 索引对象是 O(1) 属性查找，但键是字符串：`accountById[1]` 与 `accountById['1']` 命中同一槽位，数字 id 直接用没问题，拼接 id 时注意隐式转换；
+- 查不到的 userId 用 `?.` 加 `??` 单行兜底，脏数据只影响一行展示，不让整张表崩掉；关联逻辑放进 useMemo，只在 accounts 变化时重建索引；
+- 踩坑点：某条数据缺 id 时，iteratee 返回 undefined，keyBy 会把它挂到 'undefined' 字符串键下，之后 `accountById['undefined']` 会意外命中——所以建索引前先过滤无 id 记录，示例中的 filter 不能省。
+
+### 实战案例：深层表单差异对比与补丁提交
+
+**业务背景。** 复杂表单有几十个字段，编辑后整包 PUT 既浪费带宽，也容易把同事正在改的字段覆盖回去。更稳的做法是只提交脏字段：拿当前值与初始快照逐字段 isEqual，用 pickBy 筛出变更项生成 patch。初始快照必须 cloneDeep，否则「初始值」会跟着编辑一起变，diff 永远为空。
+
+```ts
+import { cloneDeep, isEqual, keys, pickBy } from 'lodash-es';
+
+type FormValues = Record<string, unknown>;
+
+function buildPatch(initial: FormValues, current: FormValues): FormValues {
+    const snapshot = cloneDeep(initial);
+    const dirty = pickBy(current, (value, key) => {
+        // isEqual：NaN 与 NaN 相等、Date 按时间值比较，不会误报为脏
+        return !isEqual(value, snapshot[key]);
+    });
+    const removed = keys(snapshot)
+        .filter((key) => !(key in current))
+        .map((key) => [key, null] as const);
+    return { ...dirty, ...Object.fromEntries(removed) };
+}
+
+const initial = { title: 'A', price: 10, tags: ['x'] };
+const edited = { title: 'A', price: 12, tags: ['x', 'y'] };
+const patch = buildPatch(initial, edited); // { price: 12, tags: ['x', 'y'] }
+```
+
+**实现要点与取舍。**
+
+- 快照必须 cloneDeep：受控表单里保存的是对象引用，直接存引用时 initial 会被后续编辑同步改掉，「提交内容永远比预期多」就是这么来的；
+- isEqual 的相等语义和 `===` 不同：NaN 与 NaN 相等、Date 按时间值比较、正则按 source 与 flags 比较，对表单值这通常正是想要的，但要写进团队约定，避免有人换成 Object.is 后行为分叉；
+- 含函数、DOM 或类实例引用的字段先 omitBy 排除再 diff：函数引用不同恒判脏，循环引用虽不会死循环但语义不可控，不该进 patch 的字段别让它进 diff；
+- 踩坑点：patch 语义必须和接口配套——只含脏字段的 patch 发给只认全量 PUT 的接口，缺省字段会被重置成空；先确认后端支持部分更新，再决定 diff 粒度。
+
+### 实战案例：大列表分块处理，别让一次 forEach 锁死主线程
+
+**业务背景。** 一次性给十万行表格做统计，或把大 JSON 批量建索引时，同步 forEach 会把主线程锁死几百毫秒甚至数秒，输入、动画、埋点全部冻结。用 chunk 把数据切成小块，每块之间让出主线程，长任务就变成一串短任务，页面保持可响应。
+
+```ts
+import { chunk } from 'lodash-es';
+
+const yieldToMain = (): Promise<void> =>
+    new Promise((resolve) => {
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(() => resolve());
+            return;
+        }
+        setTimeout(resolve, 0);
+    });
+
+async function processInBatches<T, R>(
+    items: readonly T[],
+    size: number,
+    handle: (batch: T[]) => R[],
+): Promise<R[]> {
+    const result: R[] = [];
+    for (const batch of chunk(items, size)) {
+        result.push(...handle(batch));
+        await yieldToMain();
+    }
+    return result;
+}
+```
+
+**实现要点与取舍。**
+
+- chunk 本身是同步的，价值在于把一次 O(n) 长任务拆成 N 个短任务；让出时机优先 requestIdleCallback、setTimeout 兜底，浏览器与 Node 都能跑；
+- size 要有下界校验：chunk(items, 0) 返回空数组，整批任务被静默吞掉，函数开头应断言 size >= 1；批大小用 Performance 面板按「单块耗时」实测调整，不是拍脑袋定；
+- 踩坑点：分块过程中源数据变了（用户翻页、改筛选条件），继续处理旧数据就是白做——把版本号或信号传进循环，检测到变更立即 return，必要时用 AbortController 支持取消；
+- 这是「分批不并发」的模型，牺牲吞吐换响应性；真要吞吐上限，应把 handle 挪进 Web Worker，主线程只负责调度与渲染。
+
+### 进阶技巧：带类型的深路径读取封装
+
+`lodash-es` 的 get 在动态路径下返回 any，团队应在 `utils/` 里封一层带泛型的版本，让默认值的类型直接成为返回值类型：
+
+```ts
+import { get } from 'lodash-es';
+
+function getPath<T>(source: unknown, path: string, fallback: T): T {
+    const value = get(source, path) as T | undefined;
+    return value === undefined ? fallback : value;
+}
+
+const payload: unknown = JSON.parse('{"page":{"size":20}}');
+getPath(payload, 'page.size', 10); // 返回值推断为 number
+getPath(payload, 'page.tag', '默认'); // 返回值推断为 string
+```
+
+- 泛型跟着 fallback 走：默认值是什么类型返回值就是什么类型，any 被关在这一层，断言集中一处，出问题只查一个函数；
+- 兜底语义与 lodash 保持一致：只有 undefined 才回退，路径存在但值是 null 时原样返回 null，「字段缺失」与「字段为空」是两种业务状态，不要在封装里悄悄合并；
+- 可以顺手在封装里加 has 前置校验或路径白名单（只放行 `[A-Za-z0-9_.]`），把「路径来自配置」的信任边界显式化；
+- 为什么不能把 get 当类型系统用：路径是运行时字符串，TS 校验不了 'page.szie' 这类拼写错误，接口字段改名也不会报错——静态路径一律 `?.`，这个封装只服务路径真的来自变量的场景。
+
+### 进阶技巧：shuffle/sample/random 的测试不变式
+
+随机 API 的输出不可复现，直接断言具体值必然偶发挂掉；改断言「不变式」，随机序列怎么变测试都不会抖：
+
+```ts
+import { sample, shuffle } from 'lodash-es';
+
+const source = [1, 2, 3, 4, 5];
+const shuffled = shuffle(source);
+const sorted = (values: number[]) => [...values].sort((a, b) => a - b).join();
+const keepsMultiset = shuffled.length === source.length && sorted(shuffled) === sorted(source);
+const sourceUntouched = source.join() === '1,2,3,4,5';
+const sampleInBounds = sample(source) !== undefined; // sample([]) 才返回 undefined
+```
+
+- 断言不变式而非具体结果：shuffle 后长度不变、多重集相等，sample 结果必属于原集合，random 落在区间内——这些性质对任何随机输出都成立；
+- 锁住「入参不被修改」：shuffle、sample 都返回新数组，但业务里常见的原地 sort 会破坏这条约定，sourceUntouched 就是专门防回归的；
+- 要复现 bug 或覆盖特定分布时，把随机源抽成参数（种子思路）：生产传 Math.random，测试传固定序列的伪随机函数，同一个函数两条路径，不必去 mock lodash；
+- sample 对空数组返回 undefined，别用 `!` 断言非空；random(a, b) 默认返回浮点，要整数记得传 `true` 或自己取整——这两处是随机 API 用例失败的高发原因。
+
+### 进阶技巧：lodash 迁移到原生与 es-toolkit 的判定清单
+
+治理体积不是「能换就换」，而是逐个 API 判定。替换动作发生在 `utils/` 封装层内部，业务调用签名不变：
+
+```ts
+import { groupBy } from 'lodash-es';
+
+// 替换前：groupBy 来自 lodash-es
+const byRegion = groupBy(orders, (order) => order.region);
+// 替换后：Object.groupBy 同语义、零依赖，注意返回的是 null 原型对象
+const byRegionNative = Object.groupBy(orders, (order) => order.region);
+```
+
+- 可直接换原生（先确认运行时基线）：map、filter、reduce、find、some、every、flatMap；Object.groupBy、Map.groupBy；toSorted、toReversed、toSpliced；structuredClone 覆盖纯数据深拷贝；
+- 建议保留 lodash：debounce 与 throttle（leading/trailing/maxWait 全套语义）、get（动态路径）、cloneDeep（边界比 structuredClone 更宽容）、orderBy（多键多方向稳定排序）、memoize（带 resolver）；
+- 中间地带给 es-toolkit：uniqBy、chunk、keyBy、omit、camelCase 这类实现简单、原生缺失的函数，API 高度兼容且体积更小；
+- 行为差异要逐条登记：Object.groupBy 返回 null 原型对象（不能直接调 hasOwnProperty），原生也没有 orderBy 的多键稳定排序语义，评审时连同单测一起过；
+- 每批替换都要留下数据：替换前后的 chunk 字节数与回归结果，用分析器说话，不拍脑袋估收益。
+
+---
+
+## 30.6 综合自测题
+
+<details>
+<summary><b>16. 【挑战】为一个已大量使用 lodash 的中后台项目设计完整的体积治理方案。</b></summary>
+
+①基线：打包分析器输出各 chunk 的 lodash 函数与字节数，设首屏预算；②规范：禁止默认导入与整包 `chain`，统一 `lodash-es` 具名导入，ESLint 加限制规则；③封装：业务只依赖 `utils/` 暴露的函数，方便替换实现；④替换：原生可覆盖的先换，简单的换 `es-toolkit`，复杂边界保留；⑤拆分：Excel、图表等低频能力移到动态 import；⑥验收：每个 PR 对比体积，超预算阻断；⑦定期审计版本与 CVE。治理是持续流程，不是一次性重构。
+</details>
+
+<details>
+<summary><b>17. 【挑战】前端状态同时包含 Date、Map、类实例与 DOM 引用，深拷贝方案怎么选？</b></summary>
+
+按数据类别拆分，不要指望一个 API 全包：纯 JSON 部分用 `structuredClone` 或 `cloneDeep`；`Date`、`Map`、`Set` 两者都能正确处理（`structuredClone` 原生支持）；类实例必须在类上实现 `copy()`/`toJSON()`，因为两种克隆都会丢失自定义原型；DOM 节点用 `cloneNode(true)` 或只保存节点引用与选择器，不进入状态快照；函数与事件监听器保持引用，不克隆。最终把「可序列化状态」与「资源引用」分层存放，从设计上消除万能深拷贝的需求。
+</details>
+
+<details>
+<summary><b>18. 【进阶】除了过滤 `__proto__`，原型污染还有哪些入口？如何做纵深防御？</b></summary>
+
+入口包括 `constructor.prototype` 路径、`set` 的路径赋值、对象字面量合并、URL 查询参数转对象、`Object.assign` 与手写递归合并等。纵深防御：①所有外部输入先做 schema 白名单校验；②递归清洗危险键，数组与嵌套对象都要覆盖；③合并容器使用 `Object.create(null)`，阻断原型链赋值；④禁止用用户输入拼路径调用 `set`；⑤合并后断言原型；⑥依赖锁定 `>=4.17.21` 并跑安全测试用例；⑦`Object.freeze(Object.prototype)` 只能作为最后一道实验性兜底，不能替代入口校验。
+</details>
+
+<details>
+<summary><b>19. 【进阶】`memoize`、`debounce`、`throttle` 分别解决什么问题？能否组合使用？</b></summary>
+
+`memoize` 解决「相同输入重复计算」，缓存结果；`debounce` 解决「高频触发只执行最后一次」，控制调用时机；`throttle` 解决「高频触发按固定频率采样」，保证窗口内至少执行一次。可以组合：先 `memoize` 纯计算结果，再对「触发保存/请求」的函数做 `debounce`；或对高频事件用 `throttle` 采样后再 `memoize` 渲染计算。注意组合顺序与缓存失效，别把带副作用的请求函数长期 `memoize`。
+</details>
+
+<details>
+<summary><b>20. 【挑战】把一段 `_.chain` 风格的数据管道重构成 FP 或原生实现，如何评估是否值得？</b></summary>
+
+先看数据规模与短路收益：数据大且 `take` 能显著减少遍历时，`chain` 的惰性有价值；数据小或转换步骤少时，`chain` 只增加 wrapper 体积与调试成本。重构时把每一步拆成纯函数，原生可用 `filter/map/slice` 组合，或 `flow` 组合 data-last 函数；用 benchmark 对比耗时与内存，用分析器对比体积，用单测锁定输出。评估维度按优先级是正确性、可读性、体积、性能，只有后者有实测收益时才为性能牺牲前两者。
+</details>
+
+---
+
+## 30.7 本章避坑清单
+
+> 按生产环境出现频率排序，每条都能在实验室测试里找到对应边界。
+
+| 坑 | 后果 | 避法 |
+| --- | --- | --- |
+| `import _ from 'lodash-es'` | 整包进入产物，tree-shaking 失效 | 一律具名导入，配合 `sideEffects: false` |
+| 同时安装 `lodash` 与 `lodash-es` | 双份体积、两套类型、实例不一致 | 统一一个包并锁版本，清理旧依赖 |
+| 用 `_.get` 替代所有可选链 | 丢失静态类型与可读性，路径写错难发现 | 静态路径用 `?.`，动态路径才用 `get` |
+| 以为 `get` 默认值能挡 `null` | `null` 原样返回，业务拿到空值 | 用 `get(obj, path) ?? fallback` 或显式判空 |
+| `cloneDeep` 克隆函数/DOM/类实例 | 空对象、失效节点、原型丢失 | 只克隆纯数据；DOM 用 `cloneNode`，类写 `copy()` |
+| 对不可信 JSON 直接 `_.merge` | 原型污染，影响全站对象 | 清洗 `__proto__`/`constructor`/`prototype` + schema 校验 |
+| 在 render 中创建 debounce | 每次渲染新实例，永远等不到尾部执行 | 模块级或 `useMemo` 创建，卸载时 `cancel` |
+| 组件卸载不清理防抖计时器 | 定时器泄漏，回调操作已卸载组件 | `useEffect` cleanup 中 `cancel` 或 `flush` |
+| 把 debounce 当 throttle 用 | 持续触发期间完全不回调，进度条卡死 | 高频采样用 `throttle` 或 `leading + trailing` |
+| `memoize` 用对象作默认键 | 全部命中 `[object Object]`，返回错数据 | 自定义 resolver 生成稳定无碰撞键 |
+| `memoize` 缓存请求参数 | 内存持续增长，旧数据不释放 | 有界缓存、`WeakMap`、切换数据源时 `cache.clear()` |
+| 滥用 `_.chain` | 拉入 wrapper 代码，调试与类型推断变差 | 只有大数据短路才用，否则原生链式 |
+| iteratee 简写塞复杂逻辑 | 类型推断弱、可读性差 | 简单取值用简写，复杂条件用具名回调 |
+| 忽略 lodash 版本 | 历史原型污染/命令注入漏洞 | 锁定 `>=4.17.21`，CI 定期审计 |

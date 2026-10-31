@@ -1,0 +1,274 @@
+# 第四十九部分 · 组件库工程——Ant Design 存量维护、二次封装与设计令牌（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/49-component-library
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第四十九部分 · 组件库工程——Ant Design 存量维护、二次封装与设计令牌
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第四十八部分 · Flutter 跨平台实战](./48-flutter.md)｜下一篇：[第五十部分 · Web 蓝牙与硬件通信](./50-bluetooth-hardware.md)｜关联章节：[第四部分 · 框架深入理解](./04-frameworks.md) · [第十二部分 · CSS 工程化](./12-css-engineering.md)
+
+> 💡 **本章特色**：企业项目里真正难的不是「学会 Ant Design」，而是**在 Ant Design 3 的存量系统上安全演进**，同时把业务组件封装成团队可复用的资产。本章给出「版本基线 → 迁移适配层 → 二次封装契约 → 组件库工程化」的完整路径，两个示例分别演示 API 适配与受控字段封装。
+
+## 本部分内容
+
+- [49.1 组件库选型与版本基线](#_49-1-组件库选型与版本基线)
+- [49.2 Ant Design 3 存量维护与迁移](#_49-2-ant-design-3-存量维护与迁移)
+- [49.3 二次封装与组件库工程化](#_49-3-二次封装与组件库工程化)
+- [49.4 自测题](#_49-4-自测题)
+- [49.5 本章避坑清单](#_49-5-本章避坑清单)
+
+---
+
+## 49.1 组件库选型与版本基线
+
+### 概念解析
+
+组件库选型要同时看四个维度：**框架绑定、设计体系、可定制深度、升级成本**。
+
+| 组件库 | 框架 | 样式方案 | 适合场景 | 升级风险 |
+| --- | --- | --- | --- | --- |
+| Ant Design 5 | React 18+ | CSS-in-JS（`@ant-design/cssinjs`）+ Design Token | 中后台、企业级系统 | 中等：v4 组件 API 有破坏性变更 |
+| Ant Design 3 | React 16 | Less 变量 | 存量老系统 | 高：React 18、Less、旧 API 三重包袱 |
+| Element Plus | Vue 3 | SCSS 变量 + CSS 变量 | Vue 中后台 | 低：Vue 3 原生 |
+| Bootstrap 5 | 框架无关 | CSS 变量 + 工具类 | 快速搭建、营销页、传统后台 | 低：无 JS 框架绑定 |
+
+**版本基线不是越新越好**：Ant Design 3 项目如果业务稳定、改动少，「原地维护 + 局部适配」往往比「一次性升 5」风险更低。关键是先把差异**收敛到适配层**，再按页面逐步迁移。
+
+### 典型应用场景
+
+- 存量 AntD 3 后台：日常迭代 + 兼容 React 18 + 逐步替换高风险组件；
+- 新中后台：AntD 5（React）或 Element Plus（Vue），按设计体系选；
+- 官网/活动页：Bootstrap 工具类或 Tailwind，不引入重型组件库；
+- 多产品线：抽一层「业务组件库」，向上统一交互，向下隔离第三方库版本。
+
+### 可运行代码示例
+
+适配层把 v3/v4 的旧 props 转成 v5 语义，并保留业务属性。核心是「只做等价转译 + 冲突告警」。
+
+```typescript
+// 文件: examples/49-01-antd-version-adapter.ts（核心节选）
+function adaptOverlay(props: LegacyProps): AdaptResult {
+  const next: LegacyProps = { ...props };
+  const warnings: string[] = [];
+  if ("visible" in next) {
+    if ("open" in next) {
+      warnings.push("同时存在 visible 与 open,以 open 为准");
+      delete next.visible;
+    } else {
+      next.open = next.visible;
+      delete next.visible;
+    }
+  }
+  return { props: next, warnings };
+}
+```
+
+> 运行方式：`npx tsx examples/49-01-antd-version-adapter.ts`（Modal/Dropdown/message/Form 四类差异转译 + 冲突检测）。
+
+### 最佳实践
+
+- ✅ 先统计存量用法：`rg "visible=|getFieldDecorator|overlay="`，按组件数量排迁移优先级；
+- ✅ 适配层放在业务组件与第三方库之间，页面代码不直接依赖版本差异；
+- ⚠️ AntD 3 的 Less 变量与 AntD 5 的 Design Token 是两套体系，不要试图「一处改、全站生效」；
+- ❌ 不要为了升级而升级：没有明确收益（安全、性能、维护人力）时，原地维护是合理选择。
+
+> 📖 **延伸阅读**：组件库属于高风险大依赖，选型与版本基线可直接套用 [66.2 依赖准入：评分、硬门槛与白名单审批](./66-dependency-governance.md#_66-2-依赖准入-评分、硬门槛与白名单审批) 的五维评分与硬门槛。
+
+---
+
+## 49.2 Ant Design 3 存量维护与迁移
+
+### 概念解析
+
+AntD 3 → 5 的差异可以归为四类，迁移难度依次上升：
+
+| 类别 | 典型差异 | 迁移动作 |
+| --- | --- | --- |
+| 属性改名 | `Modal.visible` → `open`；`Dropdown.overlay` → `menu` | 适配层或批量 codemod |
+| 组件重构 | `Form.create` + `getFieldDecorator` → `Form` + `name/rules`；`Icon` → `@ant-design/icons` | 按表单/图标逐个重写 |
+| 样式体系 | Less 变量 → CSS-in-JS + Design Token；`babel-plugin-import` 不再必需 | 移除 less-loader 配置，改 `ConfigProvider theme` |
+| 运行时依赖 | AntD 3 面向 React 16；React 18 的 `createRoot`、StrictMode 双调用 | 先升 React 18 并修 `findDOMNode` 警告，再升 AntD |
+
+**迁移顺序建议**：React 18 兼容 → 图标与样式体系 → 表单 → 高频弹层组件 → 低频页面。每一步都保持可回滚。
+
+**官方迁移工具**：`@ant-design/compatible` 提供 v3 组件的兼容包（如旧版 Form/Icon），`antd-migration-helper` 能扫描代码中的废弃 API。它们适合过渡期，不适合长期共存。
+
+### 典型应用场景
+
+- 老后台仍跑 AntD 3 + React 16，需要接入 React 18 的新特性；
+- 多个子系统共用一套 AntD 3，升级窗口不一致；
+- 只想替换高风险组件（如 Form、Table），其余保持原样；
+- 需要用 Design Token 统一品牌色，但暂时不能全量升 5。
+
+### 可运行代码示例
+
+迁移中最容易出错的是**表单**。下面展示 v3 `getFieldDecorator` 与 v5 `Form.Item name/rules` 的等价写法，迁移时逐字段对照，不要凭记忆改。
+
+```tsx
+// 文件: src/legacy/UserForm.tsx —— 虚拟工程文件
+// v3:显式 id + options,校验规则藏在 options.rules
+// Form.create()(props => <Form>{getFieldDecorator('email', { rules })(<Input />)}</Form>)
+
+// v5:name 即字段路径,rules 直接挂在 Form.Item
+<Form form={form} onFinish={submit}>
+  <Form.Item name="email" rules={[{ required: true, type: 'email' }]}>
+    <Input />
+  </Form.Item>
+</Form>
+```
+
+> 运行方式：`npx tsx examples/49-01-antd-version-adapter.ts` 可验证字段声明转译；JSX 部分需在 React 工程内运行。
+
+**React 18 兼容的三个高频问题**：
+
+1. `ReactDOM.render` 已废弃，改 `createRoot`；AntD 3 的 `message`/`notification` 静态方法在并发渲染下可能丢失上下文，必要时用 `App` 组件或 `ConfigProvider` 包裹；
+2. StrictMode 下 effect 双调用会暴露「未清理的副作用」，先修业务代码，不要直接关 StrictMode；
+3. AntD 3 内部使用 `findDOMNode`，React 18 会告警；升级前用 `@ant-design/compatible` 过渡或逐个替换。
+
+### 最佳实践
+
+- ✅ 先锁版本：`package.json` 用精确版本或锁文件，避免升级过程中被间接依赖带跑；
+- ✅ 每次只迁一类组件，配套视觉回归截图，确认样式无漂移；
+- ⚠️ `babel-plugin-import` 在 AntD 5 已不需要，保留会拖慢构建；
+- ❌ 不要同时升级 React、AntD、构建工具三件套——出问题时无法定位是哪一层引起的。
+
+---
+
+## 49.3 二次封装与组件库工程化
+
+### 概念解析
+
+二次封装的目的是**把团队约定固化下来**，不是把第三方组件再包一层。一个合格的业务组件要定义清楚五件事：
+
+| 契约 | 说明 | 反例 |
+| --- | --- | --- |
+| Props | 只暴露业务语义（`label`、`status`），不透传整个第三方 API | 把 `visible`、`overlay` 原样透出 |
+| 受控/非受控 | 明确 `value` + `onChange` 是否受控，内部状态何时同步 | 半受控：外部改了值内部不更新 |
+| 插槽/组合 | 用 children/slots 扩展，而不是加一堆布尔开关 | `showFooter`、`showFooterLeft`… |
+| 错误与空态 | 统一 loading、empty、error 的展示与重试入口 | 每个页面各写一套 |
+| 可观测性 | 关键交互埋点、错误上报由组件统一处理 | 业务页面重复埋点 |
+
+**设计令牌（Design Token）** 是可定制的前提：颜色、圆角、间距、字体、阴影都应该来自 token，而不是组件里写死。AntD 5 用 `ConfigProvider theme.token`，Element Plus 用 CSS 变量，Bootstrap 5 用 `--bs-*` 变量。
+
+**组件库工程化**要回答：怎么发版、怎么保证不破坏调用方、怎么验证视觉、怎么按需加载。
+
+- 版本：Semantic Versioning + Changesets，破坏性变更走 major；
+- 依赖：第三方组件库放 `peerDependencies`，避免多份实例；
+- 样式：CSS-in-JS 或 CSS 变量 + 作用域前缀，避免全局污染；
+- 质量：单元测试 + 视觉回归（Playwright 截图）+ API 报告（`api-extractor`）；
+- 分发：ESM 优先，按组件导出，配合 `sideEffects: false` 做 tree-shaking。
+
+### 典型应用场景
+
+- 中后台统一「查询表格页」：搜索区 + 表格 + 分页 + 批量操作；
+- 表单字段封装：统一校验时机、错误展示、单位后缀；
+- 多产品线共用品牌组件：按钮、空态、加载、权限包裹；
+- 第三方库升级时，只改适配层，业务页面零改动。
+
+### 可运行代码示例
+
+受控字段封装要同时解决三件事：值与错误的同步、异步校验竞态、错误展示时机。示例用一个可订阅的 `FieldController` 把这三件事变成确定行为。
+
+```typescript
+// 文件: examples/49-02-field-wrapper.ts（核心节选）
+private async validate() {
+  const current = ++this.seq;
+  this.state = { ...this.state, validating: true };
+  this.emit();
+  const error = await this.validator(this.state.value);
+  // 竞态保护:只有最后一次校验的结果能落地
+  if (current !== this.seq) return;
+  this.state = {
+    ...this.state,
+    validating: false,
+    error: this.touched ? error : "",
+  };
+  this.emit();
+}
+```
+
+> 运行方式：`npx tsx examples/49-02-field-wrapper.ts`（慢校验被新输入覆盖、失焦前不展示错误、提交时强制校验）。
+
+### 最佳实践
+
+- ✅ 封装前先写「调用方代码」，从使用体验倒推 API，而不是从第三方 Props 正推；
+- ✅ 组件库独立仓库/独立包，业务项目通过版本号升级，避免复制粘贴；
+- ⚠️ 透传 `...rest` 很方便，但会把第三方 API 泄漏成团队契约，升级时全面爆雷；
+- ❌ 不要在业务组件里写死颜色和间距——改品牌时你会改到怀疑人生。
+
+---
+
+## 49.4 自测题
+
+<details>
+<summary><b>1. 【基础】Ant Design 3 与 5 在样式体系上的核心差异是什么？</b></summary>
+
+AntD 3 使用 Less 变量，构建期由 less-loader 编译，主题定制靠修改 less 变量；AntD 5 使用 CSS-in-JS（`@ant-design/cssinjs`）与 Design Token，运行时通过 `ConfigProvider theme` 注入，支持动态主题与局部覆盖。迁移时需要移除 less-loader 相关配置，改用 token。
+</details>
+
+<details>
+<summary><b>2. 【基础】为什么二次封装不应该把第三方组件的全部 Props 透传出去？</b></summary>
+
+透传会把第三方 API 变成团队契约：调用方开始依赖 `visible`、`overlay` 这类细节，第三方升级时所有调用点都要改。封装应只暴露业务语义，把版本差异收敛在组件内部，升级时只改一处。
+</details>
+
+<details>
+<summary><b>3. 【进阶】AntD 3 项目升级到 React 18，为什么要先处理 `findDOMNode` 和 `ReactDOM.render`？</b></summary>
+
+React 18 的 `createRoot` 取代了 `ReactDOM.render`，StrictMode 会双调用 effect；AntD 3 内部依赖 `findDOMNode`，在并发渲染与 StrictMode 下会产生告警甚至行为异常。先修这两类兼容问题，才能保证升级 AntD 时问题不被混淆。
+</details>
+
+<details>
+<summary><b>4. 【进阶】异步校验为什么必须做竞态保护？不做会怎样？</b></summary>
+
+用户快速输入时会产生多个校验请求，返回顺序不一定与发起顺序一致。若不保护，旧请求的「格式错误」可能覆盖新输入的「校验通过」，界面显示过期错误。示例 49-02 用递增 `seq` 只让最后一次结果落地。
+</details>
+
+<details>
+<summary><b>5. 【进阶】Design Token 相比「覆盖组件样式」的优势是什么？</b></summary>
+
+Token 是设计决策的单一事实来源：颜色、间距、圆角统一由变量驱动，组件与业务都消费同一套值；覆盖样式则是点对点打补丁，容易漏、容易冲突，主题切换和品牌定制成本高。Token 还能跨端（Web/小程序/App）共享同一套语义。
+</details>
+
+<details>
+<summary><b>6. 【挑战】一个 AntD 3 的 20 页后台要升级到 AntD 5，请给出可回滚的迁移计划。</b></summary>
+
+① 锁版本并建分支，先升 React 18、修 `createRoot`/StrictMode/`findDOMNode`；② 引入适配层，把 `visible`/`overlay`/`getFieldDecorator` 等差异收敛；③ 按「图标 → 表单 → 高频弹层 → 低频页面」分批迁移，每批配视觉回归与灰度开关；④ 适配层保留一个版本周期，确认无调用方依赖旧 API 后删除；⑤ 每步可单独回滚，绝不把 React、AntD、构建工具放在同一次发布里。
+</details>
+
+<details>
+<summary><b>7. 【挑战】业务组件库如何做到「升级不破坏调用方」？</b></summary>
+
+用 SemVer + Changesets 管理版本，破坏性变更走 major 并提供 codemod；第三方组件库放 `peerDependencies` 避免多实例；对外 API 用 `api-extractor` 生成报告并在 CI 比对；视觉回归覆盖关键组件；废弃 API 先标记 deprecated 并保留一个 minor 周期，再移除。
+</details>
+
+<details>
+<summary><b>8. 【挑战】Element Plus、Ant Design、Bootstrap 三选一，你会怎么问需求？</b></summary>
+
+先问框架：Vue 3 选 Element Plus，React 选 AntD；再问设计体系：是否需要深度定制、是否有品牌规范（有则看 token 能力）；再问页面类型：中后台重表单表格选 AntD/Element，营销页与传统页面选 Bootstrap；最后问团队维护成本与招聘市场。组件库不是技术选美，是团队与业务的约束匹配。
+</details>
+
+---
+
+## 49.5 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 同时升级 React、AntD、构建工具 | 出问题无法定位层级 | 分批次升级，每批可回滚 |
+| 直接把 `visible` 全量替换成 `open` | 自定义组件/第三方库也被误改 | 用适配层收敛，按组件迁移 |
+| 保留 `babel-plugin-import` | 构建变慢，AntD 5 已不需要 | 移除插件，依赖 ESM tree-shaking |
+| 用 Less 变量改 AntD 5 主题 | 不生效，样式体系已变 | 用 `ConfigProvider theme.token` |
+| 二次封装透传全部 Props | 第三方 API 变成团队契约 | 只暴露业务语义 |
+| 组件内写死颜色/间距 | 品牌换肤需全量改代码 | 全部走 Design Token |
+| 受控组件半受控 | 外部改值内部不更新，状态分裂 | 明确受控/非受控，二选一 |
+| 异步校验不做竞态保护 | 旧错误覆盖新结果 | 递增序号，只接受最后一次 |
+| 输入过程中就展示错误 | 用户尚未输完就被标红 | 失焦或提交时展示 |
+| 业务组件库与第三方库版本耦合 | 升级一处，全线阻塞 | 第三方库放 peerDependencies |
+| 组件库无视觉回归 | 样式漂移无人发现 | Playwright 截图比对 |
+| 全局样式无作用域 | 组件库污染业务页面 | CSS 变量 + 前缀/Shadow DOM |
+| 直接复制第三方源码改 | 无法跟进安全修复 | 封装或 fork + 记录补丁 |
+| 忽略无障碍属性 | 键盘与读屏器不可用 | 保留语义标签与焦点管理 |
+| 组件库不发版、靠复制粘贴 | 多份实现分叉 | 独立包 + SemVer + Changesets |
+
+---
+
+> **下一篇**：[第五十部分 · Web 蓝牙与硬件通信](./50-bluetooth-hardware.md) 会把 BLE、Web Serial 与设备协议解析接到前端工程里。

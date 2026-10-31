@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#101a33"/>
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#a78bfa" opacity="0.04"/>
+  <polygon points="150,0 220,0 1040,840 970,840" fill="#22d3ee" opacity="0.03"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#7C3AED"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#ffffff">EP.38</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad)">vdom diff 里的 key 魔法</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad)" opacity="0.6"/>
+
+    <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#22d3ee" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：列表疯狂闪</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#1d4ed8"/>
+      <path d="M-5,18 L5,18 L3.5,27 L0,29 L-3.5,27 Z" fill="#f97316"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 L-11,-13 L-6,-4 L0,-14 L6,-4 L11,-13 L16,-2 Q0,-11 -16,-2 Z" fill="#f97316"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">用 index 当 key，列表一排序全闪！</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">换个稳定 id，立刻丝滑。为啥？</text>
+    <rect x="24" y="152" width="254" height="118" rx="8" fill="#0a0f1c" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 没 key =&amp;gt; 全重建</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">[A, B, C]  增 A 头</text>
+    <text x="38" y="210" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">     ↓↓↓</text>
+    <text x="38" y="228" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">[X, A, B, C]</text>
+    <text x="38" y="246" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">DOM 动了 4 次 ✗</text>
+    <text x="38" y="264" font-size="12.5" fill="#64748b" font-family="'SF Mono',Consolas,monospace">(每个位置都被当成新节点)</text>
+    <rect x="286" y="152" width="262" height="118" rx="8" fill="#0a0f1c" stroke="#a78bfa" stroke-opacity="0.35"/>
+    <text x="300" y="174" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 有稳定 key =&amp;gt; 复用</text>
+    <text x="300" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">[A:a, B:b, C:c]</text>
+    <text x="300" y="210" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">     ↓↓↓</text>
+    <text x="300" y="228" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">[X:x, A:a, B:b, C:c]</text>
+    <text x="300" y="246" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">DOM 只增 1 次 ✓</text>
+    <text x="300" y="264" font-size="12.5" fill="#64748b" font-family="'SF Mono',Consolas,monospace">(匹配到 a/b/c 原地复用)</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#22d3ee"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">diff 算法靠 key 认出"这俩其实是同一个节点"。</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">没 key 就当它们全变了——于是每个都重造。</text>
+  </g>
+
+    <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#a78bfa" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：同层 diff</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">diff 只在同层比：key 是身份牌。</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">找到相同 key = 复用，不一样 = 删加。</text>
+    <rect x="24" y="152" width="524" height="96" rx="8" fill="#0a0f1c" stroke="#a78bfa" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 核心：findIndex 匹配 key</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">for (let i = 0; i &amp;lt; oldLen; i++) {</text>
+    <text x="54" y="210" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">  const k = old[i].key;</text>
+    <text x="54" y="228" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">  const j = newChildren.findIndex(c =&amp;gt; c.key === k);</text>
+    <text x="54" y="246" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">  if (j !== -1) patch(old[i], newCh[j]);</text>
+    <text x="54" y="264" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">  else unmount(old[i]);</text>
+    <text x="38" y="282" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">}</text>
+    <text x="38" y="300" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">newChildren.forEach(c =&amp;gt; mount(c));</text>
+    <rect x="24" y="258" width="524" height="72" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="258" width="4" height="72" rx="2" fill="#a78bfa"/>
+    <text x="40" y="282" font-size="13.5" fill="#e2e8f0">React 的"全量 findIndex"就是 LCS 贪心版——</text>
+    <text x="40" y="302" font-size="13.5" fill="#e2e8f0">Vue 3 加了递增序号优化，O(n) 也能跑。</text>
+    <text x="40" y="322" font-size="13.5" fill="#94a3b8">key 不要求全局唯一，同兄弟节点里唯一就行。</text>
+  </g>
+
+    <g transform="translate(20,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#f472b6" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：手写 h + diff</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#7C3AED"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-2,-11 -16,-11 q-14,0 -16,11 z" fill="#22d3ee"/>
+      <circle cx="15" cy="-11" r="6.5" fill="#22d3ee"/>
+      <rect x="12" y="-9" width="6" height="4" rx="2" fill="#7C3AED"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">手写 mini-vdom 跑一把：</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">有 key DOM 操作 3 次；没 key 15 次！</text>
+    <rect x="24" y="152" width="524" height="132" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 测试：10 项列表，头部插入 1 项</text>
+    <text x="38" y="192" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">const v1 = h('ul', null, [</text>
+    <text x="54" y="210" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">  h('li', { key: 'a' }, 'A'),</text>
+    <text x="54" y="228" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">  h('li', { key: 'b' }, 'B'), /* ... */</text>
+    <text x="38" y="246" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">]);</text>
+    <text x="38" y="264" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">diff(v1, v2); // ✅ 只有 1 次 createElement</text>
+    <text x="38" y="282" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// 换成 index 当 key → 10 次删除 + 11 次创建</text>
+    <text x="38" y="300" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// 省了 80% 的 DOM 操作</text>
+    <rect x="24" y="300" width="524" height="46" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="300" width="4" height="46" rx="2" fill="#f472b6"/>
+    <text x="40" y="322" font-size="13.5" fill="#e2e8f0">DOM 操作比 JS 慢上百倍——少 80% 就是丝滑。</text>
+    <text x="40" y="342" font-size="13.5" fill="#94a3b8">key 选好 = diff 精准 = 少 reflow。</text>
+  </g>
+
+    <g transform="translate(608,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#f97316" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f97316"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：三大雷区</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">key 不是让你随便写的字符串——</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">它定义了"谁和谁是同一个"。</text>
+    <rect x="24" y="148" width="96" height="26" rx="13" fill="#f97316"/>
+    <text x="72" y="166" text-anchor="middle" font-size="13" font-weight="bold" fill="#0b1220">⚠ 坑点</text>
+    <rect x="32" y="183" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="192" font-size="13.5" fill="#e2e8f0">别用 index 当 key——顺序一变身份就全错</text>
+    <rect x="32" y="207" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="216" font-size="13.5" fill="#e2e8f0">兄弟节点内必须唯一——重复 key = 身份撞脸</text>
+    <rect x="32" y="231" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="240" font-size="13.5" fill="#e2e8f0">随机 Math.random() 每次渲染变 = 永远全重建</text>
+    <rect x="32" y="255" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="264" font-size="13.5" fill="#e2e8f0">Fragment 里的列表项同样要 key</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#f97316"/>
+    <text x="40" y="300" font-size="13" font-weight="bold" fill="#f97316">码叔总结</text>
+    <text x="118" y="300" font-size="13" fill="#e2e8f0">key 是 vdom 的身份证——不变就复用，变了就重造。</text>
+    <text x="40" y="320" font-size="13" fill="#e2e8f0">稳定 id 比什么都重要。</text>
+  </g>
+
+  <text x="1180" y="832" text-anchor="end" font-size="11" fill="#475569">NEON INK · frontend-advanced-guide · EP.38</text>
+</svg>

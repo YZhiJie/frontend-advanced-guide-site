@@ -1,0 +1,679 @@
+# 第八部分：跨端开发（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/08-cross-platform
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第八部分：跨端开发
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[前端安全](./07-security.md)｜下一篇：[测试策略](./09-testing.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-8" target="_blank" rel="noopener">EP.08《JSBridge 与跨端》</a>
+
+## 本部分内容
+
+- [8.1 跨端技术全景与选型](#_8-1-跨端技术全景与选型)
+- [8.2 小程序与 Taro](#_8-2-小程序与-taro)
+- [8.3 React Native](#_8-3-react-native)
+- [8.4 Electron 桌面应用](#_8-4-electron-桌面应用)
+- [8.5 Hybrid 与 JSBridge 原理](#_8-5-hybrid-与-jsbridge-原理)
+- [8.6 Flutter 与其他方案](#_8-6-flutter-与其他方案)
+- [8.7 路由与页面栈差异](#_8-7-路由与页面栈差异)
+- [8.8 自测题](#_8-8-自测题)
+- [8.9 本章避坑清单](#_8-9-本章避坑清单)
+
+---
+
+## 8.1 跨端技术全景与选型
+
+#### 概念解析
+
+跨端的三条技术路线：
+
+| 路线 | 原理 | 代表 | 性能/体验 |
+| ---- | ---- | ---- | --------- |
+| Web 容器 | 原生壳 + WebView 渲染 H5 | 传统 Hybrid、小程序 | 中，受 WebView 限制 |
+| 原生渲染 | JS 写逻辑，映射为原生控件 | React Native、uni-app(nvue) | 接近原生 |
+| 自绘引擎 | 自带渲染引擎(Dart/Skia) | Flutter | 一致性最好，包体较大 |
+| 编译型 | 一套代码编译到多端 | Taro、uni-app | 取决于目标端 |
+
+选型核心公式：**团队技术栈（React/Vue）× 目标平台（App/小程序/桌面）× 性能要求 × 生态成熟度**。
+
+## 8.2 小程序与 Taro
+
+#### 概念解析
+
+小程序本质是**双线程架构**：逻辑层（JsCore/V8，无 DOM）与渲染层（WebView）分离，通过 Native 桥通信——这解释了小程序的几个"怪癖"：不能直接操作 DOM、`setData` 序列化开销、频繁通信是最大性能瓶颈。
+
+Taro 让你用 React/Vue 语法写小程序：编译期把组件转换为小程序模板，运行时提供 React 兼容层。
+
+#### 完整代码示例
+
+```tsx
+// 文件: pages/index/index.tsx —— Taro + React 写微信小程序
+import { View, Text, Button, Input } from '@tarojs/components';
+import Taro, { useLoad } from '@tarojs/taro';
+import { useState } from 'react';
+import './index.scss';
+
+export default function Index() {
+    const [keyword, setKeyword] = useState('');
+    const [list, setList] = useState<string[]>([]);
+
+    // 页面生命周期:对应小程序的 onLoad
+    useLoad(() => {
+        console.log('页面加载, options:', Taro.getCurrentInstance().router?.params);
+    });
+
+    const search = async () => {
+        Taro.showLoading({ title: '搜索中' });
+        try {
+            const { result } = await Taro.cloud.callFunction({ name: 'search', data: { keyword } });
+            setList(result as string[]);
+        } finally {
+            Taro.hideLoading();
+        }
+    };
+
+    return (
+        <View className="index">
+            <Input value={keyword} onInput={(e) => setKeyword(e.detail.value)} placeholder="输入关键词" />
+            <Button onClick={search} type="primary">搜索</Button>
+            {list.map((item) => (
+                <View key={item} className="item" onClick={() => Taro.showToast({ title: item, icon: 'none' })}>
+                    <Text>{item}</Text>
+                </View>
+            ))}
+        </View>
+    );
+}
+// 初始化:pnpm i -g @tarojs/cli && taro init my-app(选择 React + TS)
+// 编译:npm run dev:weapp 后用微信开发者工具导入 dist 目录
+```
+
+#### 最佳实践
+
+- ✅ `setData`（Taro 中是 setState → 内部 setData）是性能瓶颈，**只传变化的最小数据**，避免一次性 set 大列表；
+- ✅ 长列表用虚拟渲染（Taro 的 `VirtualList` / recycle-tree），`key` 保持稳定；
+- ⚠️ 小程序包体积限制严格（微信主包 2MB），分包 + 分包预下载是必做优化；
+- ⚠️ 各端差异用 `process.env.TARO_ENV` 条件编译隔离，业务代码保持统一。
+
+## 8.3 React Native
+
+#### 概念解析
+
+RN 的架构要点：JS 运行在独立线程（新架构 Hermes 引擎 + JSI 直调，告别旧 Bridge 的序列化瓶颈），UI 组件被映射为**原生控件**（`View` → iOS UIView / Android View）。2026 年新架构（Fabric 渲染器 + TurboModules）已是默认。
+
+#### 完整代码示例
+
+```tsx
+// 文件: App.tsx —— RN 核心概念一览
+import { useCallback, useMemo, useState } from 'react';
+import {
+    FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View,
+} from 'react-native';
+
+interface Todo { id: string; title: string; done: boolean }
+
+export default function App() {
+    const [todos, setTodos] = useState<Todo[]>([
+        { id: '1', title: '学习 RN 新架构', done: false },
+        { id: '2', title: '对比 Flutter', done: true },
+    ]);
+    const [draft, setDraft] = useState('');
+    const [refreshing, setRefreshing] = useState(false);
+
+    const addTodo = useCallback(() => {
+        if (!draft.trim()) return;
+        setTodos((prev) => [{ id: Date.now().toString(), title: draft, done: false }, ...prev]);
+        setDraft('');
+    }, [draft]);
+
+    const toggle = useCallback((id: string) => {
+        setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+    }, []);
+
+    // FlatList 是 RN 性能核心:只渲染可视区域(内置虚拟化)
+    const renderItem = useCallback(
+        ({ item }: { item: Todo }) => (
+            <Pressable onPress={() => toggle(item.id)} style={styles.row}>
+                <Text style={item.done ? styles.doneText : styles.text}>
+                    {item.done ? '✅' : '⬜'} {item.title}
+                </Text>
+            </Pressable>
+        ),
+        [toggle],
+    );
+
+    // getItemLayout:固定行高时跳过动态测量,滚动性能显著提升
+    const getItemLayout = useMemo(
+        () => (_: unknown, index: number) => ({ length: 52, offset: 52 * index, index }),
+        [],
+    );
+
+    return (
+        <View style={styles.container}>
+            <View style={styles.inputRow}>
+                <TextInput style={styles.input} value={draft} onChangeText={setDraft} placeholder="新增待办" />
+                <Pressable onPress={addTodo} style={styles.addBtn}>
+                    <Text style={styles.addText}>添加</Text>
+                </Pressable>
+            </View>
+
+            <FlatList
+                data={todos}
+                keyExtractor={(item) => item.id}
+                renderItem={renderItem}
+                getItemLayout={getItemLayout}
+                refreshControl={ // 下拉刷新
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={async () => {
+                            setRefreshing(true);
+                            await new Promise((r) => setTimeout(r, 1000)); // 模拟拉取
+                            setRefreshing(false);
+                        }}
+                    />
+                }
+            />
+        </View>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: { flex: 1, paddingTop: 60 },
+    inputRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 8 },
+    input: { flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, height: 40 },
+    addBtn: { backgroundColor: '#1890ff', borderRadius: 8, paddingHorizontal: 16, justifyContent: 'center' },
+    addText: { color: '#fff' },
+    row: { height: 52, justifyContent: 'center', paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#eee' },
+    text: { fontSize: 16 },
+    doneText: { fontSize: 16, color: '#aaa', textDecorationLine: 'line-through' },
+});
+```
+
+> 运行方式：`npx create-expo-app@latest my-app --template blank-typescript`（Expo 是 RN 事实上的标准工作流）→ `npx expo start` → Expo Go 扫码真机预览。
+
+#### 最佳实践
+
+- ✅ 列表一律 `FlatList`/`FlashList`（Shopify 出品，性能更好），并配 `keyExtractor` + 固定行高用 `getItemLayout`；
+- ✅ `useCallback` 缓存 `renderItem` 等回调，避免列表整批重渲染；
+- ⚠️ 动画用 `react-native-reanimated`（UI 线程动画），不要用 JS 驱动的 `Animated` 老写法做复杂动画；
+- ⚠️ 样式不支持继承（无 CSS 级联），布局用 Flexbox；尺寸用 `Dimensions`/`useWindowDimensions` 适配。
+
+## 8.4 Electron 桌面应用
+
+#### 概念解析
+
+Electron = **Chromium（渲染）+ Node.js（系统能力）+ 原生壳**。进程模型：
+
+```
+主进程(Main)  —— Node 环境,一个应用一个:窗口管理、系统 API、原生菜单
+预加载(Preload) —— 沙箱桥梁:通过 contextBridge 安全地暴露最小 API 集合
+渲染进程(Render) —— Chromium 页面:你的 React/Vue 应用,默认无 Node 能力
+IPC 通信:ipcMain.handle(...)  ←→  ipcRenderer.invoke(...)
+```
+
+#### 完整代码示例
+
+```typescript
+// 文件: electron/main.ts —— 主进程
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+
+function createWindow() {
+    const win = new BrowserWindow({
+        width: 960,
+        height: 640,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            contextIsolation: true, // 上下文隔离(默认开启):渲染进程拿不到 Node 原语
+            sandbox: true,          // 渲染进程沙箱化
+            nodeIntegration: false, // ❌ 千万不要开:等于把系统权限交给网页
+        },
+    });
+    win.loadFile('index.html');
+}
+
+// IPC:渲染进程可调用的"RPC 接口",handle/invoke 一问一答
+ipcMain.handle('read-file', async (_event, filePath: string) => {
+    // 安全校验:限制可访问目录,防止路径穿越攻击
+    const allowedDir = app.getPath('documents');
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(allowedDir)) throw new Error('越权访问');
+
+    return fs.readFile(resolved, 'utf-8');
+});
+
+ipcMain.handle('pick-file', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({ properties: ['openFile'] });
+    return canceled ? null : filePaths[0];
+});
+
+app.whenReady().then(createWindow);
+app.on('window-all-closed', () => process.platform !== 'darwin' && app.quit());
+```
+
+```typescript
+// 文件: electron/preload.ts —— 预加载脚本:最小暴露面
+import { contextBridge, ipcRenderer } from 'electron';
+
+contextBridge.exposeInMainWorld('desktopAPI', {
+    readFile: (path: string) => ipcRenderer.invoke('read-file', path),
+    pickFile: () => ipcRenderer.invoke('pick-file'),
+    // ❌ 不要暴露 ipcRenderer 本身或任意通道转发,只暴露具名、收敛的 API
+});
+```
+
+```typescript
+// 文件: src/types/desktop.d.ts —— 渲染进程侧的类型声明
+declare global {
+    interface Window {
+        desktopAPI: {
+            readFile: (path: string) => Promise<string>;
+            pickFile: () => Promise<string | null>;
+        };
+    }
+}
+export {};
+
+// 渲染进程(React 组件)中:
+// const file = await window.desktopAPI.pickFile();
+// const content = file && await window.desktopAPI.readFile(file);
+```
+
+> 运行方式：`npm i -D electron electron-builder` + `vite-plugin-electron`（或用 `electron-vite` 脚手架），主/预加载代码编译为 CJS 后 `electron .` 启动。
+
+#### 最佳实践
+
+- ✅ 安全三件套不可妥协：`contextIsolation: true` + `sandbox: true` + `nodeIntegration: false`；
+- ✅ IPC 接口做**路径/参数校验**（示例中的目录白名单是真实漏洞点）；
+- ✅ 性能杀手锏：大文件操作放主进程流式处理，渲染进程只拿结果；多窗口按需创建、及时销毁；
+- ⚠️ 包体积大（~100MB）与内存占用是 Electron 的固有代价，轻量工具类可考虑 Tauri（Rust 壳，复用系统 WebView）。
+
+## 8.5 Hybrid 与 JSBridge 原理
+
+#### 概念解析
+
+Hybrid = 原生壳 + WebView 页面，**JSBridge 是 H5 与 Native 双向通信的桥梁**：
+
+```
+H5 → Native:  ① 注入对象(iOS: WKScriptMessageHandler / Android: addJavascriptInterface)
+              ② URL Scheme 拦截(老方案,已少用)
+Native → H5:  ① evaluateJavascript / evaluateJavaScript 直接执行 JS
+              ② 注入对象的回调函数被 Native 主动调用
+```
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/08-01-jsbridge.ts —— [浏览器] 手写一个 Promise 化的 JSBridge
+// ============ H5 侧完整实现:调用、回调分发、超时兜底 ============
+
+interface NativeMessage { method: string; params: Record<string, unknown>; callbackId: string }
+type Callback = (data: { ok: boolean; data?: unknown; error?: string }) => void;
+
+const pendingCallbacks = new Map<string, Callback>();
+let seed = 0;
+
+/** H5 → Native:所有调用 Promise 化 */
+function callNative<T>(method: string, params: Record<string, unknown> = {}, timeout = 10_000): Promise<T> {
+    return new Promise((resolve, reject) => {
+        const callbackId = `cb_${Date.now()}_${seed++}`;
+        const timer = setTimeout(() => {
+            pendingCallbacks.delete(callbackId);
+            reject(new Error(`JSBridge 调用超时: ${method}`));
+        }, timeout);
+
+        pendingCallbacks.set(callbackId, (result) => {
+            clearTimeout(timer);
+            result.ok ? resolve(result.data as T) : reject(new Error(result.error));
+        });
+
+        // 通过 Native 注入的对象发送(iOS: window.webkit.messageHandlers.bridge.postMessage)
+        const bridge = (window as any).NativeBridge;
+        if (!bridge?.postMessage) return reject(new Error('Bridge 未注入(是否运行在 App 内?)'));
+        bridge.postMessage(JSON.stringify({ method, params, callbackId } satisfies NativeMessage));
+    });
+}
+
+// Native 处理完毕后,调用 window.__handleNativeResponse 回传(由 Native 侧 evaluateJavascript 触发)
+// 对应 Native 伪代码:
+//   webView.evaluateJavascript("window.__handleNativeResponse('cb_1', {ok:true, data:{...}})")
+(window as any).__handleNativeResponse = (callbackId: string, result: { ok: boolean; data?: unknown; error?: string }) => {
+    pendingCallbacks.get(callbackId)?.(result);
+    pendingCallbacks.delete(callbackId);
+};
+
+// ---- 业务封装:具体能力收敛成语义化 API ----
+export const bridge = {
+    scanCode: () => callNative<string>('scanCode'),
+    getLocation: () => callNative<{ lat: number; lng: number }>('getLocation'),
+    setTitle: (title: string) => callNative<void>('setTitle', { title }),
+};
+
+// 使用:
+// const { lat, lng } = await bridge.getLocation();
+export {};
+```
+
+> 运行方式：本示例需在 App 内的 WebView 中运行（Bridge 由 Native 注入）；单独测试可先在 Console 中模拟 `window.NativeBridge = { postMessage: (msg) => setTimeout(() => window.__handleNativeResponse(JSON.parse(msg).callbackId, { ok: true, data: 'mock' }), 100) }`。
+
+#### 最佳实践
+
+- ✅ 所有 Bridge 调用 Promise 化 + 超时兜底 + 回调清理（示例已含），避免回调表无限增长；
+- ✅ Native 注入对象时机早于页面 JS（`documentStart`），否则首次调用会失败——需重试或事件通知；
+- ⚠️ 安全线：Bridge 暴露的能力要做**域名白名单**校验（防止被第三方页面调用扫码/支付等敏感能力）；
+- 📖 面试高频：双线程通信为什么慢（序列化）、Scheme 拦截 vs 注入对象的差异、离线包与 H5 秒开方案。
+
+## 8.6 Flutter 与其他方案
+
+#### 概念解析
+
+Flutter 用 **Dart + 自绘渲染引擎（Impeller/Skia）**：不走原生控件也不走 WebView，所有像素自己画——所以 iOS/Android/桌面/网页视觉完全一致，但包体更大、Web 端是短板（canvas 渲染，SEO/无障碍弱）。
+
+| 场景 | 推荐 | 理由 |
+| ---- | ---- | ---- |
+| 团队是 React 栈、需要 App | React Native + Expo | 生态与心智复用 |
+| 团队是 Vue 栈、需要 App + 小程序 | uni-app / Taro(Vue) | 一套代码多端 |
+| 高一致性、重动画的独立 App | Flutter | 渲染性能与视觉统一性最强 |
+| 轻量桌面工具 | Tauri | 系统级 WebView，包体 ~5MB |
+| 需要访问深度系统能力 | 原生 + 嵌入 Web | Bridge/插件按需开发 |
+
+## 8.7 路由与页面栈差异
+
+#### 概念解析
+
+三端的"路由"不是同一回事，差别在**谁持有导航状态**以及**能否前进**：
+
+| 端 | 导航状态持有者 | 能否前进 | 层数上限 | 状态载体 |
+| -- | -------------- | -------- | -------- | -------- |
+| 小程序 | 逻辑层自维护的页面栈 | ❌ 只有 `navigateBack` | **10 层** | 页面实例 + `onLoad` 的 options |
+| H5 / SPA | 浏览器 history（前进 + 后退双栈） | ✅ 可 forward | 无 | URL |
+| React Native | 导航库（React Navigation）的导航状态 | 取决于导航栈配置 | 无 | 导航 state |
+
+小程序页面栈的四条核心规则：
+
+- `navigateTo`：**入栈**（打开新页面），栈满 10 层时失败；
+- `redirectTo`：**替换栈顶**（当前页被换掉，栈深不变）；
+- `navigateBack`：**出栈**（只能后退，没有对应的"前进"API）；
+- `switchTab` / `reLaunch`：**清空页面栈**后只保留目标页——跳 tabBar 页面只能用 `switchTab`，`navigateTo` 打不开 tabBar 页面。
+
+关键差异：浏览器是"前进 + 后退"双栈、层数无上限、URL 即状态；小程序的页面栈是**单向内存栈**——没有"前进"语义、参数不体现在 URL（在 `onLoad(options)` 里）、页面被系统回收后栈可能被重建。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/08-02-page-stack.ts —— [Node] 模拟小程序页面栈:10 层上限 / 返回传参 / 与浏览器历史栈的差异
+// ============ 小程序的路由模型:逻辑层自维护的"单向栈"(只有后退,没有前进)============
+
+interface Page {
+    path: string;
+    query: Record<string, string>;
+    data: Record<string, unknown>;
+}
+
+class MiniRouter {
+    /** 页面栈:栈底是首页、栈顶是当前页;数组本身不含"前进栈"(与浏览器历史不同) */
+    private stack: Page[] = [];
+
+    /** navigateTo:入栈(打开新页面),受 10 层硬限制保护 */
+    navigateTo(path: string, query: Record<string, string> = {}): void {
+        if (this.stack.length >= 10) {
+            throw new Error(`navigateTo:fail 页面栈已满(上限 10 层),当前 ${this.stack.length} 层`);
+        }
+        this.stack.push({ path, query, data: {} });
+    }
+
+    /** redirectTo:替换当前栈顶,栈深不变 */
+    redirectTo(path: string, query: Record<string, string> = {}): void {
+        if (this.stack.length === 0) throw new Error('redirectTo:fail 页面栈为空');
+        this.stack[this.stack.length - 1] = { path, query, data: {} };
+    }
+
+    /** switchTab / reLaunch:清空页面栈后重建(只保留目标页) */
+    switchTab(path: string): void {
+        this.stack = [{ path, query: {}, data: {} }];
+    }
+
+    /** navigateBack:出栈,只能"后退"、没有"前进";delta 可一次退多层 */
+    navigateBack(delta = 1): void {
+        if (this.stack.length <= 1) throw new Error('navigateBack:fail 已经是首页,无法再退');
+        this.stack.splice(Math.max(1, this.stack.length - delta), delta);
+    }
+
+    /** 返回传参:改写目标页 data,等价于小程序 eventChannel 的参数回传 */
+    backWithData(targetStackIndex: number, payload: Record<string, unknown>): void {
+        const target = this.stack[targetStackIndex];
+        if (!target) throw new Error('目标页不在栈中');
+        Object.assign(target.data, payload);
+    }
+
+    get depth(): number {
+        return this.stack.length;
+    }
+
+    /** 对应小程序 getCurrentPages():返回栈内各页的 path?query */
+    snapshot(): string[] {
+        return this.stack.map((p) => {
+            const qs = new URLSearchParams(p.query).toString();
+            return qs ? `${p.path}?${qs}` : p.path;
+        });
+    }
+
+    pageAt(index: number): Page {
+        return this.stack[index];
+    }
+}
+
+// ============ 场景一:入栈、返回传参、后退 ============
+const router = new MiniRouter();
+router.navigateTo('pages/home/index');
+router.navigateTo('pages/list/index', { keyword: '键盘' });
+router.navigateTo('pages/detail/index', { id: '42' });
+console.log('当前栈:', router.snapshot().join(' → '));
+
+router.backWithData(1, { selected: 'keyboard-42' }); // 详情页把选择结果写回列表页
+router.navigateBack();
+console.log('返回后栈:', router.snapshot().join(' → '));
+console.log('列表页 data:', JSON.stringify(router.pageAt(1).data));
+
+// ============ 场景二:redirectTo 栈深不变;switchTab 清空栈 ============
+router.redirectTo('pages/list/index', { keyword: '鼠标' });
+console.log('redirectTo 后栈深:', router.depth, '当前页:', router.snapshot().slice(-1)[0]);
+
+router.switchTab('pages/mine/index');
+console.log('switchTab 后栈:', router.snapshot().join(' → '), '栈深:', router.depth);
+
+// ============ 场景三:10 层上限与"退到首页"边界 ============
+const deep = new MiniRouter();
+deep.navigateTo('pages/p1/index');
+for (let i = 2; i <= 10; i++) deep.navigateTo(`pages/p${i}/index`);
+console.log('压满后栈深:', deep.depth);
+try {
+    deep.navigateTo('pages/p11/index');
+} catch (e) {
+    console.log('第 11 层被拒绝:', (e as Error).message);
+}
+
+for (let i = 0; i < 9; i++) deep.navigateBack();
+console.log('退到首页栈深:', deep.depth, '当前页:', deep.snapshot().slice(-1)[0]);
+try {
+    deep.navigateBack();
+} catch (e) {
+    console.log('首页再退被拒绝:', (e as Error).message);
+}
+```
+
+> 运行方式：`npx tsx examples/08-02-page-stack.ts`，输出可见 navigateTo 压满 10 层后被拒绝、redirectTo 栈深不变、switchTab 清空页面栈，以及返回传参把选择结果回写到上一页。
+
+#### 最佳实践
+
+- ✅ 需要"清历史 / 回到首页"用 `reLaunch`，跳 tabBar 页面必须用 `switchTab`，两类场景用 `navigateTo` 都会失败；
+- ✅ 页面栈 ≥ 10 层时 `navigateTo` 走 fail 回调（不是抛异常），关键流程跳转前先判 `getCurrentPages().length`；
+- ✅ 返回传参用 eventChannel（Taro 中通过 `Taro.navigateBack` 的 events 回调），不要依赖直接改写上一页 `data`——跨端不通用；
+- ⚠️ 小程序没有浏览器的"前进（forward）"语义，也不能像 SPA 那样靠 URL 深链直达任意页；分享/扫码进来的是全新栈（栈底即目标页）；
+- 📖 面试高频：页面栈 10 层上限与四个跳转 API 的差异、小程序栈模型 vs 浏览器 history 栈、深链参数如何注入 `onLoad`（对应 Taro 的 `useLoad`）。
+
+#### 移动端经典坑点专题（JD 适配）
+
+JD 明确要求「具备独立实现复杂页面布局、动态动画交互能力」，移动端运维工具类前端必须熟悉 PC + 移动双端的经典适配坑点。以下是高频 TOP 7：
+
+| 坑 | 现象 | 正确做法 |
+| --- | --- | --- |
+| **1px 边框显粗** | DPR 2/3 设备上 1 CSS px 实际占 2-3 个物理像素 | 伪元素 + `transform: scaleY(0.5)` 输出真 1px（或直接 `0.5px` iOS 10+ 支持） |
+| **safe-area-inset 被忽略** | iPhone 灵动岛/手势条遮挡底部按钮 | 根容器加 `viewport-fit=cover` 并用 `padding-bottom: env(safe-area-inset-bottom)` 预留 |
+| **100vh 抖动** | iOS Safari 地址栏伸缩时 `100vh` 跟着变，内容跳来跳去 | 改用 `min-height: 100dvh`（动态视口）+ 允许滚动容器自身 `overflow-y: auto` |
+| **键盘弹起 fixed 错乱** | 输入框聚焦后 `position: fixed` 的弹层跟着键盘顶起 | 监听 `visualViewport.resize` 动态计算；iOS 用 `adjust-position: false` 自己接管 |
+| **Pointer Events 不统一** | 同时绑定 `click`、`touchstart`、`mousedown`，事件重复触发 | 用 `pointerdown` / `pointerup` + `pointer-action: manipulation` 代替（兼容 iOS 13+ / Android 6+） |
+| **iOS input 自动放大** | 输入框 `font-size < 16px` 时聚焦会自动放大整个页面 | 全局设置 `input { font-size: 16px; }` 或加 `maximum-scale=1` |
+| **touch-action 缺失** | 手指滑动弹层时页面跟着滚（锁滚失效） | 弹层根节点加 `touch-action: none`，内部滚动区域加 `touch-action: pan-y` |
+
+##### 完整代码示例（Pointer Events 统一）
+
+```ts
+// 文件: examples/08-03-pointer-events-unify.ts —— 统一 PC/移动点击事件
+// 运行方式: npx tsx examples/08-03-pointer-events-unify.ts
+
+/**
+ * 痛点:同时绑 click + touchstart + mousedown,移动端会触发两次(touchstart 后又触发 click)
+ * 解法:统一用 Pointer Events(POINTER_EVENTS),现代浏览器全支持
+ *
+ * Pointer Events 兼容矩阵:
+ * - iOS Safari 13+ ✅
+ * - Android Chrome 6+ ✅
+ * - macOS Safari 13+ ✅
+ * - Windows Edge 12+ ✅
+ */
+
+export function createUnifiedClick(
+  element: { addEventListener: (t: string, h: (e: PointerEvent) => void, o?: unknown) => void },
+  handler: (e: PointerEvent) => void,
+  opts?: { preventDefault?: boolean; capture?: boolean }
+) {
+  element.addEventListener(
+    "pointerdown",
+    (e: PointerEvent) => {
+      // pointerType: mouse / touch / pen —— 可区分来源
+      if (opts?.preventDefault) e.preventDefault();
+      handler(e);
+    },
+    { capture: opts?.capture }
+  );
+  // iOS Safari 需要 pointer-action 禁用默认手势冲突:
+  // element.style.touchAction = 'manipulation';
+}
+
+// 移动端锁滚实现(弹层场景)
+export function lockBodyScroll(
+  body: { style: { overflow: string; position?: string; top?: string } },
+  content: HTMLElement,
+  enable: boolean
+) {
+  if (enable) {
+    const scrollY = window.scrollY;
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+  } else {
+    const scrollY = parseInt(body.style.top || "0", 10);
+    body.style.overflow = "";
+    body.style.position = "";
+    body.style.top = "";
+    body.style.width = "";
+    window.scrollTo(0, -scrollY);
+  }
+}
+
+/** ============ 纯逻辑验证 ============ */
+export function runMobilePitfallTests() {
+  // PointerEvents 是否可用(在现代 Node/浏览器环境):
+  const available = typeof (globalThis as unknown as { PointerEvent?: unknown }).PointerEvent !== "undefined";
+  console.log(`PointerEvent 可用: ${available ? "✅" : "⚠️ 当前环境无 PointerEvent,但现代浏览器全支持"}`);
+
+  // PointerEvents 的 pointerType 区分验证
+  type PointerLike = { pointerType: "mouse" | "touch" | "pen" };
+  const mockTouchEvt: PointerLike = { pointerType: "touch" };
+  const mockMouseEvt: PointerLike = { pointerType: "mouse" };
+  console.assert(mockTouchEvt.pointerType === "touch", "应识别触摸事件");
+  console.assert(mockMouseEvt.pointerType === "mouse", "应识别鼠标事件");
+
+  // safe-area-inset env 占位验证
+  const safeAreaCSS = `padding-bottom: env(safe-area-inset-bottom);`;
+  console.assert(safeAreaCSS.includes("safe-area-inset"), "safe-area CSS 语法正确");
+
+  // 100dvh 替代 100vh 验证
+  const viewportCSS = `min-height: 100dvh; overflow-y: auto;`;
+  console.assert(viewportCSS.includes("100dvh"), "应优先用 100dvh 而非 100vh");
+
+  console.log("✅ 移动端适配坑点逻辑验证通过");
+}
+
+runMobilePitfallTests();
+```
+
+> 运行方式：`npx tsx examples/08-03-pointer-events-unify.ts`。
+
+---
+
+## 8.8 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【进阶】小程序双线程架构为什么慢?对应的优化手段?</b></summary>
+
+逻辑层与渲染层分离,所有 UI 更新都要经过 setData 序列化通信,频繁/大数据量的 setData 是最大瓶颈。优化:只传变化的最小数据、长列表虚拟化、分包加载减少首包。
+</details>
+
+<details>
+<summary><b>2. 【进阶】React Native 新架构相比旧 Bridge 改进了什么?</b></summary>
+
+旧架构所有通信都要跨桥异步序列化,高频交互易掉帧。新架构:JSI 让 JS 与原生同步直调(无需序列化)、Fabric 渲染器同步渲染、TurboModules 按需加载原生模块。
+</details>
+
+<details>
+<summary><b>3. 【进阶】Electron 的安全三件套是什么?为什么不能开 nodeIntegration?</b></summary>
+
+contextIsolation: true、sandbox: true、nodeIntegration: false。渲染进程加载的是网页,一旦被 XSS 注入,拥有 Node 能力等于把整个操作系统权限交给攻击者;系统能力只能通过预加载脚本收敛暴露。
+</details>
+
+<details>
+<summary><b>4. 【基础】JSBridge 的两个通信方向分别怎么实现?</b></summary>
+
+H5 → Native:Native 注入对象(iOS: WKScriptMessageHandler / Android: addJavascriptInterface),H5 调 postMessage;Native → H5:evaluateJavascript 直接执行 H5 全局回调函数,带上 callbackId 配对。
+</details>
+
+<details>
+<summary><b>5. 【进阶】Pointer Events 相比 click + touchstart + mousedown 三件套有什么优势?什么时候不能用?</b></summary>
+
+**优势**：① 一个事件覆盖鼠标/触摸/手写笔三种输入，不会重复触发（touchstart 后又触发 click 的"300ms 延迟 + 双击放大"问题彻底消失）；② 自带 `pointerType` 区分输入来源、`pressure`/`width`/`height` 获取手写笔压力和触点尺寸；③ iOS 13+ / Android 6+ / 桌面浏览器全线支持。**不能用**：需要兼容 iOS 12 及以下（Pointer Events 不支持），此时用 `touchstart` + `preventDefault` 禁用 click 延迟作为 fallback。运维工具类前端通常不支持 iOS 12，可以放心用 Pointer Events。
+</details>
+
+<details>
+<summary><b>6. 【进阶】iOS Safari 的 100vh 为什么会抖动?正确的视口高度方案是什么?</b></summary>
+
+**抖动原因**：iOS Safari 的地址栏/工具栏会滚动时伸缩，它们占据视口高度的一部分。`100vh` 是**固定视口高度**（取地址栏展开时的值），当地址栏收起时页面底部会空出来，弹起时又被截断——看起来像"抖动"。**正确方案**：
+1. 现代方案：`min-height: 100dvh`（动态视口高度，会随地址栏变化实时调整）；
+2. 兼容方案：监听 `resize` + `visualViewport.resize`，取 `window.innerHeight` 更新容器高度；
+3. **永远不要**用 `100vh` 作为弹层/全屏容器高度。
+</details>
+
+---
+
+## 8.9 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 安全区 | iPhone 灵动岛、手势条遮挡底部按钮，固定定位元素被挤出屏幕 | 用 `env(safe-area-inset-*)` 加 `viewport-fit=cover` 预留内边距，别写死 `padding-bottom` |
+| 键盘弹起 | 输入框聚焦后键盘顶起页面，弹层被遮挡、`fixed` 布局错乱 | 监听 `visualViewport.resize` 动态调整；别用 `100vh` 写死，改 `dvh` 并允许滚动容器上移 |
+| 1px 边框 | 设计稿 1px 细线在高分屏上显粗 | 1 CSS px 在 DPR 2/3 下对齐多个物理像素；用伪元素 `transform: scaleY(0.5)` 输出真 1px |
+| WebView 白屏 | 首屏 JS 报错、资源 404，页面一片白且无提示 | 关键渲染先做静态骨架兜底、`window.onerror` 上报；别让白屏毫无反馈 |
+| JSBridge 时序 | `onMessage` 在桥注入完成前注册，原生回调消息丢失 | 约定桥就绪事件后再发首条消息；消息带 `callbackId` 配对并设超时重发 |
+| iOS 侧滑返回 | 手势返回后 `history` 与页面栈不同步，返回到错误页 | 监听 `popstate`、`pagehide` 同步状态，别用 `history.length` 判断层级 |
+| RN 与 H5 | 同一套样式在 RN 上不生效（无 DOM、无 `px` 单位、无伪类） | RN 用 `StyleSheet` 且 Flex 默认列方向、单位无 `px`；差异部分按平台分文件 |
+| 视口高度 | iOS Safari `100vh` 随地址栏伸缩抖动，内容跳来跳去 | 改用 `min-height: 100dvh`（动态视口）；兼容老 iOS 时监听 `visualViewport.resize` 用 `innerHeight` |
+| 事件重复触发 | 同时绑 click + touchstart + mousedown，移动端 touchstart 后又触发 click（300ms 延迟） | 统一用 `pointerdown` / `pointerup` + `touch-action: manipulation` 代替，现代浏览器全支持 |
+| iOS 输入放大 | `input { font-size < 16px }` 聚焦时自动放大整个页面破坏布局 | 全局设 `input { font-size: 16px }` 或 `maximum-scale=1` 禁用自动放大 |

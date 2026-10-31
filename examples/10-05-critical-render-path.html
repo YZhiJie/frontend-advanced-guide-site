@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>10-05 关键渲染路径：DOM / CSSOM / 渲染树可观测实验</title>
+  <style>
+    /* 教学演示页：白底卡片风，打开即自动出实验结论 */
+    body {
+      font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+      margin: 0;
+      padding: 32px 20px;
+      background: #f5f7fa;
+      color: #1f2937;
+      line-height: 1.7;
+    }
+
+    h1 {
+      font-size: 22px;
+    }
+
+    h2 {
+      font-size: 16px;
+      margin: 28px 0 10px;
+      padding-left: 10px;
+      border-left: 4px solid #7c3aed;
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-bottom: 14px;
+    }
+
+    .log {
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 13px;
+      background: #0b1220;
+      color: #a5f3fc;
+      border-radius: 8px;
+      padding: 12px 14px;
+      white-space: pre-wrap;
+    }
+
+    .log .ok {
+      color: #34d399;
+    }
+
+    .log .warn {
+      color: #fbbf24;
+    }
+
+    .note {
+      color: #6b7280;
+      font-size: 13.5px;
+    }
+
+    .probe {
+      padding: 12px;
+      border: 1px dashed #9ca3af;
+      border-radius: 8px;
+      margin-top: 8px;
+    }
+
+    #display-box {
+      display: none;
+      height: 80px;
+      background: #fecaca;
+    }
+
+    #visibility-box {
+      visibility: hidden;
+      height: 80px;
+      background: #bfdbfe;
+    }
+
+    code {
+      background: #eef2ff;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+  </style>
+  <!-- 实验 0：本 <script> 位于 <head>，执行时浏览器只解析到了 <head>，
+     body 里的元素一个都还没进 DOM —— 用来证明"JS 默认阻塞 HTML 解析" -->
+  <script>
+    window.__phase0 = {
+      targetA: document.getElementById('target-a'), // 预期 null
+      domIsReady: document.readyState,             // 'loading'
+    };
+  </script>
+</head>
+
+<body>
+  <h1>关键渲染路径 · 可观测实验</h1>
+  <p class="note">对应 10.1：解析 HTML 构建 DOM → 解析 CSS 构建 CSSOM → 合成渲染树 → Layout → Paint → Composite。打开本页即自动输出结论，也可打开
+    DevTools 的 Elements / Performance 面板对照。</p>
+
+  <h2>实验 1：DOM 是边解析边构建的（脚本位置决定能读到什么）</h2>
+  <div class="card">
+    <p id="target-a" class="note">我是 #target-a，body 里的真实元素。</p>
+    <div id="log-1" class="log">检测中…</div>
+    <p class="note">结论：head 中的内联脚本执行时 #target-a 还未被解析（<code>null</code>）；<code>DOMContentLoaded</code> 时 DOM 已完整。生产代码把操作
+      DOM 的脚本放到 body 末尾，或加 <code>defer</code>。</p>
+  </div>
+
+  <h2>实验 2：预加载扫描器（preload scanner）</h2>
+  <div class="card">
+    <p class="note">解析器被阻塞脚本卡住时，浏览器会派出"预加载扫描器"向后扫，提前发现
+      <code>&lt;img&gt;</code>、<code>&lt;link&gt;</code>、<code>&lt;script&gt;</code> 等外链资源并行预取，不必等解析器走到那里才发起请求。</p>
+    <p class="note"><strong>在任意真实页面的 DevTools 中验证：</strong>打开 Network 面板刷新，会看到靠后的 <code>&lt;img&gt;</code>
+      请求在文档加载早期就已发出（与 head 里的阻塞脚本并行）；关键资源（LCP 图片、首屏字体）还可以用 <code>&lt;link rel="preload" as="image"&gt;</code> 与
+      <code>fetchpriority="high"</code> 主动插队。（本实验不内嵌外部图片，保证离线打开也无 404 噪音。）</p>
+  </div>
+
+  <h2>实验 3：渲染树的取舍规则（display:none vs visibility:hidden）</h2>
+  <div class="card">
+    <div class="probe">
+      <div id="display-box">我是 display:none 的盒子</div>
+      <div id="visibility-box">我是 visibility:hidden 的盒子</div>
+      <div id="normal-box" class="note">我是普通盒子（参照）</div>
+    </div>
+    <div id="log-3" class="log">检测中…</div>
+    <p class="note">结论：<code>display:none</code> 的节点<strong>不进渲染树</strong>（不占几何空间，offsetHeight =
+      0，其内部元素也全部不渲染）；<code>visibility:hidden</code> <strong>在渲染树中保留盒子</strong>（占 80px 高度，只是不可见）；伪元素
+      <code>::before/::after</code> 会生成匿名盒子进入渲染树。</p>
+  </div>
+
+  <h2>实验 4：CSS 阻塞渲染（Performance 面板观察法）</h2>
+  <div class="card">
+    <ol class="note">
+      <li>DevTools → Performance → 勾选 <code>Screenshots</code>，刷新页面；</li>
+      <li>首帧（FCP）之前可以看到 <strong>Parse HTML</strong> 与 <strong>Recalculate Style</strong>（CSSOM 构建）两条轨道；</li>
+      <li>把一个慢样式表放到 head（如 <code>@import</code> 串行加载），会发现 CSSOM 未就绪前浏览器<strong>不绘制任何内容</strong>（白屏）——CSS 不阻塞 DOM
+        解析，但阻塞渲染；</li>
+      <li>对策：关键 CSS 内联进 <code>&lt;style&gt;</code>、非关键 CSS 用媒体查询拆分或 <code>media="print"</code> 降级、避免
+        <code>@import</code> 串行。</li>
+    </ol>
+  </div>
+
+  <script>
+    // ---------- 实验 1：脚本位置与 DOM 构建 ----------
+    function renderLog1() {
+      var afterReady = document.getElementById('target-a');
+      document.getElementById('log-1').innerHTML =
+        '[head 内联脚本执行时]  readyState = ' + window.__phase0.domIsReady +
+        '\n                         #target-a = ' + window.__phase0.targetA + '  <span class="warn">← 元素还没解析到</span>' +
+        '\n[DOMContentLoaded 时]     #target-a = ' + (afterReady ? '<span class="ok">&lt;p id="target-a"&gt;（已在 DOM 中）</span>' : 'null');
+    }
+
+    // ---------- 实验 3：渲染树取舍 ----------
+    function renderLog3() {
+      var d = document.getElementById('display-box');
+      var v = document.getElementById('visibility-box');
+      var dChildExists = !!d; // 节点本身在 DOM 中
+      var line = function (label, el, expect) {
+        var h = el.offsetHeight;
+        var ok = (h === 0) === expect;
+        return label + ' offsetHeight = ' + h + 'px（占位' + (h === 0 ? '否' : '是') + '） ' +
+          (ok ? '<span class="ok">✓</span>' : '<span class="warn">?</span>');
+      };
+      document.getElementById('log-3').innerHTML =
+        'DOM 树中节点存在性：display:none 盒子在 DOM 中 = ' + dChildExists + '（<span class="warn">DOM 有，渲染树无</span>）\n' +
+        line('#display-box    ', d, true) + '\n' +
+        line('#visibility-box ', v, false);
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () { renderLog1(); renderLog3(); });
+    } else {
+      renderLog1(); renderLog3();
+    }
+    // load 事件：所有外链资源（含 CSS/图片）也加载完毕，对比 DOMContentLoaded 的差异
+    window.addEventListener('load', function () {
+      /* eslint-disable-next-line no-console */
+      console.log('[10-05] load 事件触发：DOM + 外链资源全部就绪');
+    });
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,335 @@
+# 第五十四部分 · 动画与工具库——framer-motion、GSAP、jwt-decode、qs、uuid（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/54-animation-tooling
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第五十四部分 · 动画与工具库——framer-motion、GSAP、jwt-decode、qs、uuid
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第五十三部分 · Nginx 部署与反向代理](./53-nginx-deploy.md)｜下一篇：[第五十五部分 · 构建与样式库](./55-build-style-tooling.md)｜学习路线：[常用库学习路线](./libraries-learning-path.md)
+
+> 💡 **本章特色**：这五个库分别解决「动效、时间线、身份解析、查询串、唯一标识」。本章不只列 API，而是讲清**每个库的边界**：framer-motion 的声明式生命周期、GSAP 的可 seek 时间线、jwt-decode 的「只解码不验签」、qs 的原型污染风险、uuid 的 v4/v7 选型。
+
+## 本部分内容
+
+- [54.1 framer-motion：React 声明式动画](#_54-1-framer-motion-react-声明式动画)
+- [54.2 GSAP：时间线、滚动与清理](#_54-2-gsap-时间线、滚动与清理)
+- [54.3 jwt-decode：解码不等于验签](#_54-3-jwt-decode-解码不等于验签)
+- [54.4 qs 与 uuid：查询串与唯一标识](#_54-4-qs-与-uuid-查询串与唯一标识)
+- [54.5 自测题](#_54-5-自测题)
+- [54.6 本章避坑清单](#_54-6-本章避坑清单)
+
+---
+
+## 54.1 framer-motion：React 声明式动画
+
+### 概念解析
+
+framer-motion（新包名 `motion`，React 入口为 `motion/react`）把动画写成「状态描述」，而不是命令式时间线：
+
+| API | 作用 | 典型场景 |
+| --- | --- | --- |
+| `motion.div` | 带动画能力的元素 | 替代 CSS transition 的复杂编排 |
+| `initial` / `animate` / `exit` | 进入、目标、退出三态 | 弹窗、列表项、路由切换 |
+| `variants` | 命名状态集合 | 父子编排、交错动画 |
+| `AnimatePresence` | 保留卸载动画 | 模态框、Toast、列表删除 |
+| `layout` / `layoutId` | 布局变化自动补间 | 卡片展开、Tab 指示器 |
+| `whileHover` / `whileTap` / `drag` | 手势驱动 | 按钮反馈、拖拽排序 |
+| `useReducedMotion` | 尊重系统「减少动态」 | 无障碍 |
+
+**核心心智**：framer-motion 的动画由「当前值 → 目标值」驱动，React 重新渲染时它自动计算补间；`AnimatePresence` 解决的是「组件已经卸载，但退出动画还没播完」的问题。
+
+**性能边界**：优先动画 `transform` 与 `opacity`（合成层），避免动画 `width/height/top/left`（触发布局）。`layout` 会自动测量并补间，但列表很大时开销明显，必要时改用 CSS。
+
+### 典型应用场景
+
+- 模态框：<code v-pre>initial={{ opacity: 0, scale: 0.95 }}</code> + `AnimatePresence`；
+- 列表增删：`layout` + `exit`，配合稳定 `key`；
+- 页面切换：路由级 `AnimatePresence`；
+- 手势交互：拖拽卡片、滑动删除。
+
+### 可运行代码示例
+
+下面的写法覆盖「进入 + 退出 + 布局」三件事。注意 `AnimatePresence` 必须包住会卸载的子节点，且子节点要有稳定 `key`。
+
+```tsx
+// 文件: src/components/Modal.tsx —— 虚拟工程文件
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+
+export function Modal({ open, onClose, children }: ModalProps) {
+  const reduce = useReducedMotion();
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="modal"
+          initial={reduce ? false : { opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={reduce ? undefined : { opacity: 0, scale: 0.96 }}
+          transition={{ type: "spring", stiffness: 320, damping: 30 }}
+          onClick={onClose}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+```
+
+> 运行方式：React 组件需在工程内运行；时间线与缓动逻辑可用 `npx tsx examples/54-01-mini-timeline.ts` 验证。
+
+### 最佳实践
+
+- ✅ 用 `useReducedMotion` 给「减少动态」用户降级，动画不是必需品；
+- ✅ 列表项 `key` 用业务 ID，`layout` 才能正确匹配；
+- ⚠️ `layout` 动画会读写布局，长列表/表格慎用；
+- ❌ 不要在动画组件里直接操作 DOM 样式——会与 motion 的插值打架。
+
+---
+
+## 54.2 GSAP：时间线、滚动与清理
+
+### 概念解析
+
+GSAP 的优势是**可 seek 的时间线**与**成熟的滚动编排**：
+
+| 能力 | API | 说明 |
+| --- | --- | --- |
+| 补间 | `gsap.to/from/fromTo` | 目标值驱动，支持 CSS/SVG/任意对象 |
+| 时间线 | `gsap.timeline()` | 串行/并行/相对定位，可 `seek`、可 `reverse` |
+| 位置参数 | `"<"`、`"+=0.2"`、`"-=0.1"`、标签 | 精确编排多个动画 |
+| 滚动 | `ScrollTrigger` | 进入视口触发、滚动联动、pin |
+| 响应式 | `gsap.matchMedia()` | 按断点启用/销毁动画 |
+| 清理 | `gsap.context()` / `useGSAP()` | 组件卸载时回收，避免泄漏 |
+
+**时间线 vs 一堆 `setTimeout`**：时间线是「状态的纯函数」——任意时刻 `seek(t)` 都能得到确定值，所以可测试、可回放、可反向；`setTimeout` 只能向前跑，取消和同步都很难。
+
+**React/Vue 集成**：必须在卸载时 `kill()` 或使用 `gsap.context()` 回收，否则动画、ScrollTrigger、事件监听会残留。React 可用 `@gsap/react` 的 `useGSAP`，Vue 在 `onUnmounted` 中 `ctx.revert()`。
+
+**许可**：GSAP 核心长期免费，部分插件历史上需要会员；商用前确认当前许可条款与插件范围。
+
+### 典型应用场景
+
+- 落地页：滚动视差、元素入场、数字滚动；
+- 复杂 SVG：路径描边、形变；
+- 数据大屏：多元素协同的时间线；
+- 交互动效：拖拽、磁性按钮、光标跟随。
+
+### 可运行代码示例
+
+示例 54-01 实现了一个迷你时间线，支持标签、`"<"` 并行、`"+=0.2"` 相对定位与 `seek`，帮助你理解 GSAP 的位置参数语义。
+
+```typescript
+// 文件: examples/54-01-mini-timeline.ts（核心节选）
+const start =
+  opts.at === undefined
+    ? this.duration
+    : opts.at === "<"
+      ? this.lastStart
+      : typeof opts.at === "number"
+        ? opts.at
+        : this.duration + Number(opts.at.slice(2));
+```
+
+> 运行方式：`npx tsx examples/54-01-mini-timeline.ts`（并行、顺序、标签、相对定位、超出终值、缓动边界）。
+
+### 最佳实践
+
+- ✅ 用 `timeline({ defaults: { ease, duration } })` 统一默认值，减少重复；
+- ✅ 组件卸载时 `kill()` / `context.revert()`，尤其是有 ScrollTrigger 的页面；
+- ⚠️ 滚动动画要配合 `prefers-reduced-motion`，并避免影响可读性；
+- ❌ 不要在滚动回调里逐帧创建 tween——应创建一次，用 `progress()` 驱动。
+
+---
+
+## 54.3 jwt-decode：解码不等于验签
+
+### 概念解析
+
+JWT 由三段组成：`header.payload.signature`，前两段是 **base64url 编码的 JSON**（不是加密）。`jwt-decode` 做且只做一件事：把 payload 解出来。
+
+| 能做 | 不能做 |
+| --- | --- |
+| 读取 `sub`、`name`、`exp` 等声明 | 验证签名是否有效 |
+| 判断是否过期（`exp`） | 防止 token 被篡改 |
+| 调试与日志（脱敏后） | 作为权限判断的唯一依据 |
+
+**为什么不能只靠前端解析做鉴权**：攻击者可以改 payload（如把 `role` 改成 `admin`）后重新编码，签名虽然失效，但前端若不验签就看不出来。真正的权限校验必须在服务端验签 + 校验声明。
+
+**过期判断的细节**：
+
+- `exp`/`iat` 是**秒级**时间戳，`Date.now()` 是毫秒，别忘除 1000；
+- 客户端时钟可能不准，比较时留 30~60 秒偏差（skew）；
+- `exp` 只表示「过期时间」，不表示「已注销」；主动登出需要服务端黑名单/短 TTL。
+
+**存储**：敏感 token 不建议放 `localStorage`（XSS 可直接读取）；优先 HttpOnly + Secure + SameSite Cookie。前端需要读用户信息时，可以让服务端返回一个「非敏感的用户摘要」，而不是把完整 token 暴露给 JS。
+
+### 典型应用场景
+
+- 路由守卫：解析 `exp` 决定是否跳登录；
+- UI 展示：读取用户名、头像、租户；
+- 调试面板：解码 token 查看声明（脱敏）；
+- 刷新策略：在过期前 N 分钟触发 refresh。
+
+### 可运行代码示例
+
+示例 54-02 实现 base64url 解码、中文 payload、过期判断、时钟偏差与风险告警。
+
+```typescript
+// 文件: examples/54-02-jwt-inspect.ts（核心节选）
+const nowSec = nowMs / 1000;
+const exp = payload.exp ?? Number.POSITIVE_INFINITY;
+// 时钟偏差:exp 在 skew 秒内仍视为有效,避免客户端时间慢几秒就误判过期
+const expired = nowSec - skewSec >= exp;
+const expiresIn = Math.round(exp - nowSec);
+```
+
+> 运行方式：`npx tsx examples/54-02-jwt-inspect.ts`（中文 payload、过期、skew、alg=none 告警、格式校验）。
+
+### 最佳实践
+
+- ✅ 只把 JWT 当「可读的会话描述」，鉴权交给服务端；
+- ✅ 过期判断留 skew，避免临界点反复跳登录；
+- ⚠️ 日志里不要打印完整 token，必要时只保留前 8 位；
+- ❌ 不要把敏感信息（手机号、身份证、内部密钥）放进 payload。
+
+---
+
+## 54.4 qs 与 uuid：查询串与唯一标识
+
+### 概念解析
+
+**qs** 解决的是「查询串的嵌套结构」：
+
+| 能力 | 示例 | 说明 |
+| --- | --- | --- |
+| 解析嵌套 | `user[name]=张三` | 转成 `{ user: { name: "张三" } }` |
+| 数组 | `ids[]=1&ids[]=2` 或 `ids=1&ids=2` | 由 `arrayFormat` 决定序列化形式 |
+| 深度限制 | `depth` | 防止超深嵌套拖垮解析 |
+| 原型保护 | `allowPrototypes` 默认关闭 | 拦截 `__proto__` 污染 |
+| 忽略前缀 | `ignoreQueryPrefix` | 处理 `?` 开头 |
+
+**安全边界**：任何来自 URL 的 key 都不可信。`__proto__[x]=1` 这类输入在旧版本/错误配置下会污染 `Object.prototype`，导致全站对象都多出属性。解析后要用白名单/类型校验，而不是直接把结果 merge 进配置。
+
+**uuid** 选型：
+
+| 版本 | 生成方式 | 有序性 | 适用 |
+| --- | --- | --- | --- |
+| v4 | 122 位随机 | 无序 | 会话 ID、临时标识、文件名 |
+| v7 | 48 位毫秒时间戳 + 随机 | 按时间近似有序 | 数据库主键、游标、日志 ID |
+| v1 | 时间 + MAC | 有序但暴露 MAC | 一般避免 |
+| v5 | 命名空间 + 名称哈希 | 确定性 | 需要「同样输入同样 ID」 |
+
+**为什么数据库主键偏爱 v7**：v4 随机插入会导致 B-Tree 页分裂、索引碎片；v7 前缀有序，插入更集中，同时保留随机性避免可预测。
+
+### 典型应用场景
+
+- 复杂筛选：`filter[status]=active&filter[tags][]=a`；
+- 分享链接：序列化查询参数，保证可往返；
+- 幂等键：请求 ID 用 v4/v7，服务端去重；
+- 数据库主键：v7 兼顾唯一与有序；
+- 前端临时 key：v4 足够。
+
+### 可运行代码示例
+
+示例 54-03 实现了括号语法、重复 key 聚合、原型污染防护与往返序列化；示例 54-04 实现 v4/v7 并验证版本位、变体位与时间戳还原。
+
+```typescript
+// 文件: examples/54-03-query-string.ts（核心节选）
+const { base, child, isArray } = parseKey(rawKey);
+if (FORBIDDEN.has(base)) continue;
+
+if (child === undefined) {
+  const prev = result[base];
+  if (prev === undefined) result[base] = value;
+  else if (Array.isArray(prev)) prev.push(value);
+  else result[base] = [prev, value];
+  continue;
+}
+```
+
+> 运行方式：`npx tsx examples/54-03-query-string.ts`、`npx tsx examples/54-04-uuid-generator.ts`。
+
+### 最佳实践
+
+- ✅ 解析查询串后做类型/白名单校验，不直接 merge 进业务对象；
+- ✅ 需要可排序主键时选 v7，纯随机标识选 v4；
+- ⚠️ qs 的 `arrayFormat` 要与后端约定一致，否则数组会变成字符串；
+- ❌ 不要用 `Math.random()` 生成 ID——碰撞与可预测性都不可接受。
+
+---
+
+## 54.5 自测题
+
+<details>
+<summary><b>1. 【基础】framer-motion 的 `AnimatePresence` 解决什么问题？</b></summary>
+
+React 组件卸载后就不在树里了，普通动画来不及播放退出效果。`AnimatePresence` 会延迟移除子节点，等 `exit` 动画完成后再真正卸载，从而实现模态框、Toast、列表删除的退出动画。子节点需要稳定 `key`。
+</details>
+
+<details>
+<summary><b>2. 【基础】jwt-decode 能验证 token 是否被篡改吗？</b></summary>
+
+不能。它只做 base64url 解码，不校验签名。攻击者可以修改 payload 后重新编码，解码结果看起来完全正常。签名校验必须在服务端用密钥完成，前端解析只能用于读取声明与判断过期。
+</details>
+
+<details>
+<summary><b>3. 【进阶】GSAP 时间线的位置参数 `"<"` 与 `"+=0.2"` 分别是什么意思？</b></summary>
+
+`"<"` 表示与「上一个动画」同时开始（对齐其起点）；`"+=0.2"` 表示相对时间线当前结尾再延后 0.2 秒。它们让多动画的并行/串行编排不必手算绝对时间，时间线仍可整体 seek。
+</details>
+
+<details>
+<summary><b>4. 【进阶】为什么 JWT 的过期判断要留时钟偏差？</b></summary>
+
+`exp` 由签发方时钟决定，客户端时钟可能慢几秒。若严格按 `now >= exp` 判断，客户端时间稍慢就会把「刚过期」误判为「仍有效」，或时间稍快提前踢人。留 30~60 秒 skew 可减少临界抖动，服务端仍以自身时间为准。
+</details>
+
+<details>
+<summary><b>5. 【进阶】qs 解析为什么必须防原型污染？</b></summary>
+
+查询串的 key 完全由用户控制。`__proto__[polluted]=1` 这类输入若被直接展开到对象，会修改 `Object.prototype`，导致全站对象都继承该属性，可能引发逻辑错乱甚至安全漏洞。应关闭 `allowPrototypes`、拦截危险 key，并对结果做白名单校验。
+</details>
+
+<details>
+<summary><b>6. 【挑战】列表页要支持增删排序动画，framer-motion 与 GSAP 怎么选？</b></summary>
+
+列表项与 React 状态强绑定、需要声明式增删时，framer-motion 的 `layout` + `AnimatePresence` 更自然；复杂时间线、滚动联动、SVG 路径、数据大屏编排则 GSAP 更强。两者都能做，但不要在同一列表里混用两套动画控制，容易出现布局测量与清理冲突。
+</details>
+
+<details>
+<summary><b>7. 【挑战】为什么数据库主键更推荐 UUID v7 而不是 v4？</b></summary>
+
+v4 完全随机，插入时索引页随机分裂，长期造成碎片与写放大；v7 前 48 位是毫秒时间戳，插入近似顺序，B-Tree 更友好，同时保留随机位避免被枚举。需要严格单调时还要处理同毫秒内的顺序（v7 的随机位或额外计数器）。
+</details>
+
+<details>
+<summary><b>8. 【挑战】前端拿到 JWT 后，如何设计「无感刷新」而不误踢用户？</b></summary>
+
+解析 `exp` 得到剩余时间；在过期前 N 分钟（如 5 分钟）触发 refresh，而不是等到过期；刷新请求单飞，避免并发刷新；刷新失败区分「网络错误」与「refresh 失效」，前者退避重试，后者才跳登录；多标签页用 BroadcastChannel/Leader 选举避免重复刷新；服务端对旧 token 设短宽限期，防止请求在途时被拒。
+</details>
+
+---
+
+## 54.6 本章避坑清单
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 用 `jwt-decode` 结果做鉴权 | 篡改 token 即可越权 | 服务端验签 + 校验声明 |
+| 把 JWT 放 `localStorage` | XSS 可直接窃取 | HttpOnly Cookie 优先 |
+| `exp` 忘记从秒转毫秒 | 过期判断差 1000 倍 | `exp * 1000` 或统一用秒 |
+| 严格按 `now >= exp` 判断 | 时钟偏差导致误踢/误放行 | 留 30~60s skew |
+| `AnimatePresence` 子节点无 key | 退出动画不播放/错乱 | 稳定业务 key |
+| 动画 `width/height/top/left` | 触发布局，低端机掉帧 | 动画 `transform`/`opacity` |
+| 忽略 `prefers-reduced-motion` | 无障碍不达标，用户不适 | `useReducedMotion`/媒体查询 |
+| GSAP 不清理 | ScrollTrigger/监听泄漏 | `context.revert()` / `kill()` |
+| 滚动回调里创建 tween | 每帧新建，内存暴涨 | 创建一次 + `progress()` |
+| qs 直接 merge 解析结果 | 原型污染/字段覆盖 | 白名单 + 类型校验 |
+| `arrayFormat` 与后端不一致 | 数组被解析成字符串 | 前后端约定格式 |
+| 用 `Math.random()` 生成 ID | 碰撞、可预测 | `crypto.randomUUID` / uuid 库 |
+| v4 做数据库主键 | 索引碎片、写放大 | 需要有序时用 v7 |
+| 在动画里读布局属性 | 强制同步布局，卡顿 | 批量读、缓存尺寸 |
+| 同一个列表混用两套动画库 | 测量/清理冲突 | 统一一套动画控制 |
+
+---
+
+> **下一篇**：[第五十五部分 · 构建与样式库](./55-build-style-tooling.md) 会把 Vite、Webpack、PostCSS 的工程边界讲清楚。

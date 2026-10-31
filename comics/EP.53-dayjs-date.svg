@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg53" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#0d1327"/>
+    </linearGradient>
+    <linearGradient id="titleGrad53" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#eab308"/>
+      <stop offset="1" stop-color="#f472b6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg53)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#eab308" opacity="0.05"/>
+  <polygon points="150,0 220,0 1040,840 970,840" fill="#f472b6" opacity="0.04"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#eab308"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#0b1220">EP.53</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad53)">日期那点不精确的事</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad53)" opacity="0.6"/>
+
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#eab308" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#eab308"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：日期加起来飞了</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#1d4ed8"/>
+      <path d="M-5,18 L5,18 L3.5,27 L0,29 L-3.5,27 Z" fill="#f97316"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 L-11,-13 L-6,-4 L0,-14 L6,-4 L11,-13 L16,-2 Q0,-11 -16,-2 Z" fill="#f97316"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">一月最后一天加一个月变三月？</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">服务器 UTC 存的时间前端显示错位…</text>
+    <rect x="24" y="152" width="524" height="82" rx="8" fill="#0a0f1c" stroke="#eab308" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">dayjs('2024-01-31').add(1, 'month')</text>
+    <text x="38" y="194" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// → 2024-02-29 ← 钳到月末了</text>
+    <text x="38" y="214" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// 但再加一个月就是三月了？</text>
+    <rect x="24" y="244" width="524" height="98" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="244" width="4" height="98" rx="2" fill="#eab308"/>
+    <text x="40" y="268" font-size="13.5" fill="#e2e8f0">月末钳制是个坑，时区错配是另一个</text>
+    <text x="40" y="288" font-size="13.5" fill="#e2e8f0">而且 Day.js 默认 mutable——改一个对象到处联动</text>
+    <text x="40" y="308" font-size="13.5" fill="#94a3b8">日期那点事，一半是时区，一半是月末</text>
+  </g>
+
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#22d3ee" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：mutable + 月末钳 + 时区</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">Day.js 默认可变 + 月末钳 + 时区插件</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">三个最容易被忽视的默认行为</text>
+    <rect x="24" y="152" width="524" height="82" rx="8" fill="#0a0f1c" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">① .add() 改原对象，记得 clone 或 immutable</text>
+    <text x="38" y="194" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">② .add(1,'month') 本身会钳到月末</text>
+    <text x="38" y="214" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">③ 存 UTC 带 Z，展时区按用户</text>
+    <rect x="24" y="244" width="524" height="98" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="266" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">月末钳制再叠加就会出问题</text>
+    <text x="38" y="286" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">  2月28日 + 1月 = 3月28日（不是3月31日）</text>
+    <text x="38" y="302" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">  每次加完都要重新 .endOf('month') 钳一次</text>
+  </g>
+
+  <g transform="translate(20,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#f472b6" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：一套完整的存/展代码</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#7C3AED"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-2,-11 -16,-11 q-14,0 -16,11 z" fill="#22d3ee"/>
+      <circle cx="15" cy="-11" r="6.5" fill="#22d3ee"/>
+      <rect x="12" y="-9" width="6" height="4" rx="2" fill="#7C3AED"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">存 UTC + 展时区，加月末钳工具函数</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">定死这个策略，时区坑就能踩中 1%</text>
+    <rect x="24" y="152" width="524" height="174" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">// 存：UTC 带 Z</text>
+    <text x="38" y="194" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">dayjs.tz(userInput, 'Asia/Shanghai')</text>
+    <text x="50" y="210" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">  .utc().format('YYYY-MM-DDTHH:mm:ss[Z]')</text>
+    <text x="38" y="228" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// 展：按用户时区</text>
+    <text x="38" y="248" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">dayjs.utc(serverStr).tz(userTz).format(...)</text>
+    <text x="38" y="268" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 月末钳每次加完再 .endOf</text>
+    <text x="38" y="288" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">dayjs(d).add(n,'month').endOf('month').startOf('day')</text>
+    <text x="38" y="308" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">// 开 immutable 插件防共享修改 ✓</text>
+  </g>
+
+  <g transform="translate(608,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#a78bfa" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：三个最坑</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">日期工程的坑大多是默认语义</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">记下来就不会再踩</text>
+    <rect x="24" y="148" width="96" height="26" rx="13" fill="#a78bfa"/>
+    <text x="72" y="166" text-anchor="middle" font-size="13" font-weight="bold" fill="#0b1220">⚠ 坑点</text>
+    <rect x="32" y="183" width="9" height="9" rx="2" fill="#a78bfa"/>
+    <text x="52" y="192" font-size="13.5" fill="#e2e8f0">mutable 默认改原对象 → clone 或 immutable</text>
+    <rect x="32" y="207" width="9" height="9" rx="2" fill="#a78bfa"/>
+    <text x="52" y="216" font-size="13.5" fill="#e2e8f0">月末钳叠加 → 每次 add 后 .endOf</text>
+    <rect x="32" y="231" width="9" height="9" rx="2" fill="#a78bfa"/>
+    <text x="52" y="240" font-size="13.5" fill="#e2e8f0">存不带时区的本地时间 → 必须 UTC + Z</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#a78bfa"/>
+    <text x="40" y="300" font-size="13" font-weight="bold" fill="#a78bfa">码叔总结</text>
+    <text x="118" y="300" font-size="13" fill="#e2e8f0">Day.js 是 Luxon 的轻量替代，</text>
+    <text x="40" y="320" font-size="13" fill="#e2e8f0">mutable + 月末钳 + 时区 这三点搞清楚就稳。</text>
+  </g>
+
+  <text x="1180" y="832" text-anchor="end" font-size="11" fill="#475569">NEON INK · frontend-advanced-guide · EP.53</text>
+</svg>

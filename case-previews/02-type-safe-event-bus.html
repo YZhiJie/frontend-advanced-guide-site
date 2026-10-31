@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>类型安全的事件总线 · 在线预览</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#2a2f3a;--tx:#dde1e8;--dim:#8b93a3;--brand:#5eead4;--err:#f87171;--ok:#86efac;--info:#93c5fd}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--bg);color:var(--tx);font:14px/1.6 ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;padding:16px 18px 28px}
+h1{font-size:16px;margin-bottom:2px}
+header p{color:var(--dim);font-size:12px;margin-bottom:12px}
+.sec{margin-top:16px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.sec h2{font-size:13px;margin-bottom:8px;color:var(--brand)}
+.hint{font-size:12px;color:var(--dim);margin:-4px 0 8px}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+button{font:12px/1 inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:#1f2430;color:var(--tx);cursor:pointer}
+button:hover{border-color:var(--brand);color:var(--brand)}
+button.primary{background:var(--brand);border-color:var(--brand);color:#06281f;font-weight:600}
+button.danger{border-color:#7f1d1d;color:var(--err)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.in,.ta{width:100%;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0c0e13;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.ta{resize:vertical;white-space:pre}
+.out{background:#0c0e13;border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-height:300px;overflow:auto;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
+.ln{white-space:pre-wrap;word-break:break-all}
+.ln.ok{color:var(--ok)}.ln.err{color:var(--err)}.ln.dim{color:var(--dim)}.ln.info{color:var(--info)}
+.blk{white-space:pre-wrap;word-break:break-all;color:var(--tx)}
+.blk.ok{color:var(--ok)}.blk.err{color:var(--err)}.blk.dim{color:var(--dim)}
+.tbl .tr{display:flex;gap:10px;padding:1px 0}
+.tbl code{color:var(--info);min-width:140px;flex-shrink:0}
+footer{margin-top:14px;color:var(--dim);font-size:11px}
+footer a{color:var(--brand)}
+</style>
+</head>
+<body>
+<div id="app">
+<header><h1>🎯 类型安全的事件总线</h1><p>实战案例在线预览 · cases/02-type-safe-event-bus · 完整源码见仓库 cases/02-type-safe-event-bus 目录（cases.md 有直达锚点）</p></header>
+</div>
+<script>(()=>{var L=new TextEncoder,C=new TextDecoder("utf-8");function y(e){return{createConnection(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)},request(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)}}}var v=y("node:http"),H=y("node:https"),$={...v,...H};function h(){let e=new Map;function t(o){let i=e.get(o);return i||(i=new Set,e.set(o,i)),i}let n=(o,i)=>(t(o).add(i),()=>s(o,i)),s=(o,i)=>{let a=e.get(o);a&&(a.delete(i),a.size===0&&e.delete(o))};return{on:n,off:s,once:(o,i)=>{let a=E=>{e.get(o)?.delete(a),i(E)};return t(o).add(a),()=>e.get(o)?.delete(a)},emit:(o,...i)=>{let a=e.get(o);if(!a||a.size===0)return!1;for(let E of[...a])E(...i);return!0}}}function f(e){if(typeof e=="string")return e;if(e==null||typeof e=="number"||typeof e=="boolean")return String(e);if(e instanceof Error)return`${e.name}: ${e.message}`;if(e instanceof Date)return e.toISOString();if(e instanceof Map)return`Map(${e.size}) { ${[...e.entries()].map(([t,n])=>`${f(t)} => ${f(n)}`).join(", ")} }`;if(e instanceof Set)return`Set(${e.size}) { ${[...e].map(t=>f(t)).join(", ")} }`;try{return JSON.stringify(e,(t,n)=>typeof n=="bigint"?String(n):n,2)??String(e)}catch{return String(e)}}function x(e,t=""){let n=document.createElement("section");n.className="sec";let s=document.createElement("h2");if(s.textContent=e,n.appendChild(s),t){let r=document.createElement("p");r.className="hint",r.textContent=t,n.appendChild(r)}return document.body.querySelector("#app").appendChild(n),n}function b(e){let t=document.createElement("div");return t.className="btn-row",e.appendChild(t),t}function l(e,t,n,s=""){let r=document.createElement("button");return r.textContent=t,s&&(r.className=s),r.addEventListener("click",()=>{try{n()}catch(g){u(e,`\u2717 ${f(g)}`,"err")}}),e.appendChild(r),r}function k(e){let t=document.createElement("div");return t.className="out",e.appendChild(t),t}function T(e){if(e?.classList.contains("out"))return e;let t=e?.querySelectorAll(":scope > .out");if(t&&t.length)return t[t.length-1];let n=document.querySelectorAll("#app .out");return n[n.length-1]}function u(e,t,n=""){let s=T(e),r=document.createElement("div");r.className=`ln ${n}`,r.textContent=f(t),s.appendChild(r),s.scrollTop=s.scrollHeight}var w=x("\u7C7B\u578B\u5B89\u5168\u4E8B\u4EF6\u603B\u7EBF","\u70B9\u51FB\u6309\u94AE\u53D1\u5E03\u4E8B\u4EF6\uFF0C\u65E5\u5FD7\u5C55\u793A\u54EA\u4E9B\u8BA2\u9605\u8005\u6536\u5230 typed payload"),d=k(w),c=h(),M=e=>t=>u(d,`[\u5BA1\u8BA1] \u6536\u5230 ${e}\uFF1A${JSON.stringify(t??"\u65E0 payload")}`,"info");c.on("user/login",e=>u(d,`[\u4F1A\u8BDD] \u767B\u5F55\u6210\u529F\uFF1A${e.name}(#${e.id})`,"ok"));c.on("user/login",M("user/login"));c.on("user/logout",M("user/logout"));c.on("cart/add",e=>u(d,`[\u8D2D\u7269\u8F66] ${e.sku} \xD7${e.qty}`,"ok"));var m=b(w);l(m,'\u25B6 user/login { id:1, name:"Ada" }',()=>c.emit("user/login",{id:1,name:"Ada"}));l(m,"\u25B6 user/logout\uFF08\u65E0 payload\uFF09",()=>c.emit("user/logout"));l(m,'\u25B6 cart/add { sku:"TS-01", qty:2 }',()=>c.emit("cart/add",{sku:"TS-01",qty:2}));l(m,"\u26D4 once \u6F14\u793A\uFF08\u53EA\u89E6\u53D1\u4E00\u6B21\uFF09",()=>{c.once("cart/add",e=>u(d,`[\u4E00\u6B21\u6027] \u53EA\u4F1A\u6536\u5230\u4E00\u6B21\uFF1A${e.sku} \xD7${e.qty}`,"info")),u(d,"\u5DF2\u6CE8\u518C once \u8BA2\u9605\uFF0C\u8FDE\u7EED\u70B9\u4E24\u6B21 cart/add \u770B\u6548\u679C","dim")});l(m,"\u{1F9F9} \u6E05\u7A7A\u65E5\u5FD7",()=>d.replaceChildren());})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1172 @@
+# 第五十七部分 · Vue 组件设计模式深潜（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/57-vue-component-patterns
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第五十七部分 · Vue 组件设计模式深潜
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第四部分 · 框架深入理解](./04-frameworks.md) · [第五部分 · 状态管理](./05-state-management.md) · [第四十九部分 · 组件库工程](./49-component-library.md)
+
+> 💡 **本章特色**：把 JD 要求的「精通组件封装、全局状态管理、复杂业务逻辑」拆解为可落地的设计模式。全部示例代码可独立运行，放在 `examples/` 目录下，用 `npx tsx <file>` 一键执行。
+
+## 本部分内容
+
+- [57.1 组件封装七大模式](#_57-1-组件封装七大模式)
+- [57.2 自定义指令实战](#_57-2-自定义指令实战)
+- [57.3 组件通信全景对比](#_57-3-组件通信全景对比)
+- [57.4 v-model 与自定义表单组件](#_57-4-v-model-与自定义表单组件)
+- [57.5 高阶组件与组合式封装](#_57-5-高阶组件与组合式封装)
+- [57.6 自测题](#_57-6-自测题)
+- [57.7 本章避坑清单](#_57-7-本章避坑清单)
+
+```mermaid
+flowchart TB
+    A[组件封装] --> B{模式选择}
+    B --> C[容器 / 展示分离]
+    B --> D[高阶组件 HOC]
+    B --> E[组合式 composables]
+    B --> F[Provider / Inject]
+    B --> G[动态组件]
+    B --> H[递归组件]
+    B --> I[Teleport 传送]
+    C & D & E & F & G & H & I --> J[落地业务组件]
+    J --> K[v-model 表单组件]
+    J --> L[自定义指令增强]
+    J --> M[组件通信选型]
+```
+
+---
+
+## 57.1 组件封装七大模式
+
+### 57.1.1 概念解析
+
+JD 要求的「精通组件封装」不是把 DOM 包一层 `<template>` 就完了——真正的封装是**按职责划分边界**。七大模式覆盖从"简单展示"到"复杂业务编排"的全部场景：
+
+| 模式 | 解决什么 | 一句话心法 | 典型场景 |
+| --- | --- | --- | --- |
+| **容器 / 展示分离** | 数据获取与 UI 渲染混在一起 | 容器管数据，展示管渲染 | 列表页：Container 调 API → 拿到 props 传给 Presentational |
+| **高阶组件 (HOC)** | 给多个组件注入相同能力 | 函数吃组件吐组件：`withXxx(Comp)` | `withPermission(Button)` → 自动判断权限码 |
+| **组合式 composables** | 逻辑复用（Vue 3 首选） | 把逻辑从组件体抽到 `useXxx()` | `useLoading()`、`useDebounce()`、`useEventListener()` |
+| **Provider / Inject** | 跨层级深层组件通信 | 祖先 provide，任意后代 inject，绕开中间 props | 主题色、国际化、表单上下文 |
+| **动态组件** | 根据状态切换不同 UI 组件 | `<component :is="..." />` | Tabs 页签、多步骤向导、表单字段类型切换 |
+| **递归组件** | 树结构数据渲染自身 | 组件 template 里 render 自己 | 目录树、评论嵌套、组织架构 |
+| **Teleport 传送** | 把 DOM 渲染到组件树外 | `<Teleport to="body">` | Modal / Dropdown / Toast → 避免父级 overflow 裁剪和 z-index 陷阱 |
+
+### 57.1.2 完整代码示例
+
+```ts
+// 文件: examples/57-01-component-patterns.ts —— Vue 3 组件模式设计范式（概念验证，浏览器运行）
+
+/**
+ * 模式 1: 容器 / 展示分离
+ * ---------------------------------------
+ * Container 管数据（获取、loading、错误），Presentational 纯渲染
+ */
+
+// ============ Presentational（纯展示，无副作用） ============
+interface UserListProps {
+  users: { id: number; name: string; email: string }[];
+  loading: boolean;
+  error: string | null;
+  onSelect: (id: number) => void;
+}
+
+function renderUserList(props: UserListProps): string {
+  if (props.loading) return '<div class="loading">加载中...</div>';
+  if (props.error) return `<div class="error">${props.error}</div>`;
+  return `<ul>${props.users
+    .map(
+      (u) =>
+        `<li data-id="${u.id}">${u.name} · ${u.email}</li>`
+    )
+    .join("")}</ul>`;
+}
+
+// ============ Container（管数据） ============
+interface UserService {
+  fetchUsers(): Promise<{ id: number; name: string; email: string }[]>;
+}
+
+function createUserListContainer(service: UserService) {
+  return {
+    async mount(containerEl: HTMLElement) {
+      containerEl.innerHTML = renderUserList({
+        users: [],
+        loading: true,
+        error: null,
+        onSelect: () => {},
+      });
+      try {
+        const users = await service.fetchUsers();
+        containerEl.innerHTML = renderUserList({
+          users,
+          loading: false,
+          error: null,
+          onSelect: () => {},
+        });
+      } catch (e) {
+        containerEl.innerHTML = renderUserList({
+          users: [],
+          loading: false,
+          error: (e as Error).message,
+          onSelect: () => {},
+        });
+      }
+    },
+  };
+}
+
+/**
+ * 模式 2: 高阶组件 —— 权限守卫
+ * ---------------------------------------
+ * withPermission 接收一个组件和一个权限判定函数，返回新组件
+ */
+
+type PermissionChecker = (userRole: string, required: string) => boolean;
+
+function withPermission<P extends { role: string }>(
+  Component: (props: P) => string,
+  requiredPerm: string,
+  checker: PermissionChecker
+) {
+  return (props: P): string => {
+    if (!checker(props.role, requiredPerm)) {
+      return `<div class="no-permission">🚫 无权限访问（需要: ${requiredPerm}）</div>`;
+    }
+    return Component(props);
+  };
+}
+
+// ============ 使用 ============
+const UserBtn = (p: { role: string; label: string }) =>
+  `<button>${p.label}</button>`;
+const AdminBtn = withPermission(
+  UserBtn,
+  "admin",
+  (role, required) => role === required
+);
+
+/**
+ * 模式 3: Provider / Inject —— 主题上下文
+ * ---------------------------------------
+ * 祖先 provide 一个对象，深层 inject 拿到同一个引用
+ */
+
+type Theme = "light" | "dark";
+interface ThemeContext {
+  theme: Theme;
+  toggle: () => void;
+}
+
+function createThemeProvider(initial: Theme = "light") {
+  const ctx: ThemeContext = {
+    theme: initial,
+    toggle() {
+      this.theme = this.theme === "light" ? "dark" : "light";
+    },
+  };
+  return ctx;
+}
+
+/**
+ * 模式 4: 递归组件 —— 树结构
+ * ---------------------------------------
+ * 组件 template 里引用自身，终止条件是 children 为空
+ */
+
+interface TreeNode {
+  id: string;
+  label: string;
+  children?: TreeNode[];
+}
+
+function renderTree(node: TreeNode, depth = 0): string {
+  const indent = "  ".repeat(depth);
+  let html = `${indent}<li>${node.label}</li>`;
+  if (node.children?.length) {
+    html += `${indent}<ul>\n${node.children
+      .map((c) => renderTree(c, depth + 1))
+      .join("\n")}\n${indent}</ul>`;
+  }
+  return html;
+}
+
+/**
+ * 模式 5: 动态组件 —— Tabs 切换
+ * ---------------------------------------
+ * 按 state.component 决定渲染哪个组件
+ */
+
+type TabKey = "overview" | "users" | "settings";
+
+const tabComponents: Record<TabKey, (props: Record<string, unknown>) => string> = {
+  overview: () => "<div>📊 概览面板</div>",
+  users: () => "<div>👥 用户管理</div>",
+  settings: () => "<div>⚙️ 系统设置</div>",
+};
+
+function renderDynamicTabs(
+  active: TabKey,
+  tabs: { key: TabKey; label: string }[]
+): string {
+  const nav = tabs
+    .map(
+      (t) =>
+        `<button data-key="${t.key}" ${
+          t.key === active ? 'class="active"' : ""
+        }>${t.label}</button>`
+    )
+    .join("");
+  const content = tabComponents[active]({});
+  return `<nav>${nav}</nav><section>${content}</section>`;
+}
+
+/** ============ 运行 & 断言 ============ */
+async function main() {
+  // 模式 1 容器/展示
+  const mockService: UserService = {
+    fetchUsers: () =>
+      Promise.resolve([
+        { id: 1, name: "Alice", email: "alice@test.com" },
+        { id: 2, name: "Bob", email: "bob@test.com" },
+      ]),
+  };
+  const container = document.createElement("div");
+  await createUserListContainer(mockService).mount(container);
+  console.assert(
+    container.innerHTML.includes("Alice"),
+    "模式 1 失败:容器应渲染用户列表"
+  );
+
+  // 模式 2 高阶组件
+  console.assert(
+    AdminBtn({ role: "guest", label: "删除用户" }).includes("无权限"),
+    "模式 2 失败:guest 应被拦截"
+  );
+  console.assert(
+    !AdminBtn({ role: "admin", label: "删除用户" }).includes("无权限"),
+    "模式 2 失败:admin 应通过"
+  );
+
+  // 模式 3 Provider/Inject
+  const theme = createThemeProvider("light");
+  theme.toggle();
+  console.assert(theme.theme === "dark", "模式 3 失败:主题应切换为 dark");
+
+  // 模式 4 递归组件
+  const tree: TreeNode = {
+    id: "1",
+    label: "根目录",
+    children: [
+      { id: "2", label: "src", children: [{ id: "3", label: "main.ts" }] },
+      { id: "4", label: "package.json" },
+    ],
+  };
+  const treeHtml = renderTree(tree);
+  console.assert(
+    treeHtml.split("<ul>").length >= 2,
+    "模式 4 失败:递归应生成多层 ul"
+  );
+
+  // 模式 5 动态组件
+  const tabs = [
+    { key: "overview" as TabKey, label: "概览" },
+    { key: "users" as TabKey, label: "用户" },
+    { key: "settings" as TabKey, label: "设置" },
+  ];
+  const overviewHtml = renderDynamicTabs("overview", tabs);
+  console.assert(
+    overviewHtml.includes("📊 概览"),
+    "模式 5 失败:应渲染概览面板"
+  );
+  const usersHtml = renderDynamicTabs("users", tabs);
+  console.assert(
+    usersHtml.includes("👥 用户"),
+    "模式 5 失败:切换后应渲染用户面板"
+  );
+
+  console.log("✅ 全部 5 个组件模式断言通过");
+}
+
+// 浏览器运行:main(); 或 Node 环境下模拟 HTMLElement
+if (typeof document === "undefined") {
+  // Node 环境只做逻辑断言
+  (globalThis as unknown as { document?: Document }).document =
+    {} as Document;
+}
+main().catch(console.error);
+```
+
+> 运行方式：浏览器打开（创建一个空 HTML 引 script type="module"），或 `npx tsx examples/57-01-component-patterns.ts`（Node 环境下 document 会被 mock）。
+
+### 57.1.3 最佳实践
+
+1. **容器 / 展示分离是 B 端项目标配**：运维工具类前端页面几乎都有复杂的数据获取逻辑（多接口聚合、轮询、缓存），把这层逻辑塞进 template 里会让组件同时承担"数据管道"和"UI 渲染"两个职责，改一个容易牵连另一个。
+2. **HOC 与 Composables 不要混用**：HOC 解决"给组件注入能力"，Composables 解决"逻辑抽取复用"。`usePermission()` 是 composable，`withPermission(Button)` 是 HOC——前者更 Vue 3，后者在需要包装原生 HTML 元素时仍有价值。
+3. **Provider / Inject 的依赖显式化**：inject 的 key 建议用 `InjectionKey<T>`（Vue 3 类型安全），不要用字符串——字符串 key 重名会拿到错误的 context，而且类型丢失。
+4. **递归组件一定要有终止条件**：每次 render 自身时 children 数组必须越来越短，否则死循环 → 栈溢出。实战中建议在递归调用前加 `node.children?.length` 判断。
+5. **Teleport 的父级样式陷阱**：Teleport 虽然 DOM 渲染到了 body，但它仍是父组件的子节点——父组件的 `scoped` 样式和 `v-if`/`v-show` 仍然生效。但 `position: fixed` 的 Modal 会被父级的 `transform`/`filter` 新建层叠上下文破坏——解决办法：Modal 独立成顶级组件或直接用原生 `<dialog>`。
+6. **动态组件的 keep-alive**：频繁切换 Tabs 时，`<keep-alive>` 缓存组件实例可避免重复 mounted。但要在 `onActivated` 里刷新数据，否则切回来看到的是旧状态。
+
+---
+
+## 57.2 自定义指令实战
+
+### 57.2.1 概念解析
+
+JD 要求的「精通组件封装」还包括用**自定义指令**增强原生元素——把"对元素的操作"从组件里解耦出来。五大高频指令：
+
+| 指令 | 解决什么 | 实现要点 |
+| --- | --- | --- |
+| `v-permission="'code'"` | 按钮级权限控制 | mounted 时检查用户权限码 → 无权限则 `el.remove()` 或置灰 |
+| `v-debounce="handler"` | 输入框防抖 | 监听 input → `setTimeout` 延迟触发 → 新输入时 `clearTimeout` |
+| `v-watermark="text"` | 页面水印防盗录 | 插入一个 `position: fixed; pointer-events: none; z-index: 9999` 的 canvas |
+| `v-lazy-src` | 图片懒加载 | `IntersectionObserver` 监听可见性 → 可见时赋值 `img.src` |
+| `v-long-press="fn"` | 长按事件 | `touchstart` 启动计时器（~500ms）→ `touchend` 取消 → 时间到则触发 |
+
+### 57.2.2 完整代码示例
+
+```ts
+// 文件: examples/57-02-custom-directives.ts —— 五大高频指令实现（逻辑验证）
+
+import { jest } from "@jest/globals"; // 可选：纯函数测试无需依赖
+
+/**
+ * v-permission —— 按钮级权限守卫
+ * ---------------------------------------
+ * mounted(el, binding) 时检查权限码数组，无权限则隐藏或置灰
+ */
+export function createPermissionDirective(
+  getPermissions: () => string[],
+  mode: "remove" | "disable" = "remove"
+) {
+  return {
+    mounted(el: HTMLElement, binding: { value: string | string[] }) {
+      const required = Array.isArray(binding.value)
+        ? binding.value
+        : [binding.value];
+      const userPerms = getPermissions();
+      const hasAll = required.every((r) => userPerms.includes(r));
+      if (!hasAll) {
+        if (mode === "remove") {
+          el.remove();
+        } else {
+          el.setAttribute("disabled", "true");
+          el.style.opacity = "0.5";
+          el.style.pointerEvents = "none";
+        }
+      }
+    },
+  };
+}
+
+/**
+ * v-debounce —— 输入防抖
+ * ---------------------------------------
+ * 每次 input 清除上次计时器，延迟 N ms 后触发
+ */
+export function createDebounceDirective(delay = 300) {
+  return {
+    mounted(el: HTMLElement & { _debounceTimer?: ReturnType<typeof setTimeout> }, binding: { value: (val: string) => void }) {
+      const handler = (e: Event) => {
+        if (el._debounceTimer) clearTimeout(el._debounceTimer);
+        el._debounceTimer = setTimeout(() => {
+          binding.value((e.target as HTMLInputElement).value);
+        }, delay);
+      };
+      el.addEventListener("input", handler);
+      // 保存清理函数供 unmounted 使用
+      (el as HTMLElement & { _cleanup?: () => void })._cleanup = () => {
+        el.removeEventListener("input", handler);
+      };
+    },
+    unmounted(el: HTMLElement & { _cleanup?: () => void }) {
+      el._cleanup?.();
+    },
+  };
+}
+
+/**
+ * v-watermark —— 页面水印
+ * ---------------------------------------
+ * 在 body 末尾插入一个 fixed 定位、无事件穿透的 canvas
+ */
+export function applyWatermark(text: string, opts?: { size?: number; color?: string }): void {
+  const size = opts?.size ?? 200;
+  const color = opts?.color ?? "rgba(0,0,0,0.12)";
+
+  // 移除旧水印
+  const old = document.getElementById("__watermark__");
+  if (old) old.remove();
+
+  const canvas = document.createElement("canvas");
+  canvas.id = "__watermark__";
+  canvas.width = size;
+  canvas.height = size;
+  canvas.style.cssText =
+    "position:fixed;top:0;left:0;width:100vw;height:100vh;" +
+    "pointer-events:none;z-index:99999;overflow:hidden;";
+  canvas.setAttribute("aria-hidden", "true");
+
+  const ctx = canvas.getContext("2d")!;
+  ctx.translate(size / 2, size / 2);
+  ctx.rotate((-20 * Math.PI) / 180); // 倾斜 -20°
+  ctx.font = "14px sans-serif";
+  ctx.fillStyle = color;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 0, 0);
+
+  canvas.style.background = `url(${canvas.toDataURL()}) repeat`;
+  canvas.width = 0;
+  canvas.height = 0;
+
+  document.body.appendChild(canvas);
+}
+
+/**
+ * v-long-press —— 长按触发
+ * ---------------------------------------
+ * touchstart → 启动 500ms 计时器 → touchend/touchmove → 取消
+ */
+export function createLongPressDirective(threshold = 500) {
+  return {
+    mounted(el: HTMLElement, binding: { value: () => void }) {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const start = () => {
+        timer = setTimeout(() => {
+          binding.value();
+        }, threshold);
+      };
+      const cancel = () => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+      };
+      el.addEventListener("touchstart", start, { passive: true });
+      el.addEventListener("touchend", cancel);
+      el.addEventListener("touchmove", cancel);
+      (el as HTMLElement & { _cleanup?: () => void })._cleanup = () => {
+        el.removeEventListener("touchstart", start);
+        el.removeEventListener("touchend", cancel);
+        el.removeEventListener("touchmove", cancel);
+      };
+    },
+    unmounted(el: HTMLElement & { _cleanup?: () => void }) {
+      el._cleanup?.();
+    },
+  };
+}
+
+/** ============ 逻辑单元测试（Node 环境，无 DOM 依赖） ============ */
+export function runDirectiveTests() {
+  // v-permission 逻辑验证
+  const perms = ["user:read", "user:list"];
+  const dir = createPermissionDirective(() => perms, "remove");
+
+  // 模拟无权限:组件应被移除
+  let removed = false;
+  const mockEl: HTMLElement = {
+    remove() {
+      removed = true;
+    },
+  } as unknown as HTMLElement;
+  dir.mounted(mockEl, { value: "admin:delete" });
+  console.assert(removed, "v-permission 失败:无权限元素应被移除");
+
+  // 模拟有权限:不应移除
+  removed = false;
+  const mockEl2: HTMLElement = {
+    remove() {
+      removed = true;
+    },
+  } as unknown as HTMLElement;
+  dir.mounted(mockEl2, { value: "user:read" });
+  console.assert(!removed, "v-permission 失败:有权限元素不应被移除");
+
+  // 多权限 AND 语义
+  removed = false;
+  const mockEl3: HTMLElement = {
+    remove() {
+      removed = true;
+    },
+  } as unknown as HTMLElement;
+  dir.mounted(mockEl3, { value: ["user:read", "admin:delete"] });
+  console.assert(removed, "v-permission 失败:AND 模式下缺一即无权限");
+
+  console.log("✅ v-permission 指令逻辑测试通过");
+}
+
+// 导出指令供 Vue 应用注册
+export const directives = {
+  permission: createPermissionDirective(() => [], "remove"),
+  debounce: createDebounceDirective(300),
+  watermark: { mounted: () => {} }, // 完整见 applyWatermark
+  longPress: createLongPressDirective(500),
+};
+```
+
+> 运行方式：`npx tsx -e "import('./examples/57-02-custom-directives.ts').then(m => m.runDirectiveTests())"`。
+
+### 57.2.3 最佳实践
+
+1. **指令的职责边界**：指令只做"对 DOM 的单一操作"，不做业务逻辑。`v-permission` 只负责隐藏/置灰，权限判定函数应该从外部注入（如 pinia store）——不要在指令里硬编码角色数组。
+2. **指令一定要在 unmounted 清理**：addEventListener 一定要对应 removeEventListener；setTimeout/setInterval 一定要 clear；否则组件卸载后定时器还在跑 → 内存泄漏。
+3. **v-watermark 防调试**：生产环境下水印是防盗录的第一道防线，但要防止用户用 DevTools 删除 canvas 节点——可以加一个 `MutationObserver` 监听 `__watermark__` 是否被删除，删了就重新 apply。
+4. **防抖 vs 节流：不要搞混**：防抖是"停止输入 N ms 后触发一次"（适合输入框联想）；节流是"每 N ms 最多触发一次"（适合 scroll resize 高频事件）。指令里要明确注释语义，不然自己两周后回来也会忘。
+5. **指令命名用连字符**：Vue 推荐 `v-long-press` 而非 `v-longpress`，注册时用 camelCase（`app.directive('long-press', dir)`），template 用 kebab-case。
+
+---
+
+## 57.3 组件通信全景对比
+
+### 57.3.1 概念解析
+
+JD 要求的"全局状态管理"本质是**组件间数据流动的路径选择**。五种方式按"距离"和"复杂度"决策：
+
+```mermaid
+flowchart LR
+    subgraph "距离近"
+        A[props 下发] -->|父→子| B[$emit 上抛]
+    end
+    subgraph "距离中等"
+        C[provide / inject] -->|祖先↔任意后代| D[自定义事件总线]
+    end
+    subgraph "全局"
+        E[Pinia Store] -->|任何组件↔任何组件| F[LocalStorage]
+    end
+    A --> B --> C --> E
+```
+
+| 方式 | 数据流 | 适用场景 | 缺点 |
+| --- | --- | --- | --- |
+| **props / emit** | 父 ↔ 子（单向） | 父子直接通信 | 多层嵌套时要层层传（prop drilling） |
+| **provide / inject** | 祖先 → 任意后代 | 跨层级传递不常变的上下文 | 只能祖先→后代，不能 sibling 之间；不是响应式（除非 provide 响应式对象） |
+| **Pinia / Vuex** | 任何组件 ↔ 任何组件 | 全局共享状态（用户信息、主题、购物车） | 全局单例，过度使用会让数据流向不可追踪 |
+| **EventBus** | 发布 ↔ 订阅 | 跨组件偶发事件（"刷新列表"、"通知 toast"） | 无类型安全、事件名散落难追踪、忘记 off 会内存泄漏 |
+| **v-model 双向绑定** | 父 ↔ 子（语法糖） | 表单组件、输入组件 | 只是 props+emit 的语法糖，不算独立通信方式 |
+
+### 57.3.2 决策树
+
+```mermaid
+flowchart TD
+    Q1{数据在哪些组件间流动?}
+    Q1 -- "只在父子间" --> Q2{方向?}
+    Q2 -- "父给子" --> A["✅ props 下发"]
+    Q2 -- "子通知父" --> B["✅ $emit 上抛"]
+    Q2 -- "双向表单" --> C["✅ v-model"]
+    Q1 -- "跨多层 / 深层后代" --> Q3{是否频繁共享?}
+    Q3 -- "偶发 / 配置型" --> D["✅ provide / inject"]
+    Q3 -- "全局共享状态" --> E["✅ Pinia Store"]
+    Q1 -- "兄弟组件" --> F["先用共同父组件中转"]
+    F -- "共同父组件也不方便" --> E
+```
+
+### 57.3.3 避坑：EventBus 的内存泄漏陷阱
+
+```ts
+// 文件: examples/57-03-event-bus-memory-leak.ts
+
+import { EventEmitter } from "node:events";
+
+const bus = new EventEmitter();
+
+// 模拟组件 A:挂载时订阅
+function mountComponentA() {
+  const handler = (data: string) => {
+    console.log("A received:", data);
+  };
+  bus.on("refresh", handler);
+  // ❌ 忘记在 unmount 时 bus.off("refresh", handler)
+}
+
+// 模拟组件 A 卸载
+function unmountComponentA() {
+  // 👀 什么都不做 → handler 永远留在 listeners 里
+}
+
+// 订阅数持续增长
+for (let i = 0; i < 100; i++) {
+  mountComponentA();
+  unmountComponentA();
+}
+
+const count = bus.listenerCount("refresh");
+console.log(`listener 数量: ${count}`);
+console.assert(count === 100, `EventBus 泄漏:预期 0, 实际 ${count}`);
+
+// ✅ 正确做法:用 symbol 或唯一 ID 保存 handler 引用
+function mountComponentB() {
+  const handler = (data: string) => {
+    console.log("B received:", data);
+  };
+  bus.on("refresh", handler);
+  return () => bus.off("refresh", handler); // 返回 cleanup 函数
+}
+const cleanup = mountComponentB();
+cleanup(); // 卸载时调用
+console.assert(bus.listenerCount("refresh") === 0, "cleanup 应正确移除");
+```
+
+> 运行方式：`npx tsx examples/57-03-event-bus-memory-leak.ts`。
+
+### 57.3.4 最佳实践
+
+1. **props / emit 是默认选项**：90% 的父子通信都应该用它，明确、可追踪、有类型。只有当 props drilling 到三层以上时才考虑 provide/inject 或 Pinia。
+2. **provide/inject 传响应式对象才会共享更新**：`provide('theme', 'dark')` —— inject 拿到的是字符串副本，改了不生效；`provide('theme', reactive({ value: 'dark' }))` —— inject 拿到的是同一个对象引用，改了全局都看到。
+3. **Pinia 用于"全局共享的可变状态"**：用户信息、购物车、国际化语言——任何两个不相关组件都需要读/写的数据。如果只有一个组件用到，放组件本地 state 就够了。
+4. **EventBus 只用于"通知型事件"**：`'user:logged-in'`、`'file:uploaded'`、`'cart:updated'` —— 这些事件不带大 payload，只是通知"某个事情发生了"。如果是数据本身的传递，用 Pinia。
+5. **永远记得 off**：EventBus 的最大坑是忘记移除监听 → 组件卸载后还在响应事件 → 重复执行 → 内存泄漏。要么用 `onScopeDispose` (Vue 3) 自动清理，要么返回 cleanup 函数手动调用。
+
+---
+
+## 57.4 v-model 与自定义表单组件
+
+### 57.4.1 概念解析
+
+JD 要求"独立实现复杂页面布局、动态动画交互"，表单组件是 B 端业务（运维工具、后台管理）的核心。`v-model` 本质是 `:modelValue` + `@update:modelValue` 的语法糖：
+
+```vue
+<!-- 父组件使用 -->
+<CustomInput v-model="user.name" />
+<!-- 等价于 -->
+<CustomInput :modelValue="user.name" @update:modelValue="v => (user.name = v)" />
+```
+
+**Vue 3 新增**：一个组件可以有多个 `v-model`（`v-model:title`、`v-model:content`），每个都对应 `defineModel('title')`。
+
+### 57.4.2 完整代码示例
+
+```vue
+<!-- CustomRangeSlider.vue —— 自定义范围滑块，支持 v-model:min v-model:max -->
+
+<script setup lang="ts">
+// 方式 1:Vue 3.4+ defineModel（推荐，一行搞定）
+const min = defineModel<number>("min", { default: 0 });
+const max = defineModel<number>("max", { default: 100 });
+
+// 方式 2:传统 defineProps + defineEmits
+// const props = defineProps<{ modelValue: number }>();
+// const emit = defineEmits<{ (e: 'update:modelValue', v: number): void }>();
+
+function clamp(v: number, lo: number, hi: number) {
+  return Math.min(Math.max(v, lo), hi);
+}
+</script>
+
+<template>
+  <div class="range-slider">
+    <label>最小: <input type="number" :value="min" @input="min = clamp(+($event.target as HTMLInputElement).value, 0, max)" /></label>
+    <label>最大: <input type="number" :value="max" @input="max = clamp(+($event.target as HTMLInputElement).value, min, 100)" /></label>
+  </div>
+</template>
+```
+
+**父组件使用**：
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import CustomRangeSlider from "./CustomRangeSlider.vue";
+
+const priceRange = ref({ min: 10, max: 500 });
+</script>
+
+<template>
+  <!-- 多 v-model 语法糖 -->
+  <CustomRangeSlider v-model:min="priceRange.min" v-model:max="priceRange.max" />
+  <div>价格区间:¥{{ priceRange.min }} ~ ¥{{ priceRange.max }}</div>
+</template>
+```
+
+### 57.4.3 完整代码示例（TypeScript 验证）
+
+```ts
+// 文件: examples/57-04-v-model-pattern.ts —— v-model 数据管道验证
+
+/**
+ * v-model 的数据管道:
+ * 父 ref  ← :modelValue →  子 props
+ * 父 ref  ← @update:modelValue ←  子 emit('update:modelValue', newValue)
+ */
+
+interface VModelContract<T> {
+  props: { modelValue: T };
+  emit: (event: "update:modelValue", value: T) => void;
+}
+
+/** 模拟 Vue 的 v-model 管道：父组件 ref → 子组件 props → emit 回写 */
+function createVModel<T>(initial: T): {
+  value: T;
+  childReceive: T;
+  childSend: (v: T) => void;
+} {
+  let parentRef = initial;
+  let childProps: T = parentRef; // 父 → 子 下发
+  const childSend = (v: T) => {
+    parentRef = v; // 子 emit 父 → 父 ref 更新
+    childProps = v; // 父 ref 更新后 → 子 props 重新下发
+  };
+  return {
+    get value() {
+      return parentRef;
+    },
+    get childReceive() {
+      return childProps;
+    },
+    childSend,
+  };
+}
+
+function main() {
+  const form = createVModel<string>("");
+  // 子组件初始化
+  console.assert(form.childReceive === "", "初始应为空");
+
+  // 子组件 emit
+  form.childSend("admin@test.com");
+  console.assert(
+    form.value === "admin@test.com",
+    "v-model 应同步更新父 ref"
+  );
+
+  // 子组件修改 → emit 新值 → 父 → 子 新 props
+  form.childSend("boss@test.com");
+  console.assert(form.childReceive === "boss@test.com", "新值应下发到子");
+
+  console.log("✅ v-model 数据管道验证通过");
+}
+
+main();
+```
+
+> 运行方式：`npx tsx examples/57-04-v-model-pattern.ts`。
+
+### 57.4.4 最佳实践
+
+1. **用 `defineModel` 替代手写 props+emit**（Vue 3.4+）：一行代码搞定类型安全的双向绑定，不用同时写 props 类型声明和 emit 类型声明。旧项目用 `defineProps` + `defineEmits` 也可以，但记得 emit 名一定要是 `update:xxx`。
+2. **表单验证放在 emit 之前**：子组件 emit 之前先校验值（如 email 格式、数字范围），非法值直接不 emit —— 父组件 ref 保持不变。这样表单状态永远是合法的。
+3. **v-model 数量限制**：虽然 Vue 3 支持多 v-model（Element Plus 的 `el-dialog` 就有 `v-model` 和 `v-model:visible`），但一个组件超过 3 个 v-model 时要反思：是不是组件职责太多了？
+4. **checkbox / radio 的 v-model 是数组**：`<input type="checkbox" v-model="arr" :value="1">` —— 选中时 push 进 arr，取消时 splice。这个行为是 Vue 内置的，自己写 checkbox 组件时要模拟这个行为。
+
+---
+
+## 57.5 高阶组件与组合式封装
+
+### 57.5.1 概念解析
+
+JD 要求"精通组件封装"在 Vue 3 语境下的核心是**组合式 API（Composables）**——把组件里的逻辑从 `<script setup>` 里抽成独立的 `useXxx()` 函数。HOC 是 Vue 2 时代的主力，但 Vue 3 下 composables 更自然、更类型安全。
+
+**Composables vs HOC 对照表**：
+
+| 维度 | Composables (`useXxx`) | HOC (`withXxx`) |
+| --- | --- | --- |
+| 包裹方式 | 函数调用，不包裹组件 | 高阶函数包裹组件，返回新组件 |
+| 嵌套 | 可在同一个组件里调用多个 | 多个 HOC 会多层嵌套（地狱） |
+| 类型安全 | 自动推导 | 需要手动透传 props 类型 |
+| 心智模型 | 逻辑抽取 | 组件增强 |
+| Vue 版本 | 3.x 主力 | 2.x 主力，3.x 仍可用于包装 DOM 元素 |
+| 典型场景 | 提取复用的状态/副作用 | 给组件注入权限/埋点/日志横切能力 |
+
+### 57.5.2 完整代码示例
+
+```ts
+// 文件: examples/57-05-composables.ts —— 高频 composables 实现
+
+import { ref, onMounted, onUnmounted } from "vue";
+
+/**
+ * useLoading —— 加载状态自动管理
+ * ---------------------------------------
+ * 调用 useLoading() 返回 { loading, run }
+ * run(fn) 自动在 fn 执行期间把 loading 置 true
+ */
+export function useLoading<T extends (...args: unknown[]) => Promise<unknown>>() {
+  const loading = ref(false);
+  const run = async (fn: T, ...args: Parameters<T>): Promise<ReturnType<T>> => {
+    loading.value = true;
+    try {
+      return (await fn(...args)) as ReturnType<T>;
+    } finally {
+      loading.value = false;
+    }
+  };
+  return { loading, run };
+}
+
+/**
+ * useEventListener —— 自动清理的事件监听
+ * ---------------------------------------
+ * onMounted 时 addEventListener, onUnmounted 时 removeEventListener
+ */
+export function useEventListener<K extends keyof WindowEventMap>(
+  target: Window | HTMLElement,
+  event: K,
+  handler: (e: WindowEventMap[K]) => void
+) {
+  onMounted(() => {
+    target.addEventListener(event, handler as EventListener);
+  });
+  onUnmounted(() => {
+    target.removeEventListener(event, handler as EventListener);
+  });
+}
+
+/**
+ * useDebounce —— 通用防抖
+ * ---------------------------------------
+ * debounce(fn, delay) 返回新函数,delay 时间内多次调用只执行最后一次
+ */
+export function useDebounce<T extends (...args: unknown[]) => void>(
+  fn: T,
+  delay = 300
+): T {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return ((...args: unknown[]) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  }) as T;
+}
+
+/**
+ * useCounter —— 简单计数器（演示 ref 共享状态）
+ */
+export function useCounter(initial = 0, step = 1) {
+  const count = ref(initial);
+  const increment = () => {
+    count.value += step;
+  };
+  const decrement = () => {
+    count.value -= step;
+  };
+  const reset = () => {
+    count.value = initial;
+  };
+  return { count, increment, decrement, reset };
+}
+
+/** ============ 单元测试 ============ */
+export function runComposableTests() {
+  // useCounter 逻辑
+  const counter = useCounter(0, 5);
+  counter.increment();
+  console.assert(counter.count.value === 5, "useCounter: increment 应加 5");
+  counter.decrement();
+  console.assert(counter.count.value === 0, "useCounter: decrement 应减回 0");
+  counter.increment();
+  counter.increment();
+  counter.reset();
+  console.assert(counter.count.value === 0, "useCounter: reset 应重置");
+
+  // useDebounce 逻辑（不需要 DOM）
+  let callCount = 0;
+  const debounced = useDebounce(() => {
+    callCount++;
+  }, 50);
+
+  // 连续调用 3 次,应该只执行 1 次
+  debounced();
+  debounced();
+  debounced();
+
+  // 等待 debounce 时间过去
+  setTimeout(() => {
+    console.assert(callCount === 1, `useDebounce: 连续调用 3 次应只执行 1 次,实际 ${callCount}`);
+
+    // 再调用一次,应该第 2 次执行
+    debounced();
+    setTimeout(() => {
+      console.assert(callCount === 2, `useDebounce: 再调用应执行第 2 次,实际 ${callCount}`);
+      console.log("✅ 全部 composables 测试通过");
+    }, 100);
+  }, 100);
+}
+```
+
+> 运行方式：`npx tsx -e "import('./examples/57-05-composables.ts').then(m => m.runComposableTests())"`。
+
+### 57.5.3 最佳实践
+
+1. **Composable 命名用 `use` 前缀**：`useLoading`、`useEventListener`、`useDebounce` —— 看到名字就知道是 composable，和普通工具函数区分开。
+2. **Composable 里可以用 Vue 的生命周期钩子**：`onMounted`、`onUnmounted` 这些 hook 在 composable 里直接调用，Vue 会自动把它们注册到调用方组件的生命周期里。这是 composables 最强大的特性——逻辑可以自带副作用管理。
+3. **Composable 返回 ref / reactive 对象**：让调用方可以用 `.value`（或 template 自动解包）访问状态，保持响应式。不要 return 原始值，那会丢失响应式。
+4. **不要在 composables 里放硬编码的业务逻辑**：`usePermission('admin')` 不如 `usePermission(userStore, 'admin')` —— 把依赖通过参数传入，composable 就更通用。
+5. **HOC 什么时候还需要**：虽然 Vue 3 推荐 composables，但在这两种场景 HOC 仍然更好：① 包装原生 DOM 元素（如 `withTooltip('button')`）；② 给组件注入横切能力且不想在每个组件里显式调用 `useXxx()`。
+
+---
+
+## 57.6 自测题
+
+<details>
+<summary><b>1. 【基础】容器 / 展示分离模式的核心价值是什么？</b></summary>
+
+**答案**：把**数据获取逻辑（异步、loading、错误处理）**和**UI 渲染逻辑（props 映射、模板）**解耦。容器组件负责所有副作用（调 API、监听 store），展示组件只根据 props 纯函数式地渲染。这样做的好处：① 展示组件更容易测试（不需要 mock API）；② 同一个展示组件可以被多个容器复用（比如移动端和桌面端用不同容器但共用展示）；③ 改数据管道不会牵连 UI。
+
+</details>
+
+<details>
+<summary><b>2. 【进阶】provide/inject 传字符串和传 reactive 对象有什么区别？为什么？</b></summary>
+
+**答案**：
+
+```ts
+// ❌ 字符串:inject 拿到的是快照,改了不生效
+provide('theme', 'light');
+
+// ✅ reactive 对象:inject 拿到的是同一个引用,改了全局可见
+const theme = reactive({ value: 'light' });
+provide('theme', theme);
+```
+
+**原因**：`provide` 存的是值的引用。原始类型（字符串、数字）是按值拷贝的，inject 后是一个独立副本，改了不影响 provide 方。reactive 对象是引用类型，inject 和 provide 指向同一块内存，所以改了任何一方全局可见。
+
+**补充**：也可以用 `ref` 而不是 `reactive` —— `ref` 在 provide/inject 后通过 `.value` 访问，Vue 3.3+ 支持 `shallowRef` / `triggerRef` 精细控制。
+
+</details>
+
+<details>
+<summary><b>3. 【进阶】写一个 `v-loading` 指令：给元素挂一个 loading 遮罩，绑定值为 true 时显示。</b></summary>
+
+**答案**：
+
+```ts
+import type { Directive } from 'vue';
+
+const vLoading: Directive<HTMLElement, boolean> = {
+  mounted(el, binding) {
+    // 创建遮罩 DOM
+    const overlay = document.createElement('div');
+    overlay.style.cssText =
+      'position:absolute;inset:0;background:rgba(255,255,255,0.7);' +
+      'display:flex;align-items:center;justify-content:center;' +
+      'z-index:9999;';
+    overlay.innerHTML = '⏳';
+    overlay.setAttribute('aria-hidden', 'true');
+    (el as HTMLElement & { _loadingOverlay?: HTMLDivElement })._loadingOverlay = overlay;
+    // 父元素需要 position
+    const parentStyle = getComputedStyle(el);
+    if (parentStyle.position === 'static') {
+      (el as HTMLElement).style.position = 'relative';
+    }
+    if (binding.value) el.appendChild(overlay);
+  },
+  updated(el, binding) {
+    const overlay = (el as HTMLElement & { _loadingOverlay?: HTMLDivElement })._loadingOverlay;
+    if (!overlay) return;
+    if (binding.value && !overlay.parentNode) {
+      el.appendChild(overlay);
+    } else if (!binding.value && overlay.parentNode) {
+      overlay.remove();
+    }
+  },
+  unmounted(el) {
+    const overlay = (el as HTMLElement & { _loadingOverlay?: HTMLDivElement })._loadingOverlay;
+    overlay?.remove();
+  },
+};
+```
+
+</details>
+
+<details>
+<summary><b>4. 【进阶】EventBus 和 Pinia Store 各自应该用来解决什么问题？什么场景下用哪个？</b></summary>
+
+**答案**：
+
+| 维度 | EventBus | Pinia Store |
+| --- | --- | --- |
+| **本质** | 发布订阅中心 | 全局响应式状态容器 |
+| **数据流向** | 单向通知（"发生了什么事"） | 状态读写（"值是什么"） |
+| **典型 payload** | 空或轻量对象（`{ userId }`、`{ orderId }`） | 完整业务数据（用户对象、购物车列表） |
+| **可追踪性** | 差（事件名字符串散落） | 好（DevTools 可看完整 state 变更） |
+| **类型安全** | 弱（事件 payload 无类型） | 强（store state 全量 TS 类型） |
+| **内存泄漏风险** | 高（忘记 off） | 低（单例，组件卸载自动断开订阅） |
+
+**结论**：**95% 的场景用 Pinia**——用户信息、购物车、主题、国际化、权限——所有"状态"都应该放 Pinia。EventBus 只用于**偶发的、通知型事件**：
+- `'user:logged-in'` → 通知各组件刷新
+- `'file:uploaded'` → 通知列表页重新拉取
+- `'cart:cleared'` → 通知 Header 右上角清购物车红点
+
+**当你想往 EventBus 里塞大 payload 时停下来想一想——那应该是 Pinia 的 state。**
+
+</details>
+
+<details>
+<summary><b>5. 【基础】v-model 的本质是什么？Vue 3 相比 Vue 2 有什么增强？</b></summary>
+
+**答案**：
+
+**本质**：`v-model="val"` 是语法糖，展开后是 `:modelValue="val" @update:modelValue="v => (val = v)"`——就是 props 下发 + emit 上抛的组合。
+
+**Vue 2 的局限**：
+- 只能一个 `v-model`（另需要 `.sync` 修饰符 hack）
+- prop 名固定为 `value`，emit 名固定为 `input`（自定义时要声明 `model: { prop, event }`）
+
+**Vue 3 增强**：
+- 支持**多个 v-model**：`v-model:title` + `v-model:content` —— 每个对应独立的 prop/emit 对
+- 默认 prop 名改为 `modelValue`，emit 名改为 `update:modelValue`（更通用，不局限于 input）
+- Vue 3.4+ 新增 **`defineModel`** 宏：一行代码声明双向绑定，自动推导类型
+
+</details>
+
+<details>
+<summary><b>6. 【进阶】写一个 `usePagination` composable，返回分页状态 + 翻页函数 + 每页切换函数。</b></summary>
+
+**答案**：
+
+```ts
+import { ref, computed } from 'vue';
+
+export function usePagination(total = 0, pageSize = 10) {
+  const currentPage = ref(1);
+  const pageSizeRef = ref(pageSize);
+
+  const totalPages = computed(() =>
+    Math.max(1, Math.ceil(total.value / pageSizeRef.value))
+  );
+  const startIndex = computed(() =>
+    (currentPage.value - 1) * pageSizeRef.value
+  );
+  const endIndex = computed(() =>
+    Math.min(total.value, startIndex.value + pageSizeRef.value)
+  );
+
+  const goTo = (page: number) => {
+    currentPage.value = Math.min(
+      Math.max(1, page),
+      totalPages.value
+    );
+  };
+  const next = () => goTo(currentPage.value + 1);
+  const prev = () => goTo(currentPage.value - 1);
+  const setPageSize = (size: number) => {
+    pageSizeRef.value = size;
+    goTo(1); // 每页变化时重置到第 1 页
+  };
+
+  return {
+    currentPage,
+    pageSizeRef,
+    totalPages,
+    startIndex,
+    endIndex,
+    goTo,
+    next,
+    prev,
+    setPageSize,
+  };
+}
+```
+
+**使用**：
+
+```vue
+<script setup>
+const { data } = await fetchList();
+const total = ref(data.length);
+const { currentPage, totalPages, next, prev, setPageSize } = usePagination(total, 20);
+</script>
+
+<template>
+  <!-- 渲染 data.slice(startIndex, endIndex) -->
+  <button @click="prev" :disabled="currentPage === 1">上一页</button>
+  <span>{{ currentPage }} / {{ totalPages }}</span>
+  <button @click="next" :disabled="currentPage === totalPages">下一页</button>
+</template>
+```
+
+</details>
+
+<details>
+<summary><b>7. 【进阶】递归组件如何防止死循环？写一个渲染树结构的递归组件。</b></summary>
+
+**答案**：
+
+**防死循环三要素**：
+1. 每一层递归的输入必须**越来越小**（children 数组长度递减）
+2. 必须有**终止条件**（children 为空时停止递归）
+3. 给组件**起名字**（`name: 'TreeNode'`），template 里用名字引用自己（不能靠 `<script setup>` 的匿名组件自动引用自己——那会解析失败）
+
+```vue
+<!-- TreeNode.vue -->
+<script setup lang="ts">
+// Vue 3.3+ defineOptions 可以在 <script setup> 里命名组件
+defineOptions({ name: 'TreeNode' });
+
+interface TreeNodeData {
+  id: string;
+  label: string;
+  children?: TreeNodeData[];
+}
+defineProps<{ node: TreeNodeData }>();
+</script>
+
+<template>
+  <li>
+    {{ node.label }}
+    <ul v-if="node.children?.length">
+      <!-- ⚠️ 必须用组件名 TreeNode 而非 <script setup> 自动推断的匿名 -->
+      <TreeNode
+        v-for="child in node.children"
+        :key="child.id"
+        :node="child"
+      />
+    </ul>
+  </li>
+</template>
+```
+
+**父组件使用**：
+
+```vue
+<template>
+  <ul>
+    <TreeNode :node="rootData" />
+  </ul>
+</template>
+```
+
+</details>
+
+<details>
+<summary><b>8. 【挑战】Teleport 把 Modal 渲染到 body 有什么好处？为什么不直接在当前组件里写 Modal？</b></summary>
+
+**答案**：
+
+**三大好处**：
+
+1. **避开父级 overflow 裁剪**：
+   ```vue
+   <!-- 父容器有 overflow:hidden 或 overflow:auto -->
+   <div style="overflow:hidden">
+     <!-- Modal 如果是子组件,超出部分会被裁掉! -->
+     <Modal />
+   </div>
+   ```
+   Teleport 到 body 后 Modal 的 DOM 直接挂在 `<body>` 下，不受任何祖先 overflow 影响。
+
+2. **避开层叠上下文陷阱**：
+   如果 Modal 的某个祖先有 `transform` / `filter` / `perspective` 这些属性，会**新建层叠上下文**，导致 Modal 的 `z-index: 99999` 在祖先的层叠上下文里只排第 N，排不到全站最顶。Teleport 到 body 就绕开了所有祖先的层叠上下文。
+
+3. **语义上 Modal 属于页面而非组件**：
+   Modal 是全页面覆盖层，不属于任何一个局部组件。挂到 body 上语义正确，而且可以方便地用全局 CSS 控制（如 `body.modal-open { overflow: hidden }` 锁定滚动）。
+
+**注意**：Teleport 虽然 DOM 位置变了，但它仍然是父组件的子节点——父组件的 `v-if` 控制着 Modal 是否渲染，父组件销毁时 Modal 也会被销毁。不是"独立组件"，只是 DOM 位置移动。
+
+</details>
+
+---
+
+## 57.7 本章避坑清单
+
+| # | 坑 | 后果 | 正确做法 |
+| --- | --- | --- | --- |
+| 1 | **EventBus 忘记 off** | 组件卸载后 handler 仍在响应 → 重复执行 → 内存泄漏 | Vue 3 用 `onScopeDispose(() => bus.off(...))`；或返回 cleanup 函数手动调用 |
+| 2 | **provide/inject 传原始类型** | inject 拿到快照不是引用 → 改了不生效 | provide 传 reactive/ref 对象；inject 后通过 `.value` 或解构拿到引用 |
+| 3 | **递归组件死循环** | children 数组永远不为空 → 栈溢出崩溃 | 每次递归前检查 `children?.length`；组件必须有 name 才能 template 自引用 |
+| 4 | **v-model 的 emit 名写错** | `emit('change', val)` 不会触发 `:modelValue` 更新 | Vue 3 v-model 必须 emit `update:modelValue`；多 v-model 用 `update:xxx` |
+| 5 | **指令忘了 unmounted 清理** | addEventListener 不 remove → 定时器不 clear → 内存泄漏 | 每个 `mounted` 的副作用都要在 `unmounted` 里对应清理 |
+| 6 | **Composable 里硬编码业务逻辑** | `usePermission('admin')` —— 换角色就用不了 | 通过参数传入依赖：`usePermission(userStore, requiredRole)` |
+| 7 | **Teleport Modal 被父级 transform 影响** | 虽然 DOM 在 body，但 z-index 仍被祖先层叠上下文限制 | Modal 要放在**完全无 transform/filter 的祖先链**下，或直接用原生 `<dialog>` 元素 |
+| 8 | **防抖和节流搞混** | 防抖用在 scroll 上 → 滚动停一秒才执行，体验很差 | 防抖 = 停止 N ms 后触发；节流 = 每 N ms 最多触发一次。输入框用防抖，scroll/resize 用节流 |
+| 9 | **HOC 地狱（多层嵌套）** | `withA(withB(withC(Component)))` → props 来源不可追踪 | Vue 3 下首选 composables；HOC 只在包装 DOM 元素或横切注入时使用 |
+| 10 | **容器组件里写 UI 渲染** | 数据获取逻辑和 template 混在一起 → 改数据牵连 UI 改 UI 牵连数据 | 严格执行容器/展示分离：容器只返回 `<Presentational v-bind="props" />`，不写任何 `<div>` |

@@ -1,0 +1,231 @@
+<!-- 文件: examples/19-09-indexeddb.html —— [浏览器] IndexedDB:结构化仓储、索引、游标与事务 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>19-09 IndexedDB 仓储模式演示</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #1e293b; }
+        h2 { margin-bottom: 4px; }
+        .hint { color: #64748b; font-size: 13px; line-height: 1.7; }
+        button { padding: 8px 14px; margin: 4px 8px 4px 0; cursor: pointer; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; }
+        button:hover { background: #f1f5f9; }
+        #log { margin-top: 16px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; height: 320px; overflow: auto; font-size: 13px; background: #f8fafc; line-height: 1.7; }
+        .ok { color: #15803d; }
+        .err { color: #b91c1c; }
+        .info { color: #2563eb; }
+    </style>
+</head>
+<body>
+    <h2>IndexedDB 仓储模式演示</h2>
+    <p class="hint">
+        打开本页后依次点击按钮,观察下方日志。数据库名 <code>demo-bookshop</code>(可在 DevTools → Application → IndexedDB 查看实际数据)。
+    </p>
+    <p>
+        <button id="init">① 开库 + 升级建表 + 写入种子</button>
+        <button id="all">② getAll 查全部</button>
+        <button id="byIndex">③ 索引查 category=tech</button>
+    </p>
+    <p>
+        <button id="cursor">④ 游标逐条遍历</button>
+        <button id="batch">⑤ 单事务批量涨价(原子提交)</button>
+        <button id="fail">⑥ 制造约束错误(看事务回滚)</button>
+    </p>
+    <div id="log"></div>
+
+    <script>
+        'use strict';
+
+        const DB_NAME = 'demo-bookshop';
+        const DB_VERSION = 1; // 递增版本号才会触发 onupgradeneeded
+        const STORE = 'books';
+
+        const logEl = document.querySelector('#log');
+        function log(msg, type = '') {
+            const line = document.createElement('div');
+            line.className = type;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logEl.appendChild(line);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        const SEED = [
+            { isbn: 'A-001', title: 'JS 高级程序设计', category: 'tech', price: 129 },
+            { isbn: 'A-002', title: '活着', category: 'literature', price: 39 },
+            { isbn: 'A-003', title: 'CSS 揭秘', category: 'tech', price: 69 },
+        ];
+
+        // ---- 1. 开库:onupgradeneeded 是唯一能创建/修改 objectStore 的地方 ----
+        function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                request.onupgradeneeded = (event) => {
+                    log(`触发升级:旧版本 ${event.oldVersion} → 新版本 ${event.newVersion}`, 'info');
+                    const db = request.result;
+                    if (!db.objectStoreNames.contains(STORE)) {
+                        // keyPath:内联主键,记录必须含该字段;主键唯一性由引擎保证
+                        const store = db.createObjectStore(STORE, { keyPath: 'isbn' });
+                        // 二级索引:名字 + 索引字段路径 + 是否唯一
+                        store.createIndex('by-category', 'category', { unique: false });
+                        store.createIndex('by-title', 'title', { unique: true });
+                        log('已创建 objectStore books 及索引 by-category / by-title', 'ok');
+                    }
+                };
+
+                request.onsuccess = () => {
+                    log('数据库连接成功', 'ok');
+                    resolve(request.result);
+                };
+                request.onblocked = () => log('开库被其他标签页阻塞,请关闭旧页面后重试', 'err');
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        // ---- 2. IDBRequest → Promise 的通用转换 ----
+        function whenDone(request) {
+            return new Promise((resolve, reject) => {
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        // ---- 3. 仓储(Repository)封装:业务代码只跟方法打交道,不接触事务细节 ----
+        class BookRepository {
+            constructor(db) {
+                this.db = db;
+            }
+
+            store(mode) {
+                // readonly / readwrite;事务在本次事件循环结束后若不再有请求会自动提交
+                return this.db.transaction(STORE, mode).objectStore(STORE);
+            }
+
+            add(book) {
+                // add:主键已存在 → ConstraintError(首次写入用它,能发现重复数据)
+                return whenDone(this.store('readwrite').add(book));
+            }
+
+            put(book) {
+                // put:存在则覆盖、不存在则插入(更新场景用它)
+                return whenDone(this.store('readwrite').put(book));
+            }
+
+            get(isbn) {
+                return whenDone(this.store('readonly').get(isbn));
+            }
+
+            all() {
+                return whenDone(this.store('readonly').getAll());
+            }
+
+            byCategory(category) {
+                // 走索引而非全表扫描
+                const index = this.store('readonly').index('by-category');
+                return whenDone(index.getAll(IDBKeyRange.only(category)));
+            }
+
+            raisePrices(rate) {
+                // ⚠️ 多条写入必须放进同一个事务:任一请求失败 → 整个事务 abort,已写的也回滚(原子性)
+                return new Promise((resolve, reject) => {
+                    const tx = this.db.transaction(STORE, 'readwrite');
+                    const store = tx.objectStore(STORE);
+                    // ⚠️ 另一个经典坑:事务内的请求必须"同步连续"发出,不能在中间插入 await
+                    //    —— 事件循环一旦空转,事务会被自动提交,再发请求就报错
+                    const getAllReq = store.getAll();
+                    getAllReq.onsuccess = () => {
+                        getAllReq.result.forEach((book) => {
+                            store.put({ ...book, price: Math.round(book.price * rate) });
+                        });
+                    };
+                    tx.oncomplete = () => resolve('全部提交');
+                    tx.onerror = () => reject(tx.error);
+                    tx.onabort = () => reject(tx.error || new Error('事务已中止,数据回滚'));
+                });
+            }
+        }
+
+        let db = null;
+        let repo = null;
+
+        document.querySelector('#init').onclick = async () => {
+            try {
+                if (!db) {
+                    db = await openDB();
+                    repo = new BookRepository(db);
+                }
+                for (const book of SEED) {
+                    try {
+                        await repo.add(book);
+                        log(`写入成功:${book.isbn} ${book.title}`, 'ok');
+                    } catch (e) {
+                        log(`add 拒绝重复主键 ${book.isbn}:${e.name}(想覆盖请改用 put)`, 'err');
+                    }
+                }
+            } catch (e) {
+                log('初始化失败:' + e.message, 'err');
+            }
+        };
+
+        document.querySelector('#all').onclick = async () => {
+            if (!db) return log('请先点 ① 初始化', 'err');
+            const books = await repo.all();
+            log(`getAll 共 ${books.length} 条:`);
+            books.forEach((b) => log(`   ${b.isbn} | ${b.title} | ${b.category} | ¥${b.price}`));
+        };
+
+        document.querySelector('#byIndex').onclick = async () => {
+            if (!db) return log('请先点 ① 初始化', 'err');
+            const books = await repo.byCategory('tech');
+            log(`索引 by-category=tech 命中 ${books.length} 条:${books.map((b) => b.title).join('、')}`, 'ok');
+        };
+
+        document.querySelector('#cursor').onclick = async () => {
+            if (!db) return log('请先点 ① 初始化', 'err');
+            // 用事件回调版游标(官方推荐范式:onsuccess 内 continue 推进,避免 Promise 包裹游标)
+            const request = repo.store('readonly').openCursor();
+            let count = 0;
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (cursor) {
+                    count++;
+                    log(`游标访问 #${count}:${cursor.value.title}`, 'info');
+                    cursor.continue();
+                } else {
+                    log(`游标遍历结束,共 ${count} 条`, 'ok');
+                }
+            };
+            request.onerror = () => log('游标错误:' + request.error, 'err');
+        };
+
+        document.querySelector('#batch').onclick = async () => {
+            if (!db) return log('请先点 ① 初始化', 'err');
+            try {
+                const result = await repo.raisePrices(1.1);
+                log(`单事务批量涨价完成:${result}(再点 ② 查看价格变化)`, 'ok');
+            } catch (e) {
+                log('批量事务失败,已整体回滚:' + e.message, 'err');
+            }
+        };
+
+        document.querySelector('#fail').onclick = async () => {
+            if (!db) return log('请先点 ① 初始化', 'err');
+            // by-title 是唯一索引:插入两条同名记录 → ConstraintError → 同事务内其他写入一并回滚
+            try {
+                await new Promise((resolve, reject) => {
+                    const tx = db.transaction(STORE, 'readwrite');
+                    const store = tx.objectStore(STORE);
+                    store.put({ isbn: 'B-001', title: '全新书名', category: 'tech', price: 10 }); // 本应成功
+                    store.put({ isbn: 'B-002', title: '活着', category: 'literature', price: 20 }); // 撞唯一索引
+                    tx.oncomplete = resolve;
+                    tx.onabort = () => reject(tx.error);
+                    tx.onerror = () => reject(tx.error);
+                });
+            } catch (e) {
+                log(`预期失败:${e.name} —— B-001 也随事务回滚,点 ② 验证它不存在`, 'err');
+            }
+        };
+    </script>
+</body>
+</html>

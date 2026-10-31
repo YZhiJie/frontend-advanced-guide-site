@@ -1,0 +1,646 @@
+# 第五十九部分 · 前端监控与可观测性闭环（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/59-monitoring-observability
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第五十九部分 · 前端监控与可观测性闭环
+
+> 🧭 [返回总目录](./README.md)｜关联章节：[第十一部分 · 前端监控与错误上报](./11-patterns-architecture.md#_11-2-前端监控与错误上报) · [第四十六部分 · 前端错误捕获处理方案](./46-error-handling.md) · [第三部分 · 性能优化体系](./03-engineering.md#_3-5-性能优化体系)
+
+> 💡 **本章特色**：不重复 11.2 的 SDK 骨架和 46 的错误捕获，聚焦三个缺口——① 生产级监控 SDK 封装（sourcemap 自动上传、隐私脱敏、采样策略）② 会话回放实现（DOM 录制 + 离线缓存）③ 线上故障排查 SOP（从告警到止血的 step-by-step）。
+
+## 本部分内容
+
+- [59.1 可观测性三大支柱](#_59-1-可观测性三大支柱)
+- [59.2 Web Vitals 生产级采集](#_59-2-web-vitals-生产级采集)
+- [59.3 错误指纹聚合与分级上报](#_59-3-错误指纹聚合与分级上报)
+- [59.4 用户行为轨迹与会话回放](#_59-4-用户行为轨迹与会话回放)
+- [59.5 线上故障排查 SOP](#_59-5-线上故障排查-sop)
+- [59.6 自测题](#_59-6-自测题)
+- [59.7 本章避坑清单](#_59-7-本章避坑清单)
+
+```mermaid
+flowchart TB
+    subgraph collect[采集层]
+        A1[window.onerror] & A2[unhandledrejection] & A3[PerformanceObserver] & A4[Fetch/XHR Hook] & A5[DOM MutationObserver]
+    end
+    subgraph sdk[SDK 处理层]
+        B[归一化 Normalize] --> C[指纹 Fingerprint<br/>聚类去重]
+        C --> D[分级 + 采样] --> E[批量队列<br/>sendBeacon 兜底]
+    end
+    subgraph server[服务端平台]
+        F[接收网关] --> G[sourcemap 还原] --> H[聚类 Issue] --> I[告警/看板]
+    end
+    subgraph closure[排查闭环]
+        J[收到告警] --> K{分级} --> L[P0 紧急]
+        L --> M[定位 → 止血 → 发布修复]
+    end
+    collect --> sdk --> server --> closure
+```
+
+---
+
+## 59.1 可观测性三大支柱
+
+### 59.1.1 概念解析
+
+JD 要求的"错误埋点、性能采集、用户行为监控"对应业界的可观测性三大支柱——**Logs（日志）、Metrics（指标）、Traces（追踪）**。前端不是后端，三大支柱有不同的落地点：
+
+| 支柱 | 后端含义 | 前端映射 | 落地形式 |
+| --- | --- | --- | --- |
+| **Logs（日志）** | 结构化日志 / 异常堆栈 | 错误日志（JS 异常、资源加载失败、Promise 未捕获） | error 事件 + sourcemap 还原后的堆栈 |
+| **Metrics（指标）** | QPS / P99 延迟 / CPU 使用率 | Web Vitals + 自定义业务指标（接口耗时、组件渲染耗时） | PerformanceObserver + `performance.mark/measure` |
+| **Traces（追踪）** | 请求全链路 traceId | 用户会话内的操作链（click → fetch → render） | 会话回放 + 行为轨迹栈 |
+
+**核心洞察**：Logs 回答"哪里炸了"，Metrics 回答"整体趋势怎么样"，Traces 回答"用户刚才做了什么才触发的"。三者缺一不可——只看 Metrics 的"QPS 从 500 降到 50"，你不知道是代码 bug 还是用户离开；只看 Logs 的"Uncaught TypeError"，你不知道这个错误是影响 1 个用户还是 10 万个；只有 Traces 能把"哪个用户、做了什么操作、走到哪一步炸的"串起来。
+
+---
+
+## 59.2 Web Vitals 生产级采集
+
+### 59.2.1 概念解析
+
+11.2 节已经给出了 Web Vitals 指标速查表。本节关注**生产环境落地时的三个核心问题**：采样策略、归因分析、数据上报。
+
+**采样策略**：全站 10 万 DAU 不可能全量上报 Web Vitals——没那么多存储。采样比例按阶段递进：
+
+| 阶段 | 采样比例 | 目的 |
+| --- | --- | --- |
+| 上线第 1 周 | **100%** | 新功能刚上，全量收集快速发现问题 |
+| 稳定期 | **1% ~ 5%** | 足够反映趋势，控制存储成本 |
+| 性能专项期 | **100%** | 专项优化前后对比，需要足够统计显著 |
+
+**归因分析**：单纯一个 `LCP = 3.2s` 没用——你需要知道**为什么**。归因维度：
+
+```mermaid
+flowchart LR
+    A[LCP 3.2s] --> B{归因维度}
+    B --> C[页面路径<br/>/dashboard vs /login]
+    B --> D[设备类型<br/>移动端 vs PC]
+    B --> E[网络类型<br/>4G vs WiFi]
+    B --> F[地区<br/>华东 vs 海外]
+    B --> G[LCP 元素类型<br/>图片 vs 文本]
+```
+
+### 59.2.2 完整代码示例
+
+```ts
+// 文件: examples/59-01-web-vitals-collector.ts —— Web Vitals 生产级采集器（概念验证）
+
+type VitalName = "LCP" | "INP" | "CLS" | "FCP" | "TTFB";
+
+interface VitalReport {
+  name: VitalName;
+  value: number; // 毫秒（CLS 无单位）
+  rating: "good" | "needs-improvement" | "poor";
+  url: string;
+  pathname: string;
+  device: string;
+  connection: string;
+  lcpElementType?: "image" | "text" | "other";
+  timestamp: number;
+  sessionId: string;
+}
+
+const THRESHOLDS: Record<VitalName, [number, number]> = {
+  LCP: [2500, 4000],
+  INP: [200, 500],
+  CLS: [0.1, 0.25],
+  FCP: [1800, 3000],
+  TTFB: [800, 1800],
+};
+
+function rateVital(name: VitalName, value: number): VitalReport["rating"] {
+  const [good, poor] = THRESHOLDS[name];
+  if (name === "CLS") {
+    return value <= good ? "good" : value <= poor ? "needs-improvement" : "poor";
+  }
+  return value <= good ? "good" : value <= poor ? "needs-improvement" : "poor";
+}
+
+/** 采样判定:基于 sessionId 的稳定哈希,不随刷新变化 */
+function shouldSample(sessionId: string, sampleRate: number): boolean {
+  let hash = 5381;
+  for (let i = 0; i < sessionId.length; i++) {
+    hash = (hash * 33) ^ sessionId.charCodeAt(i);
+  }
+  return Math.abs(hash) % 100 < sampleRate * 100;
+}
+
+function detectDevice(): string {
+  // Node 环境占位,浏览器里用 navigator.userAgent
+  return typeof navigator !== "undefined"
+    ? /iPhone|iPad/.test(navigator.userAgent)
+      ? "iOS"
+      : /Android/.test(navigator.userAgent)
+      ? "Android"
+      : "PC"
+    : "Node";
+}
+
+/** ============ 逻辑测试（Node 环境） ============ */
+export function runVitalsTests() {
+  // rateVital 阈值验证
+  console.assert(rateVital("LCP", 2000) === "good", "LCP 2s 应为 good");
+  console.assert(rateVital("LCP", 3000) === "needs-improvement", "LCP 3s 应需改进");
+  console.assert(rateVital("LCP", 5000) === "poor", "LCP 5s 应为 poor");
+
+  console.assert(rateVital("INP", 150) === "good", "INP 150ms 应为 good");
+  console.assert(rateVital("CLS", 0.05) === "good", "CLS 0.05 应为 good");
+  console.assert(rateVital("CLS", 0.3) === "poor", "CLS 0.3 应为 poor");
+
+  // 采样稳定性验证（同一 sessionId 始终命中或不命中）
+  const sid = "session-abc123";
+  const r1 = shouldSample(sid, 0.5);
+  const r2 = shouldSample(sid, 0.5);
+  console.assert(r1 === r2, "采样应基于稳定哈希,同一 session 结果应一致");
+
+  // 不同 session 应混合
+  const results = new Set<boolean>();
+  for (let i = 0; i < 100; i++) {
+    results.add(shouldSample(`sid-${i}`, 0.5));
+  }
+  console.assert(results.size === 2, "100 个不同 session 应覆盖 true/false 两种结果");
+
+  // 低采样率验证（0.1% 时 1000 个里约 1 个命中）
+  let hit = 0;
+  for (let i = 0; i < 10000; i++) {
+    if (shouldSample(`low-${i}`, 0.001)) hit++;
+  }
+  console.assert(hit > 0 && hit < 20, `0.1% 采样应命中约 10 个, 实际 ${hit}`);
+
+  console.log("✅ Web Vitals 采集器逻辑测试通过");
+}
+
+runVitalsTests();
+```
+
+> 运行方式：`npx tsx examples/59-01-web-vitals-collector.ts`。
+
+### 59.2.3 最佳实践
+
+1. **采样要稳定哈希，不要随机**：`Math.random() < 0.05` 会导致同一用户每次刷新都重新采样——今天上报明天不上报，监控曲线抖得没法看。基于 sessionId 的哈希确保**同一用户整个会话的采样结果一致**。
+2. **LCP 要拿 renderTime 不要 startTime**：有些资源（图片、字体）用 `startTime` 会返回 0（异步加载），正确做法是取 `renderTime ?? startTime`。这是 Web Vitals 采集最容易踩的坑。
+3. **CLS 要排除 hadRecentInput**：用户点击后产生的 layout-shift（比如展开面板）不算"布局偏移"——只有没有用户输入的"意外偏移"才算 CLS。
+4. **INP 替代 FID**：FID 只记录**第一次**用户交互延迟，INP 记录**整个会话中最差的**那次——运维看板上 INP 才是真实体验。
+5. **所有指标都要附载归因维度**：pathname、device、connection——没有归因维度的数字是没用的。"LCP 平均 3.2s" 不如 "/dashboard + 移动端 + 4G 下 LCP 中位数 4.5s"。
+
+---
+
+## 59.3 错误指纹聚合与分级上报
+
+### 59.3.1 概念解析
+
+JD 要求"线上故障快速排查"——如果监控平台上是 10 万条一模一样的 "Uncaught TypeError"，你根本无从下手。**指纹聚合**把一万条同类错误压缩成一条，**分级上报**决定哪些错误该马上报警、哪些攒着慢慢看。
+
+**错误指纹 = 错误类型 + 归一化后的信息 + 关键堆栈帧（sourcemap 还原后）**
+
+### 59.3.2 分级上报策略
+
+| 错误来源 | 等级 | 上报频率 | 告警 | 说明 |
+| --- | --- | --- | --- | --- |
+| JS 运行时异常（未捕获） | **P0-Critical** | 全量 + 5s 限流 1 次 | ✅ 立即 | 直接影响用户操作 |
+| Promise 未捕获 | **P1-High** | 全量 + 10s 限流 1 次 | ✅ 立即 | 可能导致后续功能异常 |
+| 资源加载失败（JS/CSS 404） | **P0-Critical** | 全量 | ✅ 立即 | chunk 加载失败 = 白屏 |
+| 接口 5xx | **P1-High** | 采样 10% + 60s 限流 | ⚠️ 聚合计数到阈值后告警 | 后端问题多了会淹没问题 |
+| 接口 4xx | **P2-Medium** | 采样 1% | ❌ 不告警 | 多为用户侧 |
+| Performance 问题 | **P3-Low** | 全量 Metrics | ❌ 趋势看板 | 长期优化参考 |
+
+### 59.3.3 完整代码示例
+
+```ts
+// 文件: examples/59-02-error-fingerprint.ts —— 错误指纹 + 分级上报逻辑
+
+import { createHash } from "crypto";
+
+interface NormalizedError {
+  type: string;
+  message: string;
+  stack: string[];
+}
+
+/** 堆栈归一化:去掉文件路径和行号,只保留函数名 + 文件名 */
+function normalizeStack(stackLines: string[]): string[] {
+  return stackLines
+    .map((line) => {
+      const match = line.match(
+        /at\s+(.+?)\s+\((.+?):\d+:\d+\)|at\s+(.+?):\d+:\d+/
+      );
+      if (match) {
+        const fn = match[1] || "(anonymous)";
+        const file = match[2] || match[3] || "unknown";
+        const fileName = file.split("/").pop()?.replace(/\.[a-f0-9]{8,}/g, "") ?? file;
+        return `${fn}@${fileName}`;
+      }
+      return line.trim();
+    })
+    .slice(0, 5);
+}
+
+/** 错误指纹 = type + message(归一化) + 关键堆栈帧 */
+function computeFingerprint(err: NormalizedError): string {
+  const normalizedMsg = err.message
+    .replace(/\b\d{10,}\b/g, "<NUM>")
+    .replace(/[a-f0-9]{32,}/g, "<HEX>")
+    .replace(/https?:\/\/[^\s]*/g, "<URL>")
+    .replace(/"[^"]*"/g, "\"<STR>\"");
+
+  const key = `${err.type}:${normalizedMsg}:${err.stack.join("|")}`;
+  return createHash("md5").update(key).digest("hex");
+}
+
+/** 限流:同一个 fingerprint 在 window 时间内只上报 1 次 */
+class RateLimiter {
+  private sent = new Map<string, number>();
+  constructor(private windowMs: number) {}
+
+  shouldSend(fingerprint: string): boolean {
+    const now = Date.now();
+    const last = this.sent.get(fingerprint) ?? 0;
+    if (now - last > this.windowMs) {
+      this.sent.set(fingerprint, now);
+      return true;
+    }
+    return false;
+  }
+}
+
+/** ============ 完整流程演示 ============ */
+export function runFingerprintDemo() {
+  // 模拟两个同类错误（同原因不同位置）
+  const stackA = [
+    "    at useUserData (hooks-abcd.js:1:2345)",
+    "    at renderWithHooks (renderer-efgh.js:1:5678)",
+    "    at render (react-dom-ijkl.js:1:1234)",
+  ];
+  const stackB = [
+    "    at useUserData (hooks-abcd.js:1:3456)", // 不同行号
+    "    at renderWithHooks (renderer-efgh.js:1:5678)",
+    "    at render (react-dom-ijkl.js:1:1234)",
+  ];
+
+  const fpA = computeFingerprint({
+    type: "TypeError",
+    message: "Cannot read properties of undefined (reading 'map')",
+    stack: normalizeStack(stackA),
+  });
+  const fpB = computeFingerprint({
+    type: "TypeError",
+    message: "Cannot read properties of undefined (reading 'map')",
+    stack: normalizeStack(stackB),
+  });
+
+  console.assert(fpA === fpB, "同类错误应生成相同指纹");
+  console.log(`指纹一致 ✅  fp=${fpA}`);
+
+  // 限流测试
+  const limiter = new RateLimiter(5000);
+  console.assert(limiter.shouldSend(fpA), "第一次应发送");
+  console.assert(!limiter.shouldSend(fpA), "窗口内重复应被限流");
+
+  // message 归一化:动态值替换
+  const dynamicMsg = "GET /api/users?userId=1234567890 failed with session=abc123def4567890abcdef1234567890";
+  const normalized = dynamicMsg
+    .replace(/\b\d{10,}\b/g, "<NUM>")
+    .replace(/[a-f0-9]{32,}/g, "<HEX>");
+  console.assert(
+    !normalized.includes("1234567890") && !normalized.includes("abc123def456"),
+    "动态值应被归一化"
+  );
+
+  // 完全不同的错误应生成不同指纹
+  const fpDifferent = computeFingerprint({
+    type: "SyntaxError",
+    message: "Unexpected token '}'",
+    stack: normalizeStack(["    at parse (parser.js:10:5)"]),
+  });
+  console.assert(fpDifferent !== fpA, "不同错误应生成不同指纹");
+
+  console.log("✅ 错误指纹聚合与分级上报全部测试通过");
+}
+
+runFingerprintDemo();
+```
+
+> 运行方式：`npx tsx examples/59-02-error-fingerprint.ts`。
+
+### 59.3.4 最佳实践
+
+1. **指纹一定要在 sourcemap 还原之后计算**：还原前的堆栈帧里有 chunk hash，每次构建都会变 → 同一源码在不同版本里 fingerprint 不同 → 同一类错误被拆成 N 个 issue。正确流程：前端上报 → 服务端 sourcemap 还原 → 还原后堆栈算指纹 → 聚类。
+2. **message 归一化是指纹的一半**：用户 ID、时间戳、随机 URL 参数都要替换成占位符，否则 `userId=123` 和 `userId=456` 会被当成两个错误。
+3. **限流窗口按等级区分**：P0 错误 5 秒窗口（但本地 LRU 队列缓存，网络恢复后批量补传）；P2 错误可以 60 秒。限流是"上报频率控制"，不是"数据丢弃"。
+4. **sourcemap CI 自动上传**：每次构建 CI 里加一步 `sentry-cli sourcemaps upload --release=x.y.z`——这样服务端能自动还原堆栈，不依赖人工。
+5. **API 错误要附带接口名和参数，但参数要脱敏**（password/token 字段换成 `***`）——不然后果不堪设想。
+
+---
+
+## 59.4 用户行为轨迹与会话回放
+
+### 59.4.1 概念解析
+
+JD 要求的"快速排查"在**复现困难**时（"我们这测不出来，但用户那边天天出"）需要**会话回放**——把用户在页面上的所有交互录下来，像视频一样重放，看到底哪一步触发的错误。
+
+**会话回放 ≠ 录视频**。真正的会话回放录的是**交互序列 + DOM 快照**——体积小（5KB~50KB vs 5MB/分钟）、可搜索、合法合规。
+
+### 59.4.2 核心模块
+
+| 模块 | 职责 | 实现要点 |
+| --- | --- | --- |
+| **事件采集器** | click / input / scroll / route 切换 | addEventListener 捕获，timestamp 记录顺序 |
+| **DOM 变更监听** | 框架批量更新后的真实 DOM 状态 | MutationObserver 但要 200ms 防抖（批量更新合并） |
+| **敏感区域检测** | password 输入框 / credit card 自动暂停 | `input[type="password"]` + `data-sensitive="true"` |
+| **增量快照** | 只存变化的部分 | 前后状态 diff，LRU 缓存最近 50 帧 |
+| **触发上传** | 错误发生时 / 页面卸载时 | P0 错误立即上传 + `sendBeacon` 兜底 |
+
+### 59.4.3 完整代码示例
+
+```ts
+// 文件: examples/59-03-session-recorder.ts —— 会话回放录制器核心逻辑
+
+interface ReplayEvent {
+  type: "click" | "input" | "scroll" | "mutation" | "route";
+  timestamp: number;
+  payload: unknown;
+  selector?: string;
+}
+
+/** 敏感元素自动暂停检测 */
+function isSensitiveInput(type: string, name: string): boolean {
+  if (type === "password") return true;
+  if (/credit|card|cvv|secret|token|pass/i.test(name)) return true;
+  return false;
+}
+
+/** 录制器核心类 */
+export class SessionRecorder {
+  private events: ReplayEvent[] = [];
+  private isPaused = false;
+  private readonly MAX_EVENTS = 5000;
+
+  recordUserEvent(event: Omit<ReplayEvent, "timestamp">) {
+    if (this.isPaused) return;
+    this.events.push({ ...event, timestamp: Date.now() });
+    if (this.events.length > this.MAX_EVENTS) {
+      this.events = this.events.slice(-this.MAX_EVENTS);
+    }
+  }
+
+  // 浏览器里监听 input 时调用
+  checkAndPauseOnSensitive(elAttrs: { type?: string; name?: string }) {
+    if (isSensitiveInput(elAttrs.type || "", elAttrs.name || "")) {
+      this.isPaused = true;
+    } else {
+      this.isPaused = false;
+    }
+  }
+
+  export(): string {
+    return JSON.stringify({
+      version: 1,
+      events: this.events,
+      meta: { recordedAt: Date.now(), eventCount: this.events.length },
+    });
+  }
+}
+
+/** ============ 验证测试 ============ */
+export function runRecorderTests() {
+  const rec = new SessionRecorder();
+
+  // 记录事件
+  rec.recordUserEvent({ type: "click", payload: { selector: "#submit-btn" } });
+  rec.recordUserEvent({ type: "input", payload: { selector: "#search" } });
+  rec.recordUserEvent({ type: "route", payload: { to: "/dashboard" } });
+
+  const exported = JSON.parse(rec.export());
+  console.assert(exported.events.length === 3, `应记录 3 个事件, 实际 ${exported.events.length}`);
+  console.assert(exported.version === 1, "导出应有 version");
+
+  // 敏感输入检测
+  console.assert(isSensitiveInput("password", "pwd"), "password 类型应为敏感");
+  console.assert(isSensitiveInput("text", "creditCard"), "name 含 credit 应为敏感");
+  console.assert(!isSensitiveInput("text", "username"), "username 应为非敏感");
+
+  // 暂停期间不应记录
+  const rec2 = new SessionRecorder();
+  const sensitiveEl = { type: "password", name: "pwd" };
+  rec2.checkAndPauseOnSensitive(sensitiveEl);
+  rec2.recordUserEvent({ type: "click", payload: { selector: "#save" } });
+  const pausedExport = JSON.parse(rec2.export());
+  console.assert(pausedExport.events.length === 0, "暂停期间不应记录任何事件");
+
+  // 非敏感元素恢复
+  rec2.checkAndPauseOnSensitive({ type: "text", name: "username" });
+  rec2.recordUserEvent({ type: "click", payload: { selector: "#save" } });
+  const resumedExport = JSON.parse(rec2.export());
+  console.assert(resumedExport.events.length === 1, "恢复后应继续记录");
+
+  console.log("✅ 会话回放录制器逻辑测试通过");
+}
+
+runRecorderTests();
+```
+
+> 运行方式：`npx tsx examples/59-03-session-recorder.ts`。
+
+### 59.4.4 最佳实践
+
+1. **隐私合规是红线**：password/credit card 输入框自动暂停录制；`data-sensitive` 标记的 DOM 节点 mutation 跳过；录制数据只上报给自家后端。
+2. **只在错误发生时上传**：不要每秒都上传——① 捕获到 P0 错误立即上传；② 用户主动反馈 bug 时上传；③ 页面卸载时 sendBeacon 兜底最近 50 个事件。
+3. **MutationObserver 加防抖**：快速连续 DOM 变更（框架批量更新）会触发几十上百条 record——每 200ms 合并一次再写入队列。
+4. **回放播放器支持时间轴拖拽**：像视频播放器一样有进度条，跳到"那个用户说点了提交之后就炸了"的那个时间点。
+
+---
+
+## 59.5 线上故障排查 SOP
+
+### 59.5.1 SOP 六步法
+
+JD 要求的"快速排查、紧急修复"是有**标准操作流程**可依的，不是经验堆砌。
+
+```mermaid
+flowchart TD
+    A[收到告警] --> B{分级}
+    B -->|P0| C[1. 确认影响面<br/>影响多少人?哪些页面?哪些用户?]
+    B -->|P1| D[记录并排入队列]
+    C --> E[2. 复现问题<br/>会话回放 / DevTools / 其他监控信号]
+    E --> F[3. 定位根因<br/>sourcemap 还原堆栈 + 最近一次发布?]
+    F --> G[4. 止血<br/>回滚 / Feature Flag 熔断 / Hotfix]
+    G --> H[5. 验证 + 发布<br/>监控恢复? 灰度?]
+    H --> I[6. RCA 复盘<br/>根因 + 预防措施]
+```
+
+### 59.5.2 每步详解
+
+**第 1 步：确认影响面（1~2 分钟）**
+
+三个关键问题：① 影响多少用户（session 数 / DAU 比例）？② 哪些页面受影响？③ 哪些用户受影响（移动端 vs PC？iOS Safari 专属？某个版本？）——这直接决定根因方向和止血优先级。
+
+**第 2 步：复现问题（2~5 分钟）**
+
+优先级：① 会话回放（比自己复现快 10 倍）→ ② DevTools 模拟相同 UA/网络 → ③ 看监控关联信号（LCP、接口耗时、浏览器版本分布）。
+
+**第 3 步：定位根因（5~10 分钟）**
+
+根因排查优先级：
+
+| 嫌疑方向 | 快速验证手段 |
+| --- | --- |
+| 最近一次发布引入 | 错误首次出现时间点 vs 发布时间（< 30 分钟高度可疑） |
+| CDN / 静态资源问题 | `curl -I` 直接请求 404 的 chunk |
+| 后端接口变更 | 错误堆栈是否走到 fetch 层？接口 response 是 4xx/5xx？ |
+| 浏览器兼容性 | 只在 iOS Safari 出现？只在 Chrome 最新版？ |
+
+**第 4 步：止血（1~5 分钟）**
+
+| 手段 | 适用场景 | 操作 |
+| --- | --- | --- |
+| **回滚上一版本** | 最近一次发布的明确回归 | CI/CD rollback，5 分钟完成 |
+| **Feature Flag 熔断** | 新功能有 flag 开关 | 后台关掉，< 1 分钟生效 |
+| **Hotfix 发布** | 回滚不了（新版本有依赖） | 改 bug → CI 过 → 灰度 10% → 100% |
+
+**第 5 步：验证 + 发布（持续监控）**
+
+止血后盯着监控大盘：错误数是否持续下降到正常？新告警有没有出现？Hotfix 发布后还要灰度发布（10% → 30 分钟观察 → 100%）。
+
+**第 6 步：RCA 复盘（事后 24h 内）**
+
+**五问法**：① 根因是什么？（不要说"代码有 bug"，要说"utils.ts:42 `arr.map` 前没判空"）② 为什么测试没发现？③ 为什么上线没拦住？④ 怎么预防？⑤ **这次漏了哪个监控信号？**
+
+### 59.5.3 完整代码示例
+
+```ts
+// 文件: examples/59-04-incident-simulator.ts —— CDN 同步未完成就部署 HTML 的故障模拟
+
+interface IncidentContext {
+  chunkName: string;
+  cdnSynced: boolean;
+  htmlUpdated: boolean;
+}
+
+/** 故障触发条件 */
+function chunk404(ctx: IncidentContext): boolean {
+  return ctx.htmlUpdated && !ctx.cdnSynced;
+}
+
+interface SOPAction {
+  step: number;
+  action: string;
+  timeSpentMin: number;
+}
+
+function runSOP(ctx: IncidentContext, canRollback: boolean): SOPAction[] {
+  const actions: SOPAction[] = [];
+  actions.push({ step: 1, action: "监控大盘:chunk 404 → 10 分钟 3000 session 全量用户 P0", timeSpentMin: 1 });
+  actions.push({ step: 2, action: "curl -I chunk → 404; curl -I index.html → 200 引用新 chunk", timeSpentMin: 2 });
+  actions.push({ step: 3, action: "CI 日志:CDN purge 还没跑完就部署了 HTML", timeSpentMin: 3 });
+  if (canRollback) {
+    actions.push({ step: 4, action: "CI rollback 上一版本", timeSpentMin: 2 });
+  } else {
+    actions.push({ step: 4, action: "等 CDN purge 完成,自动重部署 HTML", timeSpentMin: 5 });
+  }
+  actions.push({ step: 5, action: "监控大盘:chunk 404 归零 → 验证完成", timeSpentMin: 5 });
+  actions.push({ step: 6, action: "RCA:把 HTML 部署移到 CDN purge 之后 + purge 超时告警", timeSpentMin: 15 });
+  return actions;
+}
+
+export function runIncidentSimulation() {
+  // 故障场景
+  const incidentCtx: IncidentContext = {
+    chunkName: "chunk-abcd1234.js",
+    cdnSynced: false,
+    htmlUpdated: true,
+  };
+  console.assert(chunk404(incidentCtx), "应触发 chunk 404");
+
+  const steps = runSOP(incidentCtx, true);
+  console.assert(steps.length === 6, `SOP 应有 6 步, 实际 ${steps.length}`);
+  const total = steps.reduce((s, x) => s + x.timeSpentMin, 0);
+  console.log(`P0 故障预计总耗时:${total} 分钟 (止血:前 4 步约 ${steps.slice(0, 4).reduce((s, x) => s + x.timeSpentMin, 0)} 分钟)`);
+
+  // 正常场景不应触发
+  const normalCtx: IncidentContext = { chunkName: "chunk-abcd1234.js", cdnSynced: true, htmlUpdated: true };
+  console.assert(!chunk404(normalCtx), "正常部署不应触发故障");
+
+  console.log("✅ 故障排查 SOP 流程模拟通过");
+}
+
+runIncidentSimulation();
+```
+
+> 运行方式：`npx tsx examples/59-04-incident-simulator.ts`。
+
+### 59.5.4 最佳实践
+
+1. **告警分级是组织共识**：什么是 P0/P1/P2 必须有书面定义，不同业务标准不同（支付系统"1 分钟没回调"是 P0，内部工具"搜索不准"可能是 P2）。
+2. **回滚按钮必须 click-safe**：需要输入 release id + SRE 权限校验 + 同时有取消按钮。慢一点没关系，别误操作。
+3. **RCA 不要甩锅**：根因是"系统怎么让这个错误发生"，不是"谁没做好"。"测试没测到"→"测试用例生成没有覆盖空数组场景"。
+4. **每次故障都更新 SOP**：告警阈值要调？回滚按钮延迟？SOP 是活文档。
+5. **值班要有备班**：P0 凌晨 3 点来，主值班 15 分钟没响应备班自动顶上。没有备班的值班是耍流氓。
+
+---
+
+## 59.6 自测题
+
+<details>
+<summary><b>1. 【基础】可观测性三大支柱 Logs / Metrics / Traces 在前端分别对应什么？举一个 JD 运维看板的场景。</b></summary>
+
+**答案**：
+
+| 支柱 | 前端映射 | 运维看板场景 |
+| --- | --- | --- |
+| **Logs** | 错误日志（JS 异常、404） | "10 分钟内 3000 条 TypeError: Cannot read 'map' of undefined" |
+| **Metrics** | Web Vitals + 自定义指标 | "dashboard 页面 LCP 中位数从 2.1s 涨到 4.8s" |
+| **Traces** | 用户会话操作链 | "这个用户先点了刷新，切换了筛选条件，然后页面炸了" |
+
+JD 场景：Metrics 显示"QPS 从 500 降到 50"（趋势）+ Logs 显示"chunk-xxx.js 404"（错误）+ Traces 显示"点刷新才触发的"（复现路径）→ 三者串起来才知道是"部署没等 CDN 同步就切 HTML"。
+
+</details>
+
+<details>
+<summary><b>2. 【进阶】错误指纹为什么必须在 sourcemap 还原后计算？</b></summary>
+
+**答案**：还原前的堆栈帧里有 chunk hash（`chunk-abcd1234.js`），每次构建都会变 → 同一源码位置在不同部署里有不同 fingerprint → 同一类错误被拆成 N 个 issue，排查时要手动合并才能看出"哦其实是同一个 bug"。正确流程：前端上报 → 服务端 sourcemap 还原 → 还原后堆栈算指纹 → 聚类。
+
+</details>
+
+<details>
+<summary><b>3. 【进阶】Web Vitals 采样为什么要用 sessionId 稳定哈希而不是 Math.random？</b></summary>
+
+**答案**：random 会导致同一用户每次刷新采样结果不同 → 监控曲线被 0 值打断，看不出真实趋势；会话内数据不连续（"这个用户第一次 LCP 2.1s 第二次 1.8s"对比不到）。稳定哈希确保同一用户整个会话采样结果一致，曲线平滑、数据连续。
+
+</details>
+
+<details>
+<summary><b>4. 【挑战】一个运维看板遇到 P0 故障（chunk 404），请按 SOP 六步法描述排查和止血流程。</b></summary>
+
+**答案**：
+
+| 步骤 | 动作 | 判定 | 时间 |
+| --- | --- | --- | --- |
+| **1. 确认影响面** | 看监控大盘：chunk 404 的 session 数、受影响页面、用户分布 | 10 分钟内 3000 session，全量用户，全页面 → P0 | ~1 min |
+| **2. 复现** | curl -I 404 的 chunk + curl -I HTML | HTML 是新版本引用新 chunk，但 chunk 文件在 CDN 上返回 404 | ~2 min |
+| **3. 定位根因** | 查 CI pipeline 日志 | CDN purge 步骤还没完成就触发了 HTML 部署 | ~3 min |
+| **4. 止血** | CI/CD 回滚上一个稳定版本 | 旧 chunk 还在 CDN 上 → 立即恢复 | ~2 min |
+| **5. 验证** | 盯着监控大盘 chunk 404 数量 | 1 分钟内归零 → 确认恢复 | ~5 min |
+| **6. RCA 复盘** | ① 根因：CI 流程 HTML 部署步骤在 CDN purge 之前；② 预防：把 HTML 部署移到 purge 完成之后 + purge 超时告警 | — | 事后 24h |
+
+**关键教训**：P0 故障的止血时间（步骤 1~4）目标是 **10 分钟内**——越早恢复用户损失越小。
+
+</details>
+
+---
+
+## 59.7 本章避坑清单
+
+| # | 坑 | 后果 | 正确做法 |
+| --- | --- | --- | --- |
+| 1 | **采样用 Math.random** | 同一用户每次刷新采样不同 → 监控曲线抖成筛子 | 基于 sessionId 的 DJB2 哈希 `hash(sessionId) % 100 < rate * 100` |
+| 2 | **错误指纹在 sourcemap 还原前算** | 同类错误因 chunk hash 变化被拆成 N 个 issue | 还原后堆栈算指纹，还原前上报只做暂存 |
+| 3 | **CLS 没排除 hadRecentInput** | 用户点击展开面板的偏移被算进 CLS → 虚假高值 | `if (!entry.hadRecentInput) cls += entry.value` |
+| 4 | **限流直接丢弃 P0 错误** | 10 秒窗口内 1000 条 P0 只上报 1 条 → 漏数据 | 限流 = 延迟上报 + 本地 LRU 缓存 + 网络恢复后批量补传 |
+| 5 | **会话回放不脱敏 password** | 录制到用户密码 → 合规事故 | password 自动暂停录制；`data-sensitive` 标记 DOM 跳过 |
+| 6 | **LCP 用 startTime 而非 renderTime** | 异步资源 startTime 返回 0 → LCP 被错误算成 0 | `const lcp = entry.renderTime ?? entry.startTime` |
+| 7 | **CDN 同步未完就部署 HTML** | 用户访问到引用新 chunk 的旧 HTML → chunk 404 | CI 流水线：HTML 部署放在 CDN purge 完成**之后**执行 |
+| 8 | **回滚按钮弹窗式二次确认** | 紧急 rollback 误操作回不去 | release id 输入 + SRE 权限校验 + 同时有取消按钮 |
+| 9 | **MutationObserver 每条都写入** | 框架批量更新触发几十上百条 → 队列爆炸 | 200ms 防抖合并后再写入事件队列 |
+| 10 | **RCA 甩锅** | "测试没覆盖" → 下次还是不覆盖 | "测试用例生成没有遍历空数组场景 → 补规则"（系统问题） |

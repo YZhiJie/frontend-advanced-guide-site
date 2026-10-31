@@ -1,0 +1,554 @@
+# 第七十三部分 · 多端共用架构——能力抽象与 Web/PC/H5 一致性（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/73-multi-end-architecture
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第七十三部分 · 多端共用架构——能力抽象与 Web/PC/H5 一致性
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第七十二部分 · 组织分层分级与数据权限](./72-org-hierarchy-permission.md)｜关联章节：[第八部分 · 跨端开发](./08-cross-platform.md) · [第五十六部分 · 离线与本地缓存全景](./56-offline-cache.md) · [第七十部分 · 桌面端工程化](./70-desktop-app-tauri.md)（PC 端能力 adapter 的壳层实现） · [第七十二部分 · 组织分层分级与数据权限](./72-org-hierarchy-permission.md)（权限求值三端一致） · [第三部分 · 前端工程化](./03-engineering.md)
+
+> 💡 **本章特色**：不重复第08册的跨端技术选型（Taro/RN/Flutter 怎么选），也不重复第56册的离线缓存细节，聚焦 JD 岗位二的直接考点——**移动办公产品的 Web 端、PC 管理端、H5 端如何用一套代码做架构设计**。主线只有一条：把「端差异」从业务代码里挤出去，挤到四个收口处——能力接口、adapter、构建矩阵、契约测试。五个小节给出差异矩阵基线、四层依赖规则、六类能力接口的最小完备设计、构建期条件编译与 core hash 一致性校验、三端契约测试与发布协同，三个可运行示例分别实跑能力降级链、契约违约揪错与构建矩阵模拟。
+
+## 本部分内容
+
+- [73.1 多端形态与差异矩阵](#_73-1-多端形态与差异矩阵)
+- [73.2 分层架构与依赖规则](#_73-2-分层架构与依赖规则)
+- [73.3 端能力抽象层设计](#_73-3-端能力抽象层设计)
+- [73.4 构建矩阵与条件编译](#_73-4-构建矩阵与条件编译)
+- [73.5 多端一致性与测试](#_73-5-多端一致性与测试)
+- [73.6 自测题](#_73-6-自测题)
+- [73.7 本章避坑清单](#_73-7-本章避坑清单)
+
+```mermaid
+flowchart TB
+    subgraph apps[apps 入口层 · 三端各自组装]
+        W[Web 入口] & D[PC 客户端入口] & H[H5 入口]
+    end
+    subgraph ui[ui 视图层 · 复用率看设计体系]
+        U[组件库 + 设计 token<br/>桌面密度 / 移动触控]
+    end
+    subgraph core[core 领域层 · 复用率 90%+]
+        C[草稿 / 会话 / 审批流 / 权限求值<br/>离线写队列 · 零平台 API]
+    end
+    subgraph svc[services 能力接口层 · 纯类型]
+        S[storage · file · notification<br/>clipboard · window · network]
+    end
+    subgraph adp[adapters 端实现层 · 端端不同]
+        AW[web adapter] & AD[desktop adapter] & AH[h5 adapter]
+    end
+    apps --> ui --> core --> svc
+    AW -. 实现 .- svc
+    AD -. 实现 .- svc
+    AH -. 实现 .- svc
+```
+
+---
+
+## 73.1 多端形态与差异矩阵
+
+### 概念解析
+
+企业级移动办公产品的「三端」不是三个产品，而是**同一套业务能力在三种容器里的三种形态**：
+
+| 形态 | 容器 | 技术实质 | 典型定位 |
+| --- | --- | --- | --- |
+| **Web 浏览器端** | Chrome / Edge / Safari | 纯 Web 技术栈，受浏览器沙箱约束 | 全员日常办公主入口 |
+| **PC 客户端（管理端）** | Tauri / Electron 壳 + 系统能力 | Web 渲染 + 原生能力（文件、托盘、多窗口） | 管理后台、重度办公（大表格、批量操作） |
+| **移动 H5 端** | 手机浏览器 + App 内嵌 WebView | Web 技术栈 + JSBridge 桥接原生能力 | 移动审批、外勤打卡、消息触达 |
+
+三端的能力差异必须量化成矩阵，这是架构设计的输入，不是事后补的文档：
+
+| 能力维度 | Web 浏览器 | PC 客户端（壳） | 移动 H5（含 WebView） |
+| --- | --- | --- | --- |
+| **存储** | localStorage ~5MB / IndexedDB 按磁盘比例 | 原生文件系统 / SQLite，容量近似不限 | WebView 存储**随时可能被系统清空**，须代理给 Native（见第56册） |
+| **文件** | 沙箱内上传/下载，无路径概念 | 任意路径读写、系统级预览、拖拽 | 受桥限制，走 Native 文件选择器 |
+| **通知** | Notification API，需用户授权，页面存活才可靠 | 系统级通知 + 托盘角标 + 闪烁提醒 | 桥接推送通道；纯浏览器 H5 只能靠页面内提示 |
+| **剪贴板** | Clipboard API，需用户手势授权 | 系统剪贴板任意读写、富文本/文件 | 桥接或受限的 Clipboard API |
+| **窗口** | 单标签页，弹窗受限 | 多窗口、窗口置顶、全局快捷键 | 无窗口概念，只有页面栈 |
+| **网络** | fetch 受 CORS 约束 | 可绕过 CORS、长连接、自定义代理与证书 | WebView 网络栈 + 桥接，弱网占比高 |
+
+差异矩阵还隐含一层**角色分工**：三端不是彼此的平等复刻。PC 管理端承担「创作与管理」——大表格、批量操作、多窗口对照、复杂配置；Web 端是「通用入口」——免安装、免升级、外网可达；移动 H5 承担「消费与轻操作」——审批通过/驳回、打卡、消息已读。试图把 PC 管理端的批量导入界面塞进 H5，或指望 H5 承担长时编辑，都是角色错配；矩阵里「窗口」「文件」两行已经提前否决了这些产品构想。架构评审时先问「这个功能属于哪一端的角色」，再问「能力矩阵是否支持」，顺序不能反。
+
+### 代码复用率的合理期望
+
+「一套代码跑三端」的真实含义是**分层复用**，复用率按层算，不是按项目算：
+
+| 层 | 内容 | 合理复用率 | 说明 |
+| --- | --- | --- | --- |
+| **core 领域层** | 领域模型、状态机、权限求值、离线写队列、校验规则 | **90%+** | 零平台 API，三端逐字节一致（73.4 用 hash 校验） |
+| **services 接口层** | 六类能力接口的 TypeScript 定义 | **100%** | 纯类型，没有实现可复用 |
+| **adapters 实现层** | 端能力的具体实现 | **≈0%**（但接口 100% 对齐） | 端端不同是**设计目的**，不是复用失败 |
+| **ui 视图层** | 组件、页面、交互范式 | 同设计体系 70%~85% | 桌面密度（紧凑表格、右键菜单）与移动触控（大点击区、手势）是两套交互范式，强行 100% 复用会两头不讨好 |
+
+**核心认知**：复用率的追求对象是 core 与 services，不是 ui，更不是 adapter。面试里说「我们三端代码复用率 95%」的人，要么只算了 core，要么把 ui 做成了三端都难看。
+
+### 典型应用场景
+
+- 移动办公套件：IM + 邮件 + 审批 + 文档，Web 端处理日常，PC 管理端做组织/权限/审计配置，H5 端跑审批与打卡；
+- 同一审批流的「填写页」三端复用 core 的表单状态机与校验规则，ui 层桌面端用紧凑栅格、移动端用纵向卡片流；
+- PC 客户端独占能力（批量导出到本地路径、静默打印）通过特性开关只进 desktop 产物（73.4）；
+- 出海/政企交付：同一 core，Web 端走公有云 SaaS，PC 客户端打进私有化部署包，差异只在 adapter 与构建参数。
+
+### 最佳实践
+
+- ✅ 立项时把差异矩阵贴在架构文档首页，每一行都回答「没有该能力时业务怎么降级」，而不是只列「有/没有」；
+- ✅ 复用率按层统计并进 CI 报告（core 包被 import 的端数、ui 组件的跨端复用比），季度复盘；
+- ⚠️ 不要把「H5」当成一种东西：手机浏览器 H5 与 App 内嵌 WebView H5 的能力天壤之别（后者有桥），架构上按「有桥 / 无桥」两种运行环境处理；
+- ❌ 不要追求 ui 层 100% 复用：桌面端塞满大按钮、移动端塞满右键菜单，是「一套代码」最廉价的失败方式。
+
+---
+
+## 73.2 分层架构与依赖规则
+
+### 概念解析
+
+三端共用架构的骨架是**四层 + 一条依赖铁律**：
+
+| 层 | 职责 | 允许依赖 | 禁止依赖 |
+| --- | --- | --- | --- |
+| **core** | 纯领域逻辑：实体、状态机、业务规则、纯函数算法 | 只允许依赖标准库与纯工具库（zod/dayjs） | 一切平台 API、services 的实现、adapter |
+| **services** | 端能力的**接口定义**（契约层） | core 的类型 | adapter 的实现 |
+| **adapters** | 端能力的**具体实现**，一端一套 | services 的接口 | core（实现里不许塞业务规则） |
+| **ui** | 视图与交互，按设计体系分包 | core + services | adapter 的具体实现 |
+
+**依赖铁律：只能向内，adapter 永远不许被 core import。** 完整的依赖方向只有五条，除此之外一律非法：
+
+1. `ui → core`（读领域模型与状态机）；
+2. `ui → services`（调能力接口，如「上传前查 file 能力」）；
+3. `core → services`（依赖能力**接口**，不感知实现）；
+4. `adapters → services`（实现接口，且只允许实现，不许塞业务规则）；
+5. `apps/* 入口层 → 全部`（唯一允许感知四层的组装者：选 adapter、注入 services 槽位、启动 ui）。
+
+core 需要存数据时，它 import 的是 services 里的 `StorageCapability` 接口，运行期由入口层把具体 adapter 注入进来（依赖注入）。这样 core 才可以被三端**逐字节复用**——它根本不知道自己在哪个端。
+
+为什么这条铁律必须机械化执行？因为「core 里 import 一下 desktop adapter 的工具函数」这种事，Code Review 十次能拦住九次，漏掉那一次就会让 desktop 的原生依赖（Tauri API、Node 模块）顺着 import 链爬进 H5 的产物，轻则打包失败，重则运行期白屏。**靠自觉的架构约束一定会在 deadline 前失守，必须交给 lint。**
+
+### 典型应用场景
+
+- monorepo 里新人往 core 加功能时顺手 `import { invoke } from "@tauri-apps/api"`——lint 直接红；
+- 重构时想确认「这段逻辑能不能进 core」：看它 import 了什么即可，零容忍清单一目了然；
+- 三端各自的 `apps/*` 入口是唯一允许「知道全部四层」的地方——它负责组装：选 adapter、塞进 services 槽位、启动 ui；
+- 新端接入（如车载屏、智能大屏）：四层骨架不变，新增 `adapters-carmate` 包 + 一个入口应用，core 与 services 零改动——分层架构的回报在新端接入时一次性兑现；
+- 代码评审的分工也随之清晰：core 的 PR 由领域 owner 审，adapter 的 PR 由端 owner 审，services 的 PR 必须两方会签——接口是三端的合同。
+
+### 核心代码示例
+
+pnpm workspace 分包结构：
+
+```yaml
+# 文件: pnpm-workspace.yaml（结构示意）
+packages:
+  - "packages/core"       # 领域逻辑,零平台 API,三端同一份产物
+  - "packages/services"   # 能力接口定义,纯类型
+  - "packages/adapters-web"
+  - "packages/adapters-desktop"
+  - "packages/adapters-h5"
+  - "packages/ui"         # 视图层(可按设计体系再拆 ui-desktop / ui-mobile)
+  - "apps/web"
+  - "apps/desktop"
+  - "apps/h5"
+```
+
+入口层组装（三端各自的 `main.ts` 里唯一允许感知端的地方）：
+
+```ts
+// 文件: apps/h5/main.ts（结构示意,不落盘）
+import { createApp } from "@acme/ui";
+import { DraftService } from "@acme/core";
+import { H5BridgeStorageAdapter, MemoryFallbackStorageAdapter } from "@acme/adapters-h5";
+
+// 入口层做能力探测与 adapter 选择,core 全程无感
+const storage = bridge.available() ? new H5BridgeStorageAdapter(bridge) : new MemoryFallbackStorageAdapter();
+createApp({ services: { storage } }).mount("#app");
+```
+
+边界 lint 规则（`eslint-plugin-boundaries` 或 `no-restricted-imports`，二选一）：
+
+```js
+// 文件: eslint.config.js（节选,机械执行依赖铁律）
+export default [
+  {
+    files: ["packages/core/**/*"],
+    rules: {
+      // core 禁止 import 任何 adapter 与平台 SDK——铁律由机器守,不靠自觉
+      "no-restricted-imports": ["error", {
+        patterns: ["@acme/adapters-*", "@tauri-apps/*", "electron", "node:*"],
+      }],
+    },
+  },
+  {
+    files: ["packages/adapters-*/**/*"],
+    rules: {
+      // adapter 不许反向 import core:实现里塞业务规则 = 业务逻辑漏进端层
+      "no-restricted-imports": ["error", { patterns: ["@acme/core"] }],
+    },
+  },
+  {
+    files: ["packages/ui/**/*"],
+    rules: {
+      // ui 只能面向接口编程,不许摸到具体实现
+      "no-restricted-imports": ["error", { patterns: ["@acme/adapters-*"] }],
+    },
+  },
+];
+```
+
+边界 lint 规则只解决了「不许 import 谁」，分层架构的另一红利是**可测性**：core 的构造函数接收接口，单测注入内存 mock 即可，同一份 core 测试三端共用，不需要起浏览器、起壳、起 WebView：
+
+```ts
+// 文件: packages/core/__tests__/draft.spec.ts（结构示意,不落盘）
+import { describe, it, expect } from "vitest";
+import { DraftService } from "@acme/core";
+
+// 内存 mock 实现 services 接口——core 的测试与任何真实端无关
+const mockStorage = {
+  kind: "memory-fallback",
+  quotaMB: 5,
+  data: new Map<string, string>(),
+  async set(k: string, v: string) { this.data.set(k, v); },
+  async get(k: string) { return this.data.get(k) ?? null; },
+  async remove(k: string) { this.data.delete(k); },
+};
+
+describe("DraftService", () => {
+  it("草稿写读回环一致", async () => {
+    const svc = new DraftService({ storage: () => mockStorage });
+    await svc.saveDraft("m1", "内容");
+    expect(await svc.loadDraft("m1")).toBe("内容");
+  });
+});
+```
+
+### 最佳实践
+
+- ✅ services 层只放**类型与错误定义**，一行实现代码都不许有——它是三端共同签署的「合同文本」；
+- ✅ 依赖注入在入口层做，core 的构造函数接收接口：`new DraftService(host)`——这也让单测可以注入内存 mock，core 的测试三端共用；
+- ✅ 每个包的 `package.json` 用 `exports` 字段只暴露公共入口，内部文件不可被跨包深路径 import；
+- ⚠️ adapter 里「顺手」写的业务判断（如「H5 端草稿最多存 100 条」）是业务逻辑泄漏，上限规则属于 core，adapter 只上报自己的容量标称；
+- ❌ 不要为了「少建一个包」把 services 合并进 core——接口与领域逻辑同包，adapter 就不得不 import core，依赖环就此形成。
+
+---
+
+## 73.3 端能力抽象层设计
+
+### 概念解析
+
+能力抽象层（services + adapters）的设计目标是**最小完备**：接口只覆盖业务真实用到的操作，不抄平台 API 全集。六类核心能力的最小接口集：
+
+| 能力 | 最小方法集 | 关键契约（比方法签名更重要） |
+| --- | --- | --- |
+| **storage** | `get / set / remove` + `quotaMB` 标称 | 超容量必须抛 `QuotaExceededError`；缺失 key 返回 `null` 不抛错 |
+| **file** | `pick() / save(name, data) / preview(file)` | 不支持的端 `has()` 返回 false，UI 隐藏入口 |
+| **notification** | `notify(title, body)` 返回投递结果 | `denied` 不抛错，交给降级链；必须区分「系统通道/页面内提示」 |
+| **clipboard** | `readText() / writeText(text)` | Web 端需用户手势，失败时返回 `false` 而非异常 |
+| **window** | `open(url) / setBadge(n) / focus()` | H5 端整体没有此能力，desktop 独有（多窗口见第70册） |
+| **network** | `fetch` 包装 + `onStatusChange(cb)` | 三端统一超时与重试策略；弱网状态必须可订阅（接第56册离线队列） |
+
+**能力探测 `has()`**：运行期问「这个端有没有某能力」，而不是问「当前是不是某个端」。`has("window-multi")` 与 `platform === "desktop"` 的区别在于：前者对「desktop 壳但运行在兼容模式」「H5 桥未来支持了该能力」都天然兼容，后者每加一种运行环境就要改一遍判断。UA 嗅探是上个世纪的做法，能力探测才是架构。
+
+**三级降级链**：原生能力 → Web 降级 → 功能隐藏。以通知为例：desktop 走系统通知；web 的 Notification 被拒后降级为页面内 toast；H5 无桥且无 toast 组件时，**入口按钮直接不渲染**——「点了没反应」是最差的降级，「根本看不到入口」反而诚实。降级必须是显式决策（代码里看得见的三段分支），不是 `try/catch` 兜底的副产品。
+
+**接口版本化**：接口也会演进。规则只有两条——① 破坏性变更（改语义、删方法）升主版本，三端 adapter 必须同周期跟进；② 新增能力用可选方法 + 能力位探测，不升版本。adapter 上声明 `apiVersion`，入口层组装时校验「core 要求的最低版本 ≤ adapter 提供的版本」，不满足就启动期报错，而不是运行到一半才发现方法不存在：
+
+```ts
+// 文件: packages/services/versioning.ts（结构示意,不落盘）
+export interface VersionedCapability {
+  readonly apiVersion: number; // adapter 声明自己实现的接口版本
+}
+
+/** 入口层组装时调用:core 声明最低要求,adapter 声明实际提供 */
+export function requireVersion(cap: VersionedCapability, min: number, name: string) {
+  if (cap.apiVersion < min) {
+    throw new Error(`${name} 需要接口 v${min},当前 adapter 仅 v${cap.apiVersion}——请先升级端实现`);
+  }
+}
+
+// 演进示例:v1.1 新增可选方法(不升主版本),用能力位探测
+export interface StorageCapability extends VersionedCapability {
+  set(key: string, value: string): Promise<void>;
+  get(key: string): Promise<string | null>;
+  remove(key: string): Promise<void>;
+  /** v1.1 新增:批量写入,老 adapter 可不实现,业务侧 has("storage.batch") 探测后走兜底 */
+  setBatch?(entries: Array<[string, string]>): Promise<void>;
+}
+```
+
+### 典型应用场景
+
+- 新需求评审时先过能力矩阵：「审批单附件拍照上传」一查矩阵——Web 端无摄像头直拍能力，降级为文件选择；H5 有桥则走 Native 相机；结论写在需求文档里，而不是开发到一半才发现；
+- H5 嵌进第三方 App（企业微信/钉钉/飞书）时桥能力各不同，接口层不变，只新增三个 adapter 变体；
+- 收购/整合场景：被收购方系统以 WebView 嵌入，能力抽象层决定了它能用到宿主 App 的哪些能力；
+- PC 管理端独占的「批量导入 Excel 到本地路径」：file 能力在 web/h5 端 `has()` 为 false，入口直接隐藏，不做无效降级；
+- 通知通道选型评审：运营要「审批必达」，查矩阵——Web 端浏览器关了就收不到，结论是把「必达」需求路由到 PC 客户端的系统通知与 H5 的桥推送，Web 端只承诺「在线可达」。
+
+### 可运行代码示例
+
+```ts
+// 文件: examples/73-01-capability-layer.ts（核心节选）
+async function notifyWithFallback(host: CapabilityHost, toastSink: string[], title: string) {
+  // 第一级:原生/桥接通知能力
+  const n = host.notification();
+  if (n) {
+    const r = await n.notify(title, "");
+    if (r === "shown") return { level: "native", channel: n.kind };
+    // denied → 落到第二级
+  }
+  // 第二级:Web 降级——页面内 toast,至少让用户看得见
+  if (host.has("toast")) {
+    toastSink.push(title);
+    return { level: "web-fallback", channel: "toast" };
+  }
+  // 第三级:功能隐藏——入口按钮都不渲染,而不是点了没反应
+  return { level: "hidden" };
+}
+```
+
+示例还演示了 adapter 用 `quotaMB = 0` 的标称向业务明示「我是不可靠内存兜底」，业务显式放弃落盘而不是假装存了——**契约不只约束方法，也约束标称值**。
+
+> 运行方式：`npx tsx examples/73-01-capability-layer.ts`（同一 DraftService 跑四种环境：desktop/web/h5有桥/h5无桥，观察存储实现与通知通道的降级差异，含 3 组硬断言）。
+
+### 最佳实践
+
+- ✅ 每类能力接口控制在 3~6 个方法：超出说明你在抄平台 API，把「端差异」又请回了接口层；
+- ✅ 错误类型三端统一：`QuotaExceededError`、`PermissionDeniedError` 等错误名写进 services 层契约，adapter 负责把平台原生错误翻译过来；
+- ✅ 降级链的每一级都要可观测：上报「本次通知走了哪一级」，运维看板才能发现「H5 桥通知成功率从 98% 跌到 70%」；
+- ⚠️ `has()` 探测的结果在会话内缓存，但桥类能力要在「桥断连事件」后失效重探——WebView 里桥是会死的；
+- ⚠️ 能力探测要有「探测日志」：启动期把 `has()` 全量结果随埋点上报一次，线上「某端某能力大面积缺失」才能被主动发现，而不是等客诉；
+- ❌ 不要在接口里留 `any` 逃生舱（如 `rawInvoke(method, args)`）：一个逃生舱会让整个抽象层形同虚设，三个月后所有业务都在直接调它。
+
+---
+
+## 73.4 构建矩阵与条件编译
+
+### 概念解析
+
+端差异有两种处理方式，架构上只有一种是正确的：
+
+| 方式 | 形态 | 后果 |
+| --- | --- | --- |
+| **运行期判断** | `if (isDesktop) { ... }` 散布在代码里 | 三端产物都背着全部端代码；`isDesktop` 是变量，打包器无法消除死分支；判断逻辑随环境漂移 |
+| **构建期注入** | `BUILD_TARGET` 在构建时钉死为字面量 | 非目标端分支变成 `if (false)`，被 tree-shaking 物理删除；产物即证据 |
+
+Vite 里就是 `define` 注入：在 web 与 h5 的构建里 `__BUILD_TARGET__ === "desktop"` 被替换成 `false`，整个分支连同它 import 的模块一起消失——这就是**端差异代码的 tree-shaking 隔离**。前提：分支条件必须是**字面量比较**，一旦包成函数 `isDesktop()`，求值就推迟到运行期，隔离失效。三端各一份薄配置，共享同一份基础配置：
+
+```ts
+// 文件: apps/desktop/vite.config.ts（结构示意,不落盘）
+import baseConfig from "../../vite.base.config";
+import { defineConfig, mergeConfig } from "vite";
+
+export default mergeConfig(
+  baseConfig,
+  defineConfig({
+    define: {
+      __BUILD_TARGET__: JSON.stringify("desktop"), // 构建期钉死,产物里就是字面量
+      __FEATURES__: JSON.stringify(evaluateFlags("desktop")), // 开关求值结果一并注入
+    },
+  }),
+);
+```
+
+```ts
+// 业务代码写法:字面量比较才能被消除
+if (__BUILD_TARGET__ === "desktop") {
+  const { setupTray } = await import("./tray"); // web/h5 产物里这行连同 ./tray 模块整体消失
+  setupTray();
+}
+```
+
+**特性开关**是构建矩阵的另一条轴：不是每个端差异都值得建一个 adapter，「桌面端有托盘、H5 有下拉刷新」这类有无问题，用声明式矩阵管理——每个特性列出「哪些端启用」，构建期按目标求值成一组布尔量，业务只读 `flags["system-tray"]`。与运行期远程下发的动态开关（灰度用）不冲突：构建期开关管「这个端有没有」，动态开关管「这个用户开不开」。
+
+**三端产物一致性校验**：core 包是三端共用的，但三条构建流水线各自打包，怎么证明打进三个产物里的是同一份 core？答案是 hash——发布门禁计算三端产物内 core 包的摘要，三者必须一致。任何「desktop 构建时顺手往 core 里塞了个端判断」的污染，都会让 hash 漂移，被门禁当场拦下。
+
+### 典型应用场景
+
+- CI 流水线矩阵：`BUILD_TARGET=web|desktop|h5` 三条流水线并行，产物分别发 OSS/CDN、Tauri 安装包、Native 离线包；
+- 灰度新交互：「新版审批流」先在 web 端构建开启（改矩阵一行），验证两周后 desktop/h5 跟进——开关矩阵天然支持按端灰度；
+- 端专属依赖的物理隔离：RTC SDK 200KB+ 只进 desktop/web 产物，H5 端连 npm 依赖都不安装，lockfile 按 apps/* 分包管理；
+- 事故复盘取证：线上 H5 报「草稿丢失」，先取该版本 `flags.json` 与 core hash，确认这一端构建时到底开了什么、core 是否被污染。
+
+### 可运行代码示例
+
+```ts
+// 文件: examples/73-03-build-matrix.ts（核心节选）
+const FEATURE_MATRIX: Record<string, BuildTarget[]> = {
+  "offline-sync": ["web", "desktop", "h5"], // 离线同步:三端全量(见第 56 册)
+  "system-tray": ["desktop"],               // 系统托盘:仅 PC 客户端
+  "rtc-call": ["desktop", "web"],           // 音视频:H5 WebView 体验不达标,不上
+};
+// 发布门禁:三端 core hash 必须一致,否则说明 core 被端代码污染
+const drift = verifyCoreConsistency(artifacts); // 不一致 → 揪出具体端,阻断发布
+```
+
+> 运行方式：`npx tsx examples/73-03-build-matrix.ts`（BUILD_TARGET 注入、六特性三端求值、差异模块隔离后的产物体积对比、健康/污染两条流水线的 core hash 校验）。
+
+### 最佳实践
+
+- ✅ 三条流水线用**同一个 lockfile、同一个 core 包版本**构建，构建参数差异收敛到一个矩阵配置文件，人脑记不住三份脚本；
+- ✅ 产物体积按端对比进 CI 报告：desktop 比 h5 大是预期（RTC、托盘），但 web 端某次构建突然 +200KB 就要查是不是端代码漏进来了；
+- ✅ 矩阵配置文件本身是契约：新增开关必须声明「哪些端启用 + 默认状态 + 下线条件」，评审时连「这个开关准备什么时候拆」都要回答；
+- ⚠️ 特性开关求值结果要打进产物清单（如 `dist/flags.json`），排查线上问题时先确认「这个端这个版本到底开了什么」；
+- ❌ 不要用运行期 `import()` 动态加载端模块当「隔离」——它隔离的是网络请求不是产物体积，且首屏时序会变得不可预测。
+
+---
+
+## 73.5 多端一致性与测试
+
+### 概念解析
+
+三端架构的最大谎言是「接口定义一致 = 行为一致」。TypeScript 只能约束方法签名，约束不了**行为契约**——「超容量抛 `QuotaExceededError`」这条契约，H5 桥接层用「静默丢数据」也能通过类型检查。所以多端一致性的基石是**契约测试**：用例只写一次，放在 services 层旁边，每个 adapter 的 CI 都必须跑同一套，任何一端违约即阻断发布。
+
+四层测试矩阵各司其职：
+
+| 层 | 测什么 | 工具形态 | 运行频率 |
+| --- | --- | --- | --- |
+| **core 单测** | 领域规则、状态机迁移 | vitest，注入内存 mock adapter | 每次提交 |
+| **契约测试** | adapter 行为是否符合 services 契约 | 一套用例 × 三个 adapter | 每次提交 + 发版前 |
+| **视觉回归** | 同一页面三端截图 vs 基线 | Playwright 截图比对，基线按端维护 | 发版前 |
+| **e2e 冒烟** | 核心链路 × 端的笛卡尔积 | 矩阵只覆盖 P0 链路（登录/审批提交/消息收发） | 发版前 |
+
+其中**视觉回归**最容易被做错：基线必须按「端 × 视口」二维维护（桌面 1440px、移动 375px 各一套），比对阈值按页面类型分级——表单页容差 0.1%（一个像素错位都可能是栅格崩了），图表页可放宽到 2%（抗锯齿噪声）。三端共用一套基线的后果是：移动端字体渲染差异让阈值一路放宽，最后等于没测。
+
+e2e 冒烟矩阵要控制规模，只覆盖 P0 链路 × 端的笛卡尔积，每条链路写明「端差异断言点」——同一条链路在不同端的预期表现本来就不同，断言要断言到差异上：
+
+| P0 链路 | Web 断言点 | PC 客户端断言点 | H5 断言点 |
+| --- | --- | --- | --- |
+| 登录 → 进入工作台 | cookie 会话生效 | 开机自启项可选、窗口记忆位置 | 桥登录态注入、无桥时跳扫码 |
+| 审批单提交成功 | 提交后列表刷新 | 系统通知弹出 | 桥推送回执、无桥时页面 toast |
+| 消息收发回环 | WebSocket 重连 | 托盘角标 +1 | 弱网转离线队列（第56册） |
+| 附件上传下载 | 浏览器下载目录 | 指定路径落盘 + 系统预览 | 桥调起 Native 预览 |
+
+**发布协同与版本对齐**：三端不是三个独立产品，发布节奏必须协同——core 版本三端钉死一致（hash 校验兜底），adapter 允许独立热修（H5 桥层改 bug 不该逼着 PC 客户端发版），ui 按设计体系排期。发版用「发布火车」：固定周期发车，core 变更必须赶上车并且三端同车；端独占的 adapter 修复可以补票（独立补丁版本）。版本号建议 `core 版本-端标识-端构建号`，如 `2.14.0-desktop.3`，排查线上问题时一眼定位。一次典型的同车发版节拍：
+
+| 时点 | 动作 | 门禁 |
+| --- | --- | --- |
+| T-3 天 | core 冻结，跑三端契约测试 | 任一 adapter 违约则整车延期 |
+| T-2 天 | 三端流水线分别构建，产物体积对比 | core hash 三端一致；体积异常漂移告警 |
+| T-1 天 | 冒烟矩阵 15 用例 + 视觉回归 | P0 链路全绿 |
+| T 日 | 三端同车发布，H5 离线包同步推 Native | 灰度 5% → 全量，监控面板按端分维度盯盘 |
+
+### 典型应用场景
+
+- 新 adapter 准入：给 H5 桥新增「扫码」能力时，先在 services 层定契约（返回扫码结果 / 用户取消 / 相机拒绝三种结局），契约用例先行，adapter 实现跑绿才允许合入；
+- 跨端 bug 定界：用户报「草稿偶尔丢失」，先跑契约测试——若 H5 adapter 违约则是端实现问题，若三端全绿则问题在 core 或 ui，排查范围直接减半；
+- 大版本前的回归基线：core 重构（如权限模型升级，见第72册）后，三端契约测试 + 冒烟矩阵是「重构没改语义」的证据链；
+- 外包/新团队交付验收：adapter 是否达标不看演示看契约报告，六条用例全绿才算交付完成。
+
+### 可运行代码示例
+
+```ts
+// 文件: examples/73-02-contract-test.ts（核心节选）
+{
+  name: "容量超限必须抛 QuotaExceededError(不许静默丢数据)",
+  async run(s) {
+    const big = "x".repeat((s.quotaMB + 1) * 1024 * 1024); // 故意超配 1MB
+    let caught: Error | null = null;
+    try { await s.set("huge", big); } catch (e) { caught = e as Error; }
+    assert(caught !== null, "超容量写入没有抛错(可能静默丢数据)");
+    assert(caught!.name === "QuotaExceededError", `错误名应为 QuotaExceededError`);
+    assert((await s.get("huge")) === null, "超限写入不应留下脏数据");
+  },
+},
+```
+
+示例内置一个真实世界违约：H5 桥接层超容量时静默丢弃写入——第一轮矩阵报告当场揪出，修复桥层后第二轮 6/6 全绿。
+
+> 运行方式：`npx tsx examples/73-02-contract-test.ts`（六条 storage 契约 × 三端 adapter 的矩阵报告、违约详情、修复后复跑）。
+
+### 最佳实践
+
+- ✅ 契约用例跟着接口走：services 加一条契约（如「特殊字符 key 可用」），三个 adapter 的 CI 当天就会告诉你谁不达标；
+- ✅ 视觉回归基线**按端维护**，桌面端 1440px 与移动端 375px 是两套基线，不要追求一张基线通吃；
+- ✅ e2e 冒烟矩阵控制规模：P0 链路（≤5 条）× 三端 = 15 个用例，超过这个数说明你把回归测试错放进了冒烟层（完整测试策略见第09册）；
+- ✅ 契约报告要入档：每次发版把「用例 × 端」矩阵报告存档，季度复盘能看出哪端的 adapter 质量在劣化；
+- ⚠️ 契约违约的修复方向是「adapter 对齐契约」，不是「契约为某端开口子」——口子一开，core 就要为每个端写分支，架构从根部烂掉；
+- ❌ 不要让三端各自维护「差不多的」测试用例：三份用例四个月后会漂移成三种语义，契约测试的意义归零。
+
+---
+
+## 73.6 自测题
+
+<details>
+<summary><b>1. 【基础】四层分层（core / services / adapters / ui）中，core 层的硬性约束是什么？为什么它不能 import 任何 adapter？</b></summary>
+
+**答案**：core 层的硬性约束是**零平台 API**——只允许依赖标准库与纯工具库，不许出现 `window`、`localStorage`、`@tauri-apps/*` 等任何平台痕迹。不能 import adapter 的原因：① core 是三端逐字节复用的资产，一旦 import adapter，desktop 的原生依赖就顺着 import 链爬进 H5 的产物，轻则打包失败重则白屏；② 依赖方向只能是「adapter 实现 services 接口、入口层把 adapter 注入 core」，反向依赖会形成环；③ 这条约束必须由 lint（`no-restricted-imports`）机械执行，靠 Code Review 会在 deadline 前失守。
+
+</details>
+
+<details>
+<summary><b>2. 【基础】能力探测 has() 相比「判断当前是哪个端」有什么优势？</b></summary>
+
+**答案**：`has("window-multi")` 问的是「有没有能力」，`platform === "desktop"` 问的是「是哪个端」。优势：① 新运行环境（desktop 兼容模式、H5 桥升级支持新能力）出现时无需改判断逻辑；② 同一端内能力也是动态的（Web 通知被拒、H5 桥断连），端判断表达不了；③ 与降级链天然衔接——探测失败走降级，而不是为每个端写死行为。UA 嗅探判断端是上个时代的做法。
+
+</details>
+
+<details>
+<summary><b>3. 【基础】端能力的三级降级链是哪三级？为什么「功能隐藏」比「点了没反应」更好？</b></summary>
+
+**答案**：三级为：原生能力 → Web 降级 → 功能隐藏。以通知为例：系统通知/桥推送 → 页面内 toast → 入口不渲染。「功能隐藏」优于「点了没反应」，因为前者是诚实的 UI——用户看不到入口就不会有「点了没用」的困惑与投诉；后者是静默失败，用户会怀疑产品坏了。降级必须是代码里显式可见的分支决策，且每一级都可观测（上报走了哪一级），不能是 `try/catch` 兜底的副产品。
+
+</details>
+
+<details>
+<summary><b>4. 【进阶】为什么端差异应该在构建期（BUILD_TARGET 注入）而不是运行期判断？</b></summary>
+
+**答案**：三个理由。① 产物体积：构建期把 `__BUILD_TARGET__ === "desktop"` 替换为字面量 `false`，非目标端分支连同其 import 被 tree-shaking 物理删除；运行期判断是三端产物背着全部端代码。② 产物即证据：构建后产物里有没有某段端代码是可审计的（体积对比、产物扫描）；运行期判断的正确性要在每种运行环境里逐一验证。③ 失效模式：运行期判断依赖环境变量/UA，可能被污染或误判；构建期注入在 CI 里钉死，构建参数收敛在一个矩阵配置文件。前提条件：分支条件必须是字面量比较，包成 `isDesktop()` 函数就推迟到运行期求值，隔离失效。
+
+</details>
+
+<details>
+<summary><b>5. 【进阶】有了 TypeScript 接口约束，为什么还需要契约测试来保证三端一致？</b></summary>
+
+**答案**：TypeScript 约束的是**方法签名**，约束不了**行为契约**。典型例子：契约规定「超容量必须抛 `QuotaExceededError`」，H5 桥接层写成「静默丢弃并正常返回」照样通过类型检查——签名完全合法，语义完全违约，用户草稿丢了还收到「保存成功」。行为契约还包括：缺失 key 返回 `null` 而非抛错、特殊字符 key 可用、错误类型三端统一翻译、容量标称的真实性。这些只能用「一套用例 × 三个 adapter」的契约测试在 CI 里机械保证。类型是合同文本的格式校验，契约测试是合同的履约检查。
+
+</details>
+
+<details>
+<summary><b>6. 【进阶】三端产物做 core hash 一致性校验，能揪出哪类事故？揪出后正确的修复方向是什么？</b></summary>
+
+**答案**：能揪出「core 在某一端的构建流水线上被污染」类事故：① 某端构建脚本往 core 里塞了端判断/补丁代码；② 三端流水线 lockfile 漂移导致打进不同版本的 core 依赖；③ 有人绕过 workspace 直接改了某端 node_modules 里的 core 产物。hash 不一致说明三端跑的不是同一份领域逻辑，「三端行为一致」失去根基。修复方向永远是**对齐 core 源头**（统一 core 版本、统一 lockfile、撤掉端侧补丁），而不是给校验开例外——一旦允许「desktop 的 core 可以不一样」，下次权限求值三端不一致（见第72册）就无从排查。
+
+</details>
+
+<details>
+<summary><b>7. 【挑战】移动 H5 端 JSBridge 不可用时，请为「邮件草稿自动保存」设计完整降级方案，要求覆盖存储、提示、恢复三个环节。</b></summary>
+
+**答案**：分层处理——
+
+| 环节 | 方案 |
+| --- | --- |
+| **存储** | 入口层探测桥：`bridge.available()` 为假时注入 `MemoryFallbackStorageAdapter`，其 `quotaMB` 标称为 0——这是契约信号「我不可靠」；core 的 DraftService 读到标称 0 时**显式放弃持久化**，转而只在内存保留草稿，绝不「假装存了」 |
+| **提示** | 通知走三级降级：桥推送缺失 → 页面内 toast 提示「当前环境草稿仅本次会话有效」；同时在草稿编辑页挂常驻弱提示条（一次性 toast 会被错过） |
+| **恢复** | 桥恢复事件触发后重探能力，提示「存储已恢复，是否立即保存」；若用户在无桥期关了页面，下次进入时草稿为空是**预期行为**——因为提示环节已管理过预期，不算事故 |
+
+关键取舍：不试图用 WebView localStorage 当备胎——它随时可能被系统清空（见第56册），把一个「已知不可靠」换成另一个「隐瞒的不可靠」是降级设计最常见的错误。
+
+</details>
+
+<details>
+<summary><b>8. 【挑战】services 层的 StorageCapability 需要新增「批量写入」能力，但 H5 桥的老版本不支持。请设计接口演进与版本协商方案，保证三端发布周期不一致时系统依然可上线。</b></summary>
+
+**答案**：按接口版本化两条规则处理——
+
+① **变更定性**：新增能力属于「加方法」，不破坏既有语义，**不升主版本**。用可选方法 + 能力位表达：`interface StorageCapability { apiVersion: 1; setBatch?(entries: [string, string][]): Promise<void> }`，同时能力探测增加 `has("storage.batch")`。
+
+② **协商机制**：adapter 声明 `apiVersion` 与能力位；入口层组装时校验「core 要求的最低版本 ≤ adapter 提供版本」，不满足则启动期报错。业务侧分两路：core 的批量保存逻辑写为 `if (has("storage.batch")) 走批量; else 逐条 set 循环兜底`——老 H5 桥自动落到兼容路径，功能可用只是慢。
+
+③ **发布协同**：web/desktop adapter 升级支持批量后可随发布火车先行上线；H5 桥依赖 App 发版，赶不上车就继续走兜底路径，等桥升级后 `has()` 自动切到批量路径——**core 零改动**。禁止的做法：为三端发布不同步而给 core 加 `if (platform === "h5" && bridgeVersion < x)` 判断，这会把发布协同问题泄漏进领域层。
+
+</details>
+
+---
+
+## 73.7 本章避坑清单
+
+| # | 坑 | 后果 | 正确做法 |
+| --- | --- | --- | --- |
+| 1 | **core 里写 `typeof window !== "undefined"` 判环境** | 平台判断渗进领域层，core 失去三端复用资格 | core 零平台 API；环境差异一律走 services 接口 + adapter 注入 |
+| 2 | **用 UA 嗅探判断端能力** | 新 WebView/新壳出现时全线误判；能力动态变化表达不了 | 运行期 `has()` 能力探测，结果按会话缓存、桥断连后重探 |
+| 3 | **能力接口抄平台 API 全集** | 接口几十个方法，三个 adapter 各实现一半，契约名存实亡 | 最小完备：每类 3~6 个方法，只覆盖业务真实用到的操作 |
+| 4 | **运行期 `if (isDesktop())` 处理端差异** | 三端产物背上全部端代码，死分支无法 tree-shaking | BUILD_TARGET 构建期注入字面量，分支条件必须是字面量比较 |
+| 5 | **桥层写入失败静默吞掉** | 用户收到「保存成功」但数据已丢，客诉无法定位 | 契约规定超容量抛 `QuotaExceededError`，契约测试跑遍三端 adapter |
+| 6 | **H5 把业务事实存 WebView localStorage** | 系统清存储后数据蒸发，且无法界定责任 | 业务事实代理给 Native 落库；localStorage 只放可丢小状态（第56册结论） |
+| 7 | **三端各维护一份「差不多的」core** | 四个月漂移成三套语义，权限求值三端不一致 | 单一 workspace 包 + 发布门禁 core hash 三端一致校验 |
+| 8 | **降级靠 try/catch 兜底** | 异常路径无人感知，「功能没反应」客诉涌入 | 显式三级降级链：原生能力 → Web 降级 → 功能隐藏，每级上报可观测 |
+| 9 | **接口破坏性变更不升版本** | 老 adapter 配新 core，运行到一半方法不存在 | 破坏性变更升主版本三端同周期跟进；新增能力走可选方法 + 能力位 |
+| 10 | **三端发版各自为政** | core 版本错位，「web 能提交审批、H5 报错」类问题频发 | 发布火车：core 变更三端同车；端独占 adapter 修复可独立补丁 |

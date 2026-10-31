@@ -1,0 +1,489 @@
+# 第十二部分：CSS 工程化与现代 CSS（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/12-css-engineering
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第十二部分：CSS 工程化与现代 CSS
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[设计模式与架构](./11-patterns-architecture.md)｜下一篇：[SSR 与元框架](./13-ssr-meta-frameworks.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-12" target="_blank" rel="noopener">EP.12《CSS 工程化》</a>
+
+## 本部分内容
+
+- [12.1 现代布局体系](#_12-1-现代布局体系)
+- [12.2 样式方案选型](#_12-2-样式方案选型)
+- [12.3 设计令牌与主题系统](#_12-3-设计令牌与主题系统)
+- [12.4 CSS 性能优化](#_12-4-css-性能优化)
+- [12.5 自测题](#_12-5-自测题)
+- [12.6 本章避坑清单](#_12-6-本章避坑清单)
+
+---
+
+> CSS 在很多团队的"进阶清单"里被严重低估。现代 CSS 已经拥有布局、逻辑、性能三个维度的原生能力，工程化选型（原子化 / 零运行时 / CSS Modules）也直接受 SSR/RSC 架构影响。
+
+## 12.1 现代布局体系
+
+#### 概念解析
+
+##### 地基一：盒模型——`width` 到底算到哪
+
+每个元素都是一个矩形盒子，由 **content（内容区）+ padding + border + margin** 四层组成。`box-sizing` 决定声明的 `width` 包含到哪一层：
+
+| | `content-box`（W3C 标准盒，默认值） | `border-box`（IE 怪异盒） |
+| -- | -- | -- |
+| `width` 含义 | 只含内容区 | 含 content + padding + border |
+| `width:200px; padding:20px; border:10px` 的实际占位 | **260px**（200 + 40 + 20） | **200px**（内容区被压到 140px） |
+| 设计直觉 | 写 width 还要心算加上内边距边框 | width 即"我要的组件宽度"，padding 向内吃 |
+
+历史背景：IE6 怪异模式（Quirks Mode）下 width 包含 padding/border，W3C 标准则相反；现代最佳实践是在 reset 中全局 `*, *::before, *::after { box-sizing: border-box; }`（见 [12.2 reset 示例](./12-css-engineering.md#_12-2-样式方案选型)），组件、栅格、表单控件的宽度才符合直觉。注意 `box-sizing` **不影响 margin**，外边距永远额外叠加。
+
+##### 地基二：外边距合并（margin collapsing）与 BFC
+
+普通块级盒子在**垂直方向**上，相邻的 margin 有时会合并成一个（取较大值），这不是 bug 而是 CSS 排版规则（源于段落排版：连续 `<p>` 的上下间距不应翻倍）。三种场景：
+
+| 场景 | 规则 | 典型现象 |
+| ---- | ---- | -------- |
+| 相邻兄弟 | 上下 margin 合并，取 `max()` | 上 `margin-bottom:30px` + 下 `margin-top:20px` → 间距 **30px** 不是 50px |
+| 父元素与首/末子元素 | 父无 `border-top`/`padding-top`/BFC 隔断时，首子的 `margin-top` 与父合并 | 子元素 `margin-top` 把**整个父容器**顶下去（margin 穿透） |
+| 空块自身 | 空元素的 `margin-top` 与 `margin-bottom` 直接合并 | 一个 `margin:20px 0` 的空 `<div>` 实际只占 20px |
+
+**不发生合并的情况**：建立了**块级格式化上下文（BFC）**的容器、flex / grid 容器的子项（弹性项/网格项不合并）、`inline-block`、浮动或绝对定位元素、有 border/padding 隔断的位置。常用 BFC 建立方式：`display: flow-root`（现代首选，无副作用）、`overflow: hidden`（会裁切溢出）、1px border/padding 隔断。现代 flex/grid 布局下 margin 合并基本不再干扰，但读懂老代码与排障仍必须掌握。
+
+> 可运行实验：<a href="./examples/12-11-box-model-margin.html" target="_blank" rel="noopener">12-11-box-model-margin.html</a> 提供盒模型宽度实测、父子穿透三种修法开关、兄弟合并 vs flex 项不合并的像素级对照。
+
+##### 现代布局能力
+
+| 能力 | 一句话 | 关键点 |
+| ---- | ------ | ------ |
+| Flexbox | 一维布局（行或列） | `gap`、`flex: 1` 与 `flex-basis` 的区别 |
+| Grid | 二维布局（行 + 列） | `repeat(auto-fill, minmax())` 实现**无媒体查询**的响应式栅格 |
+| Container Queries | 组件根据**父容器**（而非视口）尺寸响应 | 组件级响应式：同一个组件在侧栏和主区自动切换形态 |
+| 逻辑属性 | `margin-inline-start` 代替 `margin-left` | i18n/RTL 适配的基石（阿拉伯语界面自动镜像） |
+| aspect-ratio | 声明宽高比 | 图片/视频占位防 CLS（与 [3.5](./03-engineering.md#_3-5-性能优化体系) 呼应） |
+
+#### 完整代码示例
+
+```html
+<!-- 文件: examples/12-11-box-model-margin.html —— [浏览器] 盒模型与外边距合并实验 -->
+<!-- 三组打开即出实测值的实验: -->
+<!-- 实验1: 同 width/padding/border,content-box 实际占 260px,border-box 恒为 200px -->
+<!-- 实验2: 父子 margin-top 穿透 40px,可切换 flow-root / padding / overflow 三种修复 -->
+<!-- 实验3: 普通兄弟 margin 合并取 max=30px,flex 子项不合并=50px -->
+```
+
+```html
+<!-- 文件: examples/12-01-auto-grid.html —— [浏览器] 无媒体查询的响应式卡片栅格 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        .grid {
+            display: grid;
+            /* 核心一行:每列最小 220px,放得下几列放几列,空间不足自动换行 */
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 16px;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 拖动窗口宽度:列数自动 5 → 4 → 3 → 2 → 1,没有任何媒体查询 -->
+    <div class="grid">
+        <div class="card">卡片 1</div>
+        <div class="card">卡片 2</div>
+        <div class="card">卡片 3</div>
+        <div class="card">卡片 4</div>
+        <div class="card">卡片 5</div>
+    </div>
+</body>
+</html>
+```
+
+```html
+<!-- 文件: examples/12-02-container-query.html —— [浏览器] 容器查询:组件级响应式 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        /* 声明:这个元素是查询容器,子组件可以感知它的宽度 */
+        .sidebar { container-type: inline-size; width: 260px; resize: horizontal; overflow: auto; border: 1px dashed #999; padding: 8px; }
+        .main { container-type: inline-size; margin-top: 12px; border: 1px dashed #999; padding: 8px; }
+
+        /* 同一个商品卡片组件:窄容器(侧栏)显示紧凑形态,宽容器(主区)显示横向形态 */
+        .product-card { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; }
+        .product-card img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #eee; }
+
+        /* 容器宽度 ≥ 400px 时切换为横向布局 —— 与视口无关! */
+        @container (min-width: 400px) {
+            .product-card { flex-direction: row; align-items: center; gap: 16px; }
+            .product-card img { width: 180px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <p>侧栏(可拖动右下角改变宽度)</p>
+        <div class="product-card">
+            <img alt="商品图" />
+            <div><b>机械键盘</b><p>¥199</p></div>
+        </div>
+    </div>
+    <div class="main">
+        <p>主内容区(宽容器)</p>
+        <div class="product-card">
+            <img alt="商品图" />
+            <div><b>机械键盘</b><p>¥199</p></div>
+        </div>
+    </div>
+</body>
+</html>
+```
+
+```css
+/* 文件: examples/12-03-logical-properties.css —— 逻辑属性:RTL 国际化的基石 */
+/* ❌ 物理属性:切到阿拉伯语(RTL)后图标会贴错边 */
+.bad-icon { margin-left: 8px; text-align: left; }
+
+/* ✅ 逻辑属性:RTL 环境下自动镜像为右侧/右对齐 */
+.icon {
+    margin-inline-start: 8px;  /* "阅读起始方向"的外边距 */
+    padding-block: 4px;        /* 块方向(上下)内边距 */
+    inset-inline-end: 0;       /* 定位也支持逻辑方向 */
+}
+```
+
+> 运行方式：HTML 文件直接用浏览器打开（`open examples/12-11-box-model-margin.html` 先看地基实验，`open examples/12-01-auto-grid.html` 看响应式栅格），拖动窗口/侧栏观察布局变化。
+
+#### 最佳实践
+
+- ✅ 全局 reset 第一件事就是 `box-sizing: border-box`，组件宽度一律按"最终占位"思考；
+- ✅ 遇到"父容器被子元素 margin 顶下去"，首选在父元素加 `display: flow-root`，不要用空 `<div>` 或 `overflow:hidden` 硬顶；
+- ✅ 二维结构（整页框架、卡片栅格）用 Grid，一维排列（导航项、按钮组）用 Flex，不必二选一；
+- ✅ 抽成组件的 UI（卡片、列表项）优先用容器查询而不是媒体查询——媒体查询只处理"页面级"响应式；
+- ⚠️ `container-type: inline-size` 会让容器建立新的包含块，注意对内部 `position: fixed` 元素的影响；
+- 📖 面试高频：Grid 与 Flex 的选型、`auto-fill` vs `auto-fit`（后者会把空轨道折叠拉伸）、BFC 与现代布局的关系弱化。
+
+## 12.2 样式方案选型
+
+#### 概念解析
+
+| 方案 | 原理 | 优点 | 代价 | 适用 |
+| ---- | ---- | ---- | ---- | ---- |
+| 全局 CSS / BEM | 命名约定隔离 | 零依赖 | 靠自觉,易冲突 | 简单站点 |
+| CSS Modules | 构建期把类名哈希化 | 零运行时、类型安全(配 typed-css-modules) | 动态样式要靠 CSS 变量 | 组件库、大多数项目 |
+| CSS-in-JS(运行时) | styled-components/emotion,运行时生成 style | 样式即组件、动态能力强 | 运行时开销;**与 RSC 不兼容** | 纯 CSR 应用(存量) |
+| 零运行时 CSS-in-JS | vanilla-extract/Linaria,构建期产出 css 文件 | 类型安全 + 零运行时 | 多一步构建 | SSR/RSC 项目 |
+| 原子化 CSS | Tailwind/UnoCSS,类名即样式 | 无命名负担、产物极小、约束一致 | 模板可读性、学习曲线 | 中后台、快速迭代团队 |
+
+**2026 年的趋势判断**：RSC/流式 SSR 让"运行时 CSS-in-JS"逐渐退出新项目；主流组合是 **原子化（业务应用）或 CSS Modules / 零运行时（组件库）+ CSS 变量（主题）**。
+
+#### 完整代码示例
+
+```tsx
+// 文件: examples/12-04-css-modules.tsx —— CSS Modules:构建期隔离,零运行时
+import styles from './Button.module.css';
+
+export function Button({ variant }: { variant: 'primary' | 'ghost' }) {
+    // 类名被哈希为 Button_primary__x7f2a,天然不冲突
+    return <button className={`${styles.btn} ${styles[variant]}`}>提交</button>;
+}
+
+// Button.module.css:
+// .btn { padding: 8px 16px; border-radius: 6px; }
+// .primary { background: var(--color-primary); color: #fff; }
+// .ghost { background: transparent; border: 1px solid var(--color-primary); }
+```
+
+```tsx
+// 文件: examples/12-05-atomic-css.tsx —— 原子化 CSS(Tailwind 风格):类名即样式
+// 无需任何 css 文件;产物只包含用到的原子类,Gzip 后体积极小
+export function UserBadge({ name, online }: { name: string; online: boolean }) {
+    return (
+        <span
+            className={[
+                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-sm',
+                online ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500',
+            ].join(' ')}
+        >
+            {/* 条件样式 = 条件类名,配合 clsx/cn 工具函数更优雅 */}
+            <span className={`size-2 rounded-full ${online ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+            {name}
+        </span>
+    );
+}
+```
+
+```css
+/* 文件: examples/12-06-layer.css —— @layer:接管"优先级战争" */
+/* 三层优先级从低到高:reset < framework < local —— 组件样式永远能覆盖框架样式 */
+@layer reset, framework, local;
+
+@layer reset {
+    * { margin: 0; box-sizing: border-box; }
+}
+
+@layer framework {
+    /* 第三方组件库的样式放这里 */
+    .btn { padding: 12px 24px; }
+}
+
+@layer local {
+    /* 业务样式无条件覆盖 framework 层,不再需要 !important */
+    .btn { padding: 8px 16px; }
+}
+```
+
+> 运行方式：`12-04` / `12-05` 放入对应脚手架项目（CSS Modules 在 Vite 中开箱即用；Tailwind 需 `npm i -D tailwindcss` 并初始化）；`12-06` 可直接放进任意项目观察优先级。
+
+#### 最佳实践
+
+- ✅ 新项目决策树：组件库/设计系统 → CSS Modules 或零运行时；业务中后台 → 原子化；存量 CSR 迁移 → 维持现状 + 渐进统一；
+- ✅ 无论哪种方案，**主题与语义色一律走 CSS 变量**（见 [12.3](./12-css-engineering.md#_12-3-设计令牌与主题系统)），方案只负责"类名怎么组织"；
+- ⚠️ 运行时 CSS-in-JS 在 SSR 下有序列化开销与样式闪烁问题，RSC 下直接不可用；
+- 📖 面试高频：CSS Modules 的隔离原理（构建期哈希）、原子化 CSS 为什么产物小、`@layer` 与 `!important` 的关系。
+
+## 12.3 设计令牌与主题系统
+
+#### 概念解析
+
+设计令牌（Design Token）分三层，自下而上引用：
+
+```
+原始层(primitive): --blue-500: #1890ff        ← 色板,不直接用于组件
+语义层(semantic):  --color-primary: var(--blue-500)   ← 按用途命名
+组件层(component): .btn { background: var(--color-primary) }
+```
+
+主题切换 = 只替换语义层变量的值。暗色模式的两种驱动方式：`prefers-color-scheme`（跟随系统）+ `data-theme` 属性（用户手动切换，优先级更高）。
+
+#### 完整代码示例
+
+```html
+<!-- 文件: examples/12-07-theme-toggle.html —— [浏览器] 完整的暗色模式切换 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        /* 语义层:亮色为默认值 */
+        :root {
+            --color-bg: #ffffff;
+            --color-text: #1f1f1f;
+            --color-primary: #1890ff;
+            --color-card: #f5f5f5;
+        }
+        /* 暗色主题:只需覆盖语义层 */
+        :root[data-theme='dark'] {
+            --color-bg: #141414;
+            --color-text: rgba(255, 255, 255, 0.85);
+            --color-card: #1f1f1f;
+        }
+        /* 用户没手动选过时,跟随系统 */
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme]) {
+                --color-bg: #141414;
+                --color-text: rgba(255, 255, 255, 0.85);
+                --color-card: #1f1f1f;
+            }
+        }
+
+        body { background: var(--color-bg); color: var(--color-text); transition: background 0.2s; }
+        .card { background: var(--color-card); padding: 16px; border-radius: 8px; margin-top: 12px; }
+        button { background: var(--color-primary); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <button id="toggle">切换主题</button>
+    <div class="card">所有颜色都来自语义层变量,切换主题时组件代码零改动</div>
+
+    <script>
+        // 初始化:读取用户上一次的选择(localStorage);首帧前执行避免闪烁(FOUC)
+        const saved = localStorage.getItem('theme');
+        if (saved) document.documentElement.dataset.theme = saved;
+
+        document.getElementById('toggle').addEventListener('click', () => {
+            const root = document.documentElement;
+            const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+            root.dataset.theme = next;
+            localStorage.setItem('theme', next); // 手动选择优先于系统偏好
+        });
+    </script>
+</body>
+</html>
+```
+
+```typescript
+// 文件: examples/12-08-typed-tokens.ts —— 令牌的 TypeScript 化(呼应 2.4)
+// 单一定义源:CSS 变量名与 TS 类型互相约束,重命名令牌时编译期立刻暴露
+
+const tokens = {
+    colorPrimary: '#1890ff',
+    colorText: '#1f1f1f',
+    fontSizeSm: '12px',
+    fontSizeLg: '20px',
+} as const;
+
+type TokenName = keyof typeof tokens;                                   // 'colorPrimary' | ...
+type CssVar = `--${TokenName}`;                                         // '--colorPrimary' | ...
+
+// 运行时:生成 style 对象;编译期:注意不要用 as 断言 —— 有了它缺键/拼错都会被放过
+export function tokenVars(): Record<CssVar, string> {
+    return {
+        '--colorPrimary': tokens.colorPrimary,
+        '--colorText': tokens.colorText,
+        '--fontSizeSm': tokens.fontSizeSm,
+        '--fontSizeLg': tokens.fontSizeLg,
+        // '--colorPrimay': ..., ← 拼错键:❌ 编译报错(不在 CssVar 中)
+        // 缺掉任何一个键也会编译报错 —— 映射类型强制"每个 token 都有对应变量"
+    };
+}
+
+// React 中挂载到根元素:
+// <div style={tokenVars()}>...</div>
+console.log(tokenVars());
+```
+
+> 运行方式：`open examples/12-07-theme-toggle.html` 点击按钮体验切换（DevTools 中 `prefers-color-scheme` 可在"渲染"面板模拟）；TS 示例用 `npx tsx examples/12-08-typed-tokens.ts` 运行。
+
+#### 最佳实践
+
+- ✅ 组件**只允许引用语义层令牌**（`--color-primary`），禁止直写色值——这是主题系统唯一要坚守的纪律；
+- ✅ 主题初始化脚本必须内联在 `<head>` 且在首帧前执行，否则暗色用户会经历"白屏闪一下"（FOUC）；
+- ✅ 跟随系统 + 用户手动覆盖 + localStorage 持久化，三件套是当前的标准形态；
+- ⚠️ 切换动画只对 `background/color` 做 transition，全局 `* { transition: all }` 会引发大量无关重绘。
+
+## 12.4 CSS 性能优化
+
+#### 概念解析
+
+CSS 影响性能的三条路径：**渲染管线下游**（样式计算/布局/绘制，与 [10.2](./10-browser-rendering.md#_10-2-渲染流程与重排重绘) 呼应）、**首屏阻塞**（CSS 阻塞渲染）、**合成层滥用**（内存暴涨）。
+
+| 手段 | 作用 | 场景 |
+| ---- | ---- | ---- |
+| `content-visibility: auto` | 视口外内容跳过渲染(布局+绘制),接近虚拟列表的免费版 | 长列表、长页面分节 |
+| `contain: layout paint` | 声明子树隔离,内部变化不外溢 | 频繁更新的独立组件 |
+| `will-change` | 预创建合成层 | 即将动画的元素,用完移除(呼应 [10.3](./10-browser-rendering.md#_10-3-渲染性能优化实战) |
+| 动画只用 transform/opacity | 只走合成,跳过 Layout/Paint | 所有动画 |
+| `@layer` 分层 | 稳定的优先级,减少选择器权重竞赛 | 大型项目样式治理 |
+
+#### 完整代码示例
+
+```html
+<!-- 文件: examples/12-09-content-visibility.html —— [浏览器] 长页面渲染提速 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        .section {
+            /* 视口外的 section 跳过布局与绘制;滚动接近时才渲染 */
+            content-visibility: auto;
+            /* 关键:给"未渲染状态"一个估算高度,保证滚动条稳定(防 CLS) */
+            contain-intrinsic-size: auto 500px;
+            margin: 8px 0;
+            padding: 16px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 100 个大段落:首屏渲染成本从 100 个 section 降到 ~3 个 -->
+    <div id="app"></div>
+    <script>
+        const app = document.getElementById('app');
+        for (let i = 0; i < 100; i++) {
+            const section = document.createElement('section');
+            section.className = 'section';
+            section.innerHTML = `<h2>章节 ${i + 1}</h2><p>${'很长的内容...'.repeat(200)}</p>`;
+            app.appendChild(section);
+        }
+    </script>
+</body>
+</html>
+```
+
+```css
+/* 文件: examples/12-10-selector-perf.css —— 选择器开销的真相 */
+
+/* ❌ 反直觉:嵌套过深 + 无谓通配,主要代价是可读性与权重失控,现代引擎性能差异已很小 */
+div#app .list ul li a.item span:not(.active) { color: red; }
+
+/* ✅ 一个类名解决同样的事 */
+.item-text--active { color: red; }
+
+/* 真正要避免的两类:
+   1. 全局通配 + 高频属性变化(如 * { transition: all }) —— 大量元素参与样式失效
+   2. 低成本属性动画(如 width/left) —— 触发 Layout,与选择器无关但常被误怪给选择器 */
+
+/* 性能检查清单(DevTools → Performance → 录制交互):
+   - Recalculate Style 耗时长 → 检查失效范围过大的选择器/属性
+   - Layout 频繁 → 改用 transform
+   - Paint 大面积 → 检查大面积渐变/阴影动画 */
+```
+
+> 运行方式：`open examples/12-09-content-visibility.html`，用 Performance 面板对比开启/关闭 `content-visibility` 时的首次渲染耗时（差异通常在 3~10 倍）。
+
+#### 最佳实践
+
+- ✅ 长页面/长列表先上 `content-visibility: auto`（一行 CSS），仍不够再上虚拟列表（[10.4](./10-browser-rendering.md#_10-4-高性能虚拟列表)）；
+- ✅ 动画三查：是否 transform/opacity、是否只在必要元素上 `will-change`、动画结束是否移除；
+- ⚠️ `content-visibility: auto` 内部的锚点定位/浏览器查找可能受影响，搜索功能重的页面慎用；
+- 📖 面试高频：CSS 阻塞什么（渲染）、不阻塞什么（HTML 解析）、`content-visibility` 与虚拟列表的区别（浏览器原生启发式 vs 精确 DOM 控制）。
+
+## 12.5 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】如何只用一行 CSS 实现列数自适应的栅格布局？auto-fill 和 auto-fit 的区别是什么？</b></summary>
+
+`grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))`。区别在空间富余时：`auto-fill` 保留空轨道（卡片靠左，右侧留白）；`auto-fit` 把空轨道折叠掉，已有卡片拉伸填满整行。
+</details>
+
+<details>
+<summary><b>2. 【进阶】容器查询与媒体查询的本质区别？各自的适用场景？</b></summary>
+
+媒体查询感知的是**视口**尺寸，容器查询感知的是**父容器**尺寸。页面整体布局响应用媒体查询；可复用组件（卡片、表单项）的形态切换用容器查询——组件放进侧栏或主区都能正确表现，这才是真正的组件级响应式。
+</details>
+
+<details>
+<summary><b>3. 【进阶】为什么运行时 CSS-in-JS 与 React Server Components 不兼容？新项目应该怎么选？</b></summary>
+
+RSC 在服务端渲染且不执行客户端运行时，而运行时 CSS-in-JS 需要在客户端收集组件样式后动态插入 style 标签，服务端无法预知产物，还会增加水合成本。新项目：业务应用选原子化 CSS，组件库选 CSS Modules 或 vanilla-extract 等零运行时方案，主题统一用 CSS 变量。
+</details>
+
+<details>
+<summary><b>4. 【进阶】content-visibility: auto 和 JS 虚拟列表各解决什么问题？何时选哪个？</b></summary>
+
+`content-visibility: auto` 让浏览器跳过视口外内容的布局与绘制，一行 CSS 生效，但 DOM 仍全量存在，适合文章长页面、静态长列表。虚拟列表精确控制 DOM 数量（只渲染可视区），适合需要频繁增删、搜索定位、超大数据量的动态列表。先试前者，不够再上后者。
+</details>
+
+<details>
+<summary><b>5. 【进阶】暗色模式为什么要"内联脚本先于首帧执行"？不做会发生什么？</b></summary>
+
+CSS 变量默认是亮色值，如果等 React 应用挂载后才从 localStorage 读取用户主题并设置 data-theme，暗色用户会先看到一帧亮色再切换（FOUC 白闪）。因此初始化脚本要内联在 head 中、阻塞首帧前执行。
+</details>
+
+---
+
+## 12.6 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| `z-index` | 写了很大的 `z-index` 还是被别的元素盖住 | 先排查父级是否因 `transform`、`opacity < 1`、`filter`、`will-change`、`isolation: isolate` 新建了层叠上下文——`z-index` 只在**同一个**层叠上下文内比大小；且它对 `position: static` 完全无效 |
+| 外边距 | 相邻元素上下 `margin` 莫名合并，间距比预期小 | 垂直外边距合并：兄弟或父子相邻的外边距取较大值。用 `padding`、`overflow: hidden` 建立 BFC，或统一改用 `gap` |
+| Flex | 长文本把 flex 子项撑破，`flex: 1` 也不收缩 | 子项默认 `min-width: auto` 拒绝收缩，需显式 `min-width: 0`（或 `overflow: hidden`），溢出文本再加 `text-overflow: ellipsis` |
+| 百分比高度 | `height: 100%` 不生效，元素高度为 0 | 百分比高度依赖父级的**显式**高度，父级为 `auto` 时链路中断。用 `dvh`/`grid` 布局，或逐级打通父级高度 |
+| 移动端像素 | 设计稿 1px 的细线在高分屏上显粗 | 1 CSS px 在 DPR 2/3 下对应多个物理像素，边框会被取整加粗；用伪元素 `transform: scaleY(0.5)` 或 `border-image` 输出真 1 物理像素 |
+| 移动端视口 | 输入框聚焦弹起键盘，`100vh` 容器被顶飞 | `vh` 不随键盘与工具栏变化，改用 `dvh`（或 `svh`/`lvh`），并按 `env(safe-area-inset-*)` 预留刘海与手势条 |
+| 原子化 CSS | `text-${color}` 这类拼出来的类名打包后样式丢失 | 原子化引擎靠**静态扫描**生成类，动态拼接的字符串它看不见；改用完整类名映射表或 `safelist` |
+| `content-visibility` | 加了 `content-visibility: auto` 后锚点跳转与页内查找失灵 | 该属性跳过视口外内容的布局，被跳过区域的锚点与查找会失效；搜索与深链重的页面改用虚拟列表（[10.4](./10-browser-rendering.md#_10-4-高性能虚拟列表)） |

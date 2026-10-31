@@ -1,0 +1,826 @@
+# 第二部分：TypeScript 高级应用（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/02-typescript
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第二部分：TypeScript 高级应用
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[JavaScript 高级特性](./01-javascript-advanced.md)｜下一篇：[前端工程化](./03-engineering.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-2" target="_blank" rel="noopener">EP.02《TypeScript 类型体操》</a>
+
+## 本部分内容
+
+- [2.1 类型系统核心与类型收窄](#_2-1-类型系统核心与类型收窄)
+- [2.2 泛型深入](#_2-2-泛型深入)
+- [2.3 条件类型与 infer](#_2-3-条件类型与-infer)
+- [2.4 映射类型与模板字面量类型](#_2-4-映射类型与模板字面量类型)
+- [2.5 手写常用工具类型](#_2-5-手写常用工具类型)
+- [2.6 类型体操实战](#_2-6-类型体操实战)
+- [2.7 装饰器](#_2-7-装饰器)
+- [2.8 工程配置与类型声明文件](#_2-8-工程配置与类型声明文件)
+- [2.9 自测题](#_2-9-自测题)
+- [2.10 本章避坑清单](#_2-10-本章避坑清单)
+
+---
+
+> TypeScript 已经是现代前端的默认选择。进阶的关键不是背类型体操，而是：**泛型抽象、条件类型推理、映射类型变形**三板斧，让类型系统为业务服务。
+
+## 2.1 类型系统核心与类型收窄
+
+#### 概念解析
+
+- **结构化类型（Structural Typing）**：TS 只看"形状"是否匹配，不看名字——`type A = {x: number}` 与 `interface B { x: number }` 完全兼容；
+- **类型收窄（Narrowing）**：TS 会根据控制流分析（if、return、类型守卫等）把联合类型收窄为更具体的分支；
+- **收窄手段**：`typeof`、`instanceof`、`in`、字面量相等判断、判别联合、自定义类型谓词 `x is T`、`asserts` 断言。
+
+#### 典型应用场景
+
+- 处理 `unknown`（如解析 JSON、接收第三方回调参数）时的安全访问；
+- 判别联合替代布尔标志位，消灭非法状态；
+- 写类型守卫替代滥用 `as any`。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/02-01-narrowing.ts
+// ============ 类型收窄:让编译器"理解"你的分支逻辑 ============
+
+// ---- 判别联合:用字面量字段区分,消灭非法状态 ----
+// ❌ 反例:布尔标志会出现"loading=true 且 data 有值"的非法状态
+// interface BadState { loading: boolean; data?: User[]; error?: Error }
+
+// ✅ 正例:每个状态互斥,访问 data 前编译器强制你先收窄
+type FetchState =
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'success'; data: string[] }
+    | { status: 'error'; error: Error };
+
+function render(state: FetchState): string {
+    switch (state.status) {
+        case 'idle':
+            return '空';
+        case 'loading':
+            return '加载中...';
+        case 'success':
+            return state.data.join(','); // ✅ 这里 state 已被收窄,能安全访问 data
+        case 'error':
+            return `出错了: ${state.error.message}`; // ✅ 同理,不需要 `!` 或 as
+    }
+}
+
+// ---- unknown 与类型守卫:处理"不可信输入"的正确姿势 ----
+function parseUser(json: string) {
+    const raw: unknown = JSON.parse(json); // JSON.parse 返回 any,立刻收窄为 unknown
+    if (isUser(raw)) {
+        return raw; // ✅ raw 在这里是 { id: string; name: string }
+    }
+    throw new Error('非法的用户数据');
+}
+
+// 类型谓词函数:x is User —— 告诉编译器"返回 true 时 x 就是 User"
+function isUser(x: unknown): x is { id: string; name: string } {
+    return (
+        typeof x === 'object' &&
+        x !== null &&
+        'id' in x &&
+        'name' in x &&
+        typeof (x as { id: unknown }).id === 'string' &&
+        typeof (x as { name: unknown }).name === 'string'
+    );
+}
+
+console.log(render({ status: 'success', data: ['a', 'b'] }));
+console.log(parseUser('{"id":"1","name":"Alice"}').name); // Alice
+
+// ---- 可辨识失败结果:Result 模式,让错误必须被处理 ----
+type Result<T> = { ok: true; value: T } | { ok: false; error: string };
+
+function safeDivide(a: number, b: number): Result<number> {
+    if (b === 0) return { ok: false, error: '除数不能为 0' };
+    return { ok: true, value: a / b };
+}
+
+const result = safeDivide(10, 2);
+if (result.ok) console.log(result.value); // 5 —— 不检查 ok 就拿不到 value
+```
+
+> 运行方式：`npx tsx examples/02-01-narrowing.ts`
+
+#### 最佳实践
+
+- ✅ 接口边界（JSON.parse、第三方回调、`localStorage`）一律先当 `unknown`，再用守卫收窄；
+- ✅ 表示互斥状态用**判别联合**，不要用多个可同时为真的布尔字段；
+- ⚠️ `as` 断言是"关掉编译器"，只在确有把握且编译器无法推断时使用；优先类型谓词；
+- ⚠️ TS 的类型在**编译后会被擦除**，运行时不做任何校验——所以边界处才需要 `isUser` 这类运行时校验（进阶可用 `zod` 做"单一定义、双向校验"）。
+
+## 2.2 泛型深入
+
+#### 概念解析
+
+泛型的本质是**类型的参数化**：把"类型"当作函数的入参，让同一段逻辑适配不同类型，同时保留完整的类型信息。
+
+- **泛型约束 `extends`**：限制入参的形状，同时让函数体内可以安全访问该形状的成员；
+- **默认类型 `<T = X>`**：调用方可省略泛型参数；
+- **多泛型与映射关系**：输入输出之间建立"可推导"的联系，是工具函数类型安全的全部秘密。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/02-02-generics.ts
+// ============ 泛型:从工具函数到强类型 API 层 ============
+
+// ---- 基础:泛型保留入参类型 ----
+function firstElement<T>(arr: readonly T[]): T | undefined {
+    return arr[0];
+}
+const n = firstElement([1, 2, 3]);        // n: number | undefined
+const s = firstElement(['a']);            // s: string | undefined
+
+// ---- 约束:保证入参有某个形状 ----
+function pick<T, K extends keyof T>(obj: T, key: K): T[K] {
+    return obj[key]; // 有了 K extends keyof T 约束,这里才能安全索引
+}
+const user = { id: 1, name: 'Alice', admin: true };
+const name = pick(user, 'name');  // name: string —— 返回类型精确对应所选 key
+// pick(user, 'age');              // ❌ 编译错误:'age' 不存在于 keyof user
+
+// ---- 默认类型:让泛型参数可省略 ----
+interface ApiResponse<T = unknown> {
+    code: number;
+    data: T;
+    message: string;
+}
+const res1: ApiResponse = { code: 0, data: null, message: 'ok' };       // T = unknown
+const res2: ApiResponse<{ id: number }[]> = { code: 0, data: [{ id: 1 }], message: 'ok' };
+
+// ---- 泛型函数重载:参数与返回值的多形态精确匹配 ----
+function createElement(tag: 'div'): HTMLDivElement;
+function createElement(tag: 'span'): HTMLSpanElement;
+function createElement(tag: 'input'): HTMLInputElement;
+function createElement(tag: string): HTMLElement {
+    return document.createElement(tag); // [浏览器] 运行环境需要 DOM
+}
+// const input = createElement('input'); // [浏览器] HTMLInputElement —— 重载按字面量精确匹配
+
+// ---- 实战:类型安全的事件订阅(事件名 → 载荷 强关联)----
+interface EventMap {
+    login: { userId: string; time: number };
+    logout: undefined;
+}
+class TypedEventBus<E extends Record<string, unknown>> {
+    private handlers = new Map<keyof E, Set<(payload: never) => void>>();
+
+    on<K extends keyof E>(event: K, handler: (payload: E[K]) => void): () => void {
+        let set = this.handlers.get(event);
+        if (!set) this.handlers.set(event, (set = new Set()));
+        set.add(handler as (payload: never) => void);
+        return () => set!.delete(handler as (payload: never) => void);
+    }
+
+    emit<K extends keyof E>(event: K, payload: E[K]): void {
+        [...(this.handlers.get(event) ?? [])].forEach((h) => (h as (p: E[K]) => void)(payload));
+    }
+}
+
+const bus = new TypedEventBus<EventMap>();
+bus.on('login', ({ userId, time }) => console.log(userId, time)); // 载荷类型自动推导
+bus.emit('login', { userId: '1', time: Date.now() });
+// bus.emit('login', { userId: '1' });            // ❌ 编译错误:缺少 time
+// bus.on('logout', (p) => p.xxx);                // ❌ logout 载荷是 undefined
+```
+
+```typescript
+// 文件: examples/02-03-typed-api.ts
+// ============ 用泛型 + 映射类型搭建"类型安全"的前端 API 层 ============
+// 思路:接口路径、方法、请求/响应类型集中在一张表里,请求函数全部自动推导
+
+type User = { id: string; name: string; age: number };
+
+// API 蓝图:单一定义源(single source of truth)
+interface ApiMap {
+    '/user': {
+        GET: { res: User };
+        POST: { body: Omit<User, 'id'>; res: User };
+        DELETE: { res: { ok: boolean } };
+    };
+    '/user/list': {
+        GET: { res: User[]; query: { page: number; size: number } };
+    };
+}
+
+// 从蓝图中提取查询参数:没有 query 字段时返回 undefined
+type QueryOf<P extends keyof ApiMap> = ApiMap[P] extends { GET: { query: infer Q } } ? Q : undefined;
+type BodyOf<P extends keyof ApiMap, M extends keyof ApiMap[P]> = ApiMap[P][M] extends { body: infer B } ? B : undefined;
+type ResOf<P extends keyof ApiMap, M extends keyof ApiMap[P]> = ApiMap[P][M]['res'];
+
+async function request<P extends keyof ApiMap, M extends keyof ApiMap[P]>(
+    path: P,
+    method: M,
+    options?: { query?: QueryOf<P>; body?: BodyOf<P, M> },
+): Promise<ResOf<P, M>> {
+    const query = options?.query ? `?${new URLSearchParams(Object.entries(options.query).map(([k, v]) => [k, String(v)]))}` : '';
+    const res = await fetch(String(path) + query, {
+        method: String(method),
+        body: options?.body ? JSON.stringify(options.body) : undefined,
+    });
+    return res.json() as Promise<ResOf<P, M>>;
+}
+
+// 调用处全部自动推导,改接口蓝图时调用处会立刻报错
+async function demo() {
+    const list = await request('/user/list', 'GET', { query: { page: 1, size: 10 } }); // User[]
+    console.log(list.length);
+    const created = await request('/user', 'POST', { body: { name: 'Alice', age: 18 } }); // User
+    console.log(created.id);
+}
+void demo;
+```
+
+> 运行方式：`npx tsx examples/02-02-generics.ts`；`02-03-typed-api.ts` 中的请求函数需真实服务端，示例以类型推导演示为主（可直接观察编辑器中的类型提示）。
+
+#### 最佳实践
+
+- ✅ 写工具函数先想清楚**输入输出之间的类型联系**，让 TS 推导而不是手动标 `any`；
+- ✅ API 层用"蓝图接口 + 泛型请求函数"模式（或直接上 `openapi-typescript` 自动生成蓝图）；
+- ⚠️ 泛型层数不宜过深：当类型复杂到同事看不懂时，宁可适当放宽类型 + 注释说明；
+- ✅ 多人协作中，`interface`（可声明合并）用于公共契约，`type`（更灵活）用于工具类型。
+
+## 2.3 条件类型与 infer
+
+#### 概念解析
+
+**条件类型** `A extends B ? X : Y` 是类型层面的三元表达式，配合泛型可以实现"类型函数"；
+
+**分布式条件类型**：当条件类型作用在**裸类型参数**上且传入联合类型时，会对联合的每个成员分别计算再合并——这是很多"魔法类型"的原理；
+
+**`infer R`**：在 `extends` 子句中"占位捕获"某个位置的类型，是类型层面解构的核心工具。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/02-04-conditional-infer.ts
+// ============ 条件类型与 infer:类型层面的"解构赋值"============
+
+// ---- infer 捕获:从既有类型中"抽"出需要的部分 ----
+type ElementType<T> = T extends (infer E)[] ? E : never;          // 数组元素类型
+type DeepAwait<T> = T extends Promise<infer V> ? DeepAwait<V> : T; // 递归解包 Promise(内置 Awaited 的简化版)
+type ReturnTypeOf<T> = T extends (...args: never[]) => infer R ? R : never; // 函数返回值
+type ParamsOf<T> = T extends (...args: infer P) => unknown ? P : never;     // 函数参数元组
+
+type A1 = ElementType<string[]>;        // string
+type A2 = DeepAwait<Promise<Promise<number>>>; // number —— 递归解包
+type A3 = ReturnTypeOf<typeof fetch>;   // Promise<Response>
+type A4 = ParamsOf<(a: string, b: number) => void>; // [a: string, b: number]
+
+// ---- 实战:解包 React/Vue 组合式函数的返回值 ----
+declare function useUser(): { user: Promise<{ id: string }>; loading: boolean };
+type UnpackedUseUser = { [K in keyof ReturnType<typeof useUser>]: DeepAwait<ReturnType<typeof useUser>[K]> };
+const unpacked: UnpackedUseUser = { user: { id: '1' }, loading: false }; // Promise 被解包成数据本体
+
+// ---- 分布式条件类型:联合类型会"逐个分发" ----
+type ToArray<T> = T extends unknown ? T[] : never;
+type A5 = ToArray<string | number>; // string[] | number[] —— 而不是 (string|number)[]
+
+// 阻止分发:用 [T] 包一层元组
+type ToArrayNonDist<T> = [T] extends [unknown] ? T[] : never;
+type A6 = ToArrayNonDist<string | number>; // (string | number)[]
+
+// 经典应用:Diff / 过滤联合类型
+type Diff<T, U> = T extends U ? never : T;
+type Filter<T, U> = T extends U ? T : never;
+type A7 = Diff<'a' | 'b' | 'c', 'a'>;         // 'b' | 'c'
+type A8 = Filter<string | number | boolean, string | number>; // string | number
+
+// ---- 映射元组:批量解包 Promise 元组 ----
+type UnwrapTuple<T extends unknown[]> = { [K in keyof T]: DeepAwait<T[K]> };
+type A9 = UnwrapTuple<[Promise<string>, Promise<number>, Promise<boolean>]>; // [string, number, boolean]
+
+// ---- 实战:提取路由参数(:id / :uid 两种占位)----
+type ExtractRouteParams<T extends string> = T extends `${string}:${infer Param}/${infer Rest}`
+    ? { [K in Param | keyof ExtractRouteParams<Rest>]: string }
+    : T extends `${string}:${infer Param}`
+      ? { [K in Param]: string }
+      : Record<string, never>;
+
+type P1 = ExtractRouteParams<'/user/:id'>;                    // { id: string }
+type P2 = ExtractRouteParams<'/user/:id/post/:postId'>;       // { id: string; postId: string }
+type P3 = ExtractRouteParams<'/about'>;                       // {}
+
+const params: P2 = { id: '1', postId: '9' };
+console.log(params);
+```
+
+> 运行方式：`npx tsx examples/02-04-conditional-infer.ts`（重点在编辑器中把鼠标悬停在 `A1~A9` 上查看推导结果；`typeName` 仅为占位演示）。
+
+#### 最佳实践
+
+- ✅ 记住三件套的分工：`keyof` 取键、`infer` 捕获位置、分布式条件类型拆联合；
+- ✅ 需要阻止分发时用 `[T] extends [U]` 元组包裹，或用 `NoInfer<T>`（TS 5.4+）；
+- ⚠️ 递归条件类型注意深度，过深的递归会导致编译变慢甚至 `Type instantiation is excessively deep` 报错；
+- ✅ 工具类型写完先写**期望值注释**（如 `// number`），悬停验证，避免"以为对了对"。
+
+## 2.4 映射类型与模板字面量类型
+
+#### 概念解析
+
+- **映射类型**：基于已有类型"批量生产"新类型：`{ [K in keyof T]: NewType }`，可加 `readonly`、`?` 修饰符，也可用 `-` 移除它们；
+- **键重映射（TS 4.1+）**：`[K in keyof T as NewKey]` 可以在映射时改键名、甚至过滤键（映射为 `never` 即删除）；
+- **模板字面量类型**：字符串类型层面的拼接与模式匹配，与键重映射结合可以生成风格化命名（如 `getX`/`setX`、`onXxxChange`）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/02-05-mapped-template.ts
+// ============ 映射类型 × 模板字面量:批量变形类型 ============
+
+interface Product {
+    id: string;
+    name: string;
+    price: number;
+}
+
+// ---- 基础映射:所有属性变可选/只读/可空 ----
+type MyPartial<T> = { [K in keyof T]?: T[K] };     // 等价于内置 Partial<T> 的实现
+type Draft<T> = { -readonly [K in keyof T]: T[K] }; // - 移除修饰符
+
+// ---- 键重映射:批量重命名 ----
+// 场景:后端返回蛇形命名,前端统一转驼峰类型
+type CamelCase<S extends string> =
+    S extends `${infer Head}_${infer Tail}` ? `${Head}${CamelCase<Capitalize<Tail>>}` : S;
+
+type Camelize<T> = {
+    [K in keyof T as CamelCase<K & string>]: T[K] extends object ? Camelize<T[K]> : T[K];
+};
+
+interface RawProduct {
+    product_id: string;
+    product_name: string;
+    created_at: string;
+}
+type Product2 = Camelize<RawProduct>;
+// 等价于 { productId: string; productName: string; createdAt: string }
+
+// ---- 模板字面量生成"强关联"的 API 形状 ----
+// 场景:为对象的每个属性自动生成 getXxx / setXxx
+type Getters<T> = {
+    [K in keyof T as `get${Capitalize<string & K>}`]: () => T[K];
+};
+type Setters<T> = {
+    [K in keyof T as `set${Capitalize<string & K>}`]: (value: T[K]) => void;
+};
+type Model<T> = T & Getters<T> & Setters<T>;
+
+const product: Model<Product> = {
+    id: '1',
+    name: '键盘',
+    price: 199,
+    getId: () => '1',
+    getName: () => '键盘',
+    getPrice: () => 199,
+    setId: (v) => console.log(v),
+    setName: (v) => console.log(v),
+    setPrice: (v) => console.log(v),
+};
+product.setName('机械键盘'); // ✅ 方法名与属性类型精确关联
+// product.setName(123);     // ❌ 编译错误:name 是 string
+
+// ---- 键过滤:映射为 never 即"删除"该键 ----
+type OmitByType<T, U> = {
+    [K in keyof T as T[K] extends U ? never : K]: T[K];
+};
+type WithoutFunctions = OmitByType<Model<Product>, (...args: never[]) => unknown>;
+// 只剩 id / name / price
+
+// ---- 实战:类型安全的设计令牌(主题变量)----
+type Theme = {
+    colorPrimary: string;
+    colorText: string;
+    fontSizeSm: string;
+    fontSizeLg: string;
+};
+// 自动生成 CSS 变量名映射:--color-primary 等
+type CssVar<K extends string> = `--${K & string}`; // 配合 kebab 转换函数使用效果更佳
+type ThemeVarMap = { [K in keyof Theme as CssVar<K>]: string };
+const cssVars: ThemeVarMap = {
+    '--colorPrimary': '#1890ff', // 实际项目可配合正则做 kebab-case(此处展示能力)
+    '--colorText': '#333',
+    '--fontSizeSm': '12px',
+    '--fontSizeLg': '20px',
+};
+console.log(cssVars, product);
+```
+
+> 运行方式：`npx tsx examples/02-05-mapped-template.ts`（重点看编辑器悬停推导与注释中的"等价类型"）。
+
+#### 最佳实践
+
+- ✅ 与后端联调的"蛇形→驼峰"场景直接复用 `Camelize` 模式，类型和运行时转换配套实现；
+- ✅ 组件库 / 工具库公开 API 时，`Getters/Setters`、`onXxxChange` 这类"生成式命名"能极大减少手写成本；
+- ⚠️ 模板字面量类型嵌套递归过深会让 IDE 卡顿，公开类型建议导出"展开后的名字"（如用 `interface` 包一层）提升悬停可读性；
+- ✅ `as never` 删键、`-?`/`-readonly` 去修饰符，是映射类型的"精细刻刀"，务必掌握。
+
+## 2.5 手写常用工具类型
+
+#### 概念解析
+
+内置工具类型（`Partial`、`Pick`、`Omit`、`ReturnType`...）全部由前三节的知识组合而成。手写它们是检验类型系统掌握度的最好方式，也是面试必考题。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/02-06-utility-types.ts
+// ============ 手写内置工具类型:每一行都是前面知识的综合运用 ============
+
+// ---- Partial<T>:所有属性变可选 —— 映射类型 + ? ----
+type MyPartial<T> = { [K in keyof T]?: T[K] };
+
+// ---- Required<T>:所有属性变必选 —— -? 移除可选修饰符 ----
+type MyRequired<T> = { [K in keyof T]-?: T[K] };
+
+// ---- Readonly<T>:所有属性只读 ----
+type MyReadonly<T> = { readonly [K in keyof T]: T[K] };
+
+// ---- Pick<T, K>:挑选指定键 —— 约束键必须在 T 中 ----
+type MyPick<T, K extends keyof T> = { [P in K]: T[P] };
+
+// ---- Omit<T, K>:排除指定键 —— Pick + 排除联合 ----
+type MyOmit<T, K extends keyof T> = MyPick<T, Exclude<keyof T, K>>;
+
+// ---- Record<K, V>:键的集合 → 值类型的映射 ----
+type MyRecord<K extends keyof never, V> = { [P in K]: V };
+
+// ---- Exclude<T, U>:从联合中排除 ----
+type MyExclude<T, U> = T extends U ? never : T; // 依赖分布式条件类型
+
+// ---- Extract<T, U>:从联合中保留 ----
+type MyExtract<T, U> = T extends U ? T : never;
+
+// ---- NonNullable<T>:排除 null / undefined ----
+type MyNonNullable<T> = T extends null | undefined ? never : T;
+
+// ---- ReturnType<T>:提取函数返回值 ----
+type MyReturnType<T extends (...args: never[]) => unknown> = T extends (...args: never[]) => infer R ? R : never;
+
+// ---- Parameters<T>:提取函数参数元组 ----
+type MyParameters<T extends (...args: never[]) => unknown> = T extends (...args: infer P) => unknown ? P : never;
+
+// ---- ConstructorParameters / InstanceType:类维度 ----
+class Point { constructor(public x: number, public y: number) {} }
+type CtorParams = ConstructorParameters<typeof Point>; // [x: number, y: number]
+type PointInstance = InstanceType<typeof Point>;       // Point
+
+// ---- 验证 ----
+interface Todo { id: number; title: string; done?: boolean }
+type T1 = MyPartial<Todo>;      // { id?: number; title?: string; done?: boolean }
+type T2 = MyPick<Todo, 'id'>;   // { id: number }
+type T3 = MyOmit<Todo, 'id'>;   // { title: string; done?: boolean }
+type T4 = MyExclude<'a' | 'b' | 'c', 'a'>; // 'b' | 'c'
+const fn = (a: string, b: number) => true;
+type T5 = MyReturnType<typeof fn>;   // boolean
+type T6 = MyParameters<typeof fn>;   // [a: string, b: number]
+
+const t3: T3 = { title: 'x' };
+// T4/T5/T6 是纯类型,编辑器悬停验证即可(运行时引用类型名会报 ReferenceError)
+console.log(t3, {} as T1, {} as T2, {} as CtorParams, {} as PointInstance);
+
+// ---- 递归工具类型:DeepReadonly(面试进阶)----
+type DeepReadonly<T> = T extends (infer R)[]
+    ? readonly DeepReadonly<R>[]
+    : T extends Function
+      ? T
+      : T extends object
+        ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+        : T;
+
+interface Config { server: { host: string; ports: number[] }; debug: boolean }
+const frozen: DeepReadonly<Config> = {
+    server: { host: 'localhost', ports: [3000] },
+    debug: true,
+};
+// frozen.server.host = 'x';          // ❌ 编译错误:只读
+// frozen.server.ports.push(8080);    // ❌ 编译错误:数组也是只读的
+console.log(frozen);
+```
+
+> 运行方式：`npx tsx examples/02-06-utility-types.ts`（将注释掉的"编译错误"行放开可在编辑器中看到红色报错）。
+
+#### 最佳实践
+
+- ✅ 手写顺序建议：`Partial → Pick → Omit → ReturnType`，全部理解后再挑战递归版；
+- ✅ 项目中常用的进阶工具：`Mutable`（去 readonly）、`RequiredByKeys`、`PartialByKeys`、`DeepPartial`（测试数据工厂必备）；
+- ⚠️ `Omit` 会丢掉原类型的注释与联合类型信息，对公共 API 类型慎用，可用键重映射代替。
+
+## 2.6 类型体操实战
+
+#### 概念解析
+
+类型体操不是炫技，常见的高价值场景：**框架源码阅读**（理解 `ComponentProps`、`UseFetchReturn`）、**组件库类型**（泛型组件、props 自动推导）、**业务模型变换**（表单值 ↔ 提交体）。以下精选几道"够实用"的题目。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/02-07-type-challenges.ts
+// ============ 类型体操精选:由易到难 ============
+
+// ---- 1. 元组转联合 ----
+type TupleToUnion<T extends unknown[]> = T[number];
+type U1 = TupleToUnion<[string, number, boolean]>; // string | number | boolean
+
+// ---- 2. 联合转元组式的交叉(用于"必须同时满足"的合并场景)----
+type UnionToIntersection<U> = (U extends unknown ? (arg: U) => void : never) extends (arg: infer I) => void ? I : never;
+type I1 = UnionToIntersection<{ a: 1 } | { b: 2 }>; // { a: 1 } & { b: 2 }
+// 原理:函数参数位置是逆变的,多个函数重载的参数会被推断为交叉类型
+
+// ---- 3. DeepPartial:递归可选(测试数据工厂常用)----
+type DeepPartial<T> = T extends object
+    ? { [K in keyof T]?: DeepPartial<T[K]> }
+    : T;
+
+interface Profile { user: { name: string; address: { city: string } }; age: number }
+const patch: DeepPartial<Profile> = { user: { address: { city: '北京' } } }; // ✅ 只传部分嵌套字段
+console.log(patch);
+
+// ---- 4. 元组长度:字符串数字互转 ----
+type TupleLength<T extends unknown[]> = T['length'];
+type L1 = TupleLength<[string, number, boolean]>; // 3
+
+// ---- 5. 数值范围约束(经典:Range/LessThan 的简化应用)----
+// 场景:约束 padding 传入 1~5 之间
+type Range5 = 1 | 2 | 3 | 4 | 5;
+function setPadding(p: Range5) { return p; }
+setPadding(3);      // ✅
+// setPadding(9);   // ❌ 编译错误
+
+// ---- 6. 泛型组件:props 随数据源自动推导(组件库核心技能)----
+interface ListProps<T> {
+    items: T[];
+    renderItem: (item: T) => React.ReactNode;
+    keyOf?: (item: T) => string;
+}
+// declare 一个虚拟组件签名,重点看调用处的推导
+declare function List<T>(props: ListProps<T>): React.JSX.Element;
+
+// const el = <List items={[{id: 1, name: 'x'}]} renderItem={(item) => item.name} />;
+// ↑ 悬停 item 可看到 { id: number; name: string } —— 泛型从 items 自动反推
+
+// ---- 7. 模板字面量 + 递归:实现路径类型(表单库 lodash.get 的类型化)----
+type PathsOf<T> = T extends object
+    ? { [K in keyof T & string]: T[K] extends object ? K | `${K}.${PathsOf<T[K]>}` : K }[keyof T & string]
+    : never;
+
+type ProfilePaths = PathsOf<Profile>; // 'user' | 'age' | 'user.name' | 'user.address' | 'user.address.city'
+
+function getByPath<T>(obj: T, path: PathsOf<T>): unknown {
+    let node: unknown = obj;
+    for (const key of String(path).split('.')) {
+        if (node === null || typeof node !== 'object') return undefined;
+        node = (node as Record<string, unknown>)[key];
+    }
+    return node;
+}
+const profile: Profile = { user: { name: 'Alice', address: { city: '北京' } }, age: 18 };
+console.log(getByPath(profile, 'user.address.city')); // ✅ 自动补全 & 非法路径报错 → '北京'
+```
+
+> 运行方式：`npx tsx examples/02-07-type-challenges.ts`（React 相关行以注释/声明形式给出，避免无 DOM 环境报错；重点看编辑器内的类型推导）。
+>
+> 进阶练习：[type-challenges](https://github.com/type-challenges/type-challenges) 仓库的 `easy → medium` 共 30 题足以覆盖 90% 工作场景。
+
+#### 最佳实践
+
+- ✅ 优先解决"真实痛点"才写复杂类型：表单路径、API 蓝图、组件泛型是三大高收益区；
+- ⚠️ 团队共享的类型要写**用例测试**（`expectTypeOf` / `tsd`），防止升级后静默失效；
+- ⚠️ 遇到 `Type instantiation is excessively deep`：拆分中间类型、给递归加"提前命中"分支，或适当 `any` 逃生；
+- ✅ 用 `satisfies`（TS 4.9+）替代部分 `as`：校验形状的同时保留字面量推导。
+
+## 2.7 装饰器
+
+#### 概念解析
+
+装饰器是**对类、方法、属性、参数的声明式包装**。生态中的主流用法（NestJS、TypeORM、MobX、Vue `@Component`）都基于 legacy 装饰器（`experimentalDecorators: true`）。TS 5 同时支持 TC39 标准装饰器（无 flag、无参数元数据），但签名不同。本节以 legacy 写法为主线（生态兼容性最好）。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/02-08-decorators.ts
+// ============ 装饰器:声明式的横切逻辑(需 experimentalDecorators)============
+
+// ---- 方法装饰器:性能计时 ----
+function timed(label?: string): MethodDecorator {
+    return function (target: object, propertyKey: string | symbol, descriptor: PropertyDescriptor) {
+        const original = descriptor.value as (...args: unknown[]) => unknown;
+        descriptor.value = function (this: unknown, ...args: unknown[]) {
+            const start = performance.now();
+            try {
+                return original.apply(this, args);
+            } finally {
+                const cost = (performance.now() - start).toFixed(2);
+                console.log(`[${label ?? String(propertyKey)}] 耗时 ${cost}ms`);
+            }
+        };
+        return descriptor;
+    };
+}
+
+// ---- 方法装饰器:错误兜底(失败不崩溃,返回默认值)----
+function safe(fallback: unknown): MethodDecorator {
+    return function (target, propertyKey, descriptor) {
+        const original = descriptor.value as (...args: unknown[]) => unknown;
+        descriptor.value = function (this: unknown, ...args: unknown[]) {
+            try {
+                return original.apply(this, args);
+            } catch (e) {
+                console.error(`方法 ${String(propertyKey)} 出错:`, (e as Error).message);
+                return fallback;
+            }
+        };
+        return descriptor;
+    };
+}
+
+// ---- 类装饰器 + 拦截:所有方法自动计时 ----
+function autoTimed<T extends new (...args: never[]) => unknown>(ctor: T): T {
+    Object.getOwnPropertyNames(ctor.prototype).forEach((name) => {
+        const descriptor = Object.getOwnPropertyDescriptor(ctor.prototype, name);
+        if (typeof descriptor?.value === 'function' && name !== 'constructor') {
+            Object.defineProperty(ctor.prototype, name, timed(name)(ctor.prototype, name, descriptor));
+        }
+    });
+    return ctor;
+}
+
+// ---- 使用 ----
+@autoTimed
+class ReportService {
+    @timed('生成日报')
+    generate() {
+        let sum = 0;
+        for (let i = 0; i < 1e6; i++) sum += i; // 模拟耗时
+        return sum;
+    }
+
+    @safe(0)
+    divide(a: number, b: number) {
+        // ⚠️ JS 中 1/0 返回 Infinity 并不抛错,这里显式抛出以演示兜底
+        if (b === 0) throw new Error('除数不能为 0');
+        return a / b;
+    }
+}
+
+const report = new ReportService();
+report.generate();
+report.divide(1, 0); // 不崩溃,返回 0
+```
+
+> 运行方式：在 `examples/tsconfig.json` 中开启 `"experimentalDecorators": true`、`"emitDecoratorMetadata": true`，然后 `cd examples && npx tsx 02-08-decorators.ts`。⚠️ 必须在 `examples/` 目录内运行：tsx 按 **cwd** 查找 tsconfig，从仓库根目录直跑会静默降级为 TC39 stage-3 装饰器签名（第三参数 undefined）而报错。
+>
+> 补充：TSX/ESBuild 同样支持 legacy 装饰器；NestJS 等框架还依赖 `reflect-metadata` 提供的**元数据**能力（配合 `emitDecoratorMetadata` 实现依赖注入的类型自动解析，见 [4.6](./04-frameworks.md#_4-6-angular-核心概念速览)）。
+
+#### 最佳实践
+
+- ✅ 装饰器适合"横切关注点"：日志、计时、鉴权、缓存、重试——业务函数保持纯净；
+- ⚠️ 新项目若不依赖 NestJS 等生态，可考虑高阶函数包装（`const wrapped = timed(fn)`），无编译配置依赖；
+- ⚠️ TS 5 标准装饰器与 legacy 签名**不兼容**，升级代码时注意区分；元数据装饰器仅 legacy 支持。
+
+## 2.8 工程配置与类型声明文件
+
+#### 概念解析
+
+- **tsconfig 三层策略**：`tsconfig.base.json`（共享规范）→ 各应用/包继承 → 特定环境差异项；
+- **模块解析**：`moduleResolution: 'Bundler'`（配合 Vite/打包器，TS 5+ 推荐）；Node 项目用 `'NodeNext'`；
+- **`.d.ts` 声明文件**：为 JS 库补类型（`declare module`）、为非 TS 资源（css/图片）声明模块、为 `window` 扩展全局类型。
+
+#### 完整代码示例
+
+```jsonc
+// 文件: tsconfig.base.json —— 推荐的现代前端严格配置
+{
+    "compilerOptions": {
+        // ---- 语言目标 ----
+        "target": "ES2020",
+        "lib": ["ES2020", "DOM", "DOM.Iterable"],
+        "module": "ESNext",
+        "moduleResolution": "Bundler",   // 配合 Vite/Webpack(esbuild) 的解析策略
+
+        // ---- 严格度(全套打开,新项目的底线)----
+        "strict": true,                    // 总开关:strictNullChecks、noImplicitAny 等
+        "noUncheckedIndexedAccess": true,  // 索引访问返回 T | undefined,杜绝越界隐患
+        "noImplicitOverride": true,        // 重写必须写 override
+        "exactOptionalPropertyTypes": true, // 区分 undefined 与"属性缺失"
+        "noFallthroughCasesInSwitch": true,
+
+        // ---- 产物与互操作 ----
+        "jsx": "react-jsx",
+        "esModuleInterop": true,           // CJS/ESM 互操作
+        "skipLibCheck": true,              // 跳过 node_modules 类型检查,加速编译
+        "isolatedModules": true,           // 兼容 esbuild/swc 的单文件转译约束
+
+        // ---- 路径 ----
+        "baseUrl": ".",
+        "paths": { "@/*": ["src/*"] }
+    },
+    "include": ["src"]
+}
+```
+
+```typescript
+// 文件: src/types/global.d.ts
+// ============ 全局类型声明:扩展 window、声明非 TS 资源 ============
+
+// 1. 扩展 window(例如 Electron 预加载脚本注入的 API,见 8.4)
+declare global {
+    interface Window {
+        electronAPI?: {
+            readFile: (path: string) => Promise<{ content: string }>;
+        };
+        __POWERED_BY_QIANKUN__?: boolean; // 微前端环境标记,见 11.3
+    }
+}
+
+// 2. 声明非代码资源模块(让 import 导入不报错且有类型)
+declare module '*.module.css' {
+    const classes: Record<string, string>;
+    export default classes;
+}
+declare module '*.png' {
+    const src: string;
+    export default src;
+}
+
+// 3. 为无类型的第三方 JS 库补一个"最小可用"声明
+declare module 'legacy-widget' {
+    interface WidgetOptions { container: HTMLElement; theme?: 'light' | 'dark' }
+    export function init(options: WidgetOptions): { destroy(): void };
+}
+
+export {}; // 关键:让该文件成为模块,declare global 才会生效
+```
+
+```typescript
+// 文件: src/types/api.d.ts
+// ============ .d.ts 的另一种用法:只放类型契约,不含实现 ============
+// 适合:与后端约定接口、SDK 对外暴露类型、monorepo 中跨包共享类型
+
+declare namespace Api {
+    interface User { id: string; name: string; age: number }
+    interface PageResult<T> { list: T[]; total: number; page: number }
+    interface LoginParams { username: string; password: string }
+    type LoginResult = { token: string; user: User };
+}
+```
+
+> 运行方式：配置文件放进项目后运行 `npx tsc --noEmit` 做全量类型检查（建议接入 CI，见 [3.7](./03-engineering.md#_3-7-ci-cd-与质量工具链)）。`global.d.ts` 需放在 `tsconfig` 的 `include` 范围内才会生效。
+
+#### 最佳实践
+
+- ✅ 新项目直接上 `strict` 全家桶 + `noUncheckedIndexedAccess`，前期成本远低于后期补偿；
+- ✅ 公共 `.d.ts` 用 `namespace`/`declare global` 组织，避免大量 `export type` 散落各处；
+- ⚠️ `skipLibCheck: true` 只跳过库类型检查，自己代码的错误不会漏；
+- ⚠️ 类型检查（`tsc --noEmit`）与转译（esbuild/swc/tsx）是两件事：**转译器不做类型检查**，CI 里必须显式跑 `tsc`。
+
+---
+
+## 2.9 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】MyPartial 与 MyRequired 的实现只差一个符号,是什么?</b></summary>
+
+一个问号。Partial 用 { [K in keyof T]?: T[K] } 添加可选修饰符;Required 用 -? 移除可选修饰符 —— 映射类型的 +/- 语法可以增删 readonly 与可选两种修饰符。
+</details>
+
+<details>
+<summary><b>2. 【进阶】什么是分布式条件类型?如何阻止分发?</b></summary>
+
+当条件类型作用于裸类型参数且传入联合类型时,会对联合的每个成员分别计算再合并:`ToArray<string|number> = string[]|number[]`。用元组包裹阻止:`[T] extends [unknown]`,得到 `(string|number)[]`。
+</details>
+
+<details>
+<summary><b>3. 【基础】any 和 unknown 的本质区别是什么?各该在什么场景使用?</b></summary>
+
+any 双向放弃检查(赋给谁都行,对它做任何操作都行);unknown 是安全顶类型,可以对它赋任何值,但使用前必须收窄。原则:对外部不可信输入(接口返回、JSON.parse)用 unknown + 类型守卫;禁止用 any 关编译器。
+</details>
+
+<details>
+<summary><b>4. 【进阶】为什么说对公共 API 类型要慎用 Omit?</b></summary>
+
+Omit 会基于原类型重新计算结构,丢失原属性上的注释与联合类型信息,悬停可读性大幅下降。可以用键重映射(as never 删键)代替,保留原类型的引用关系。
+</details>
+
+---
+
+## 2.10 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| `any` 与 `as` 断言 | 类型检查全绿，运行时照样崩 | 二者都等于绕过编译器（`any` 双向放弃检查、`as` 直接推翻推断）；对外部输入用 `unknown` 加类型守卫，断言只在确有把握处收窄 |
+| 运行时校验 | 类型写得再严，接口传回脏数据仍出错 | 类型在编译后被完全擦除，运行时零校验；边界处（`JSON.parse`、响应体、表单）用 Zod 等 schema 在运行时再验一遍 |
+| `Omit` | 对公共 API 用 `Omit` 后，悬停看不到注释与联合分支 | `Omit` 按结构重算类型，会丢原属性的文档注释与联合信息；改用键重映射（`as never` 删键）保留原类型的引用关系 |
+| 递归条件类型 | 类型体操一深就报 `Type instantiation is excessively deep` | 递归超过编译器深度上限即报错；给递归加计数元组参数并在触底时短路，或把大联合类型拆成多步 |
+| `skipLibCheck` | 以为开了它就「不再检查类型」 | 它只跳过 `node_modules` 里 `.d.ts` 的检查，自己代码的错误照报；别把它当免检开关 |
+| 类型检查进 CI | 本地没报错，CI 却抓出一堆类型错误 | 转译器（esbuild、swc、tsx）只转译不做类型检查；CI 必须显式跑 `tsc --noEmit`（见 [3.7](./03-engineering.md#_3-7-ci-cd-与质量工具链)） |
+| 装饰器 | 用了装饰器却报签名不符或求值顺序怪 | 标准装饰器与 legacy 装饰器签名不兼容、不能混用；升级前先确认 `tsconfig` 开关与框架支持的是哪一套 |

@@ -1,0 +1,1312 @@
+# 第十一部分：设计模式与架构（分册全文）
+
+> 来源：高级前端进阶指南（v1.83.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/11-patterns-architecture
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第十一部分：设计模式与架构
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[浏览器原理与渲染性能](./10-browser-rendering.md)｜下一篇：[CSS 工程化与现代 CSS](./12-css-engineering.md)
+
+> 🎬 配套漫画：<a href="/comics/index.html#ep-11" target="_blank" rel="noopener">EP.11《设计模式实战》</a>
+
+## 本部分内容
+
+- [11.1 前端常用设计模式](#_11-1-前端常用设计模式)
+- [11.2 前端监控与错误上报](#_11-2-前端监控与错误上报)
+- [11.3 微前端概览](#_11-3-微前端概览)
+- [11.4 前端架构设计方法](#_11-4-前端架构设计方法)
+- [11.5 自测题](#_11-5-自测题)
+- [11.6 本章避坑清单](#_11-6-本章避坑清单)
+
+---
+
+## 11.1 前端常用设计模式
+
+#### 概念解析
+
+前端真正高频使用的设计模式只有五六个，关键是认出"你天天在用而不知道名字"的那些：
+
+| 模式 | 一句话 | 前端实例 |
+| ---- | ------ | -------- |
+| 发布订阅 | 事件中心解耦多对多依赖 | EventBus、Vue 的事件、Node EventEmitter |
+| 单例 | 全局唯一实例 | 全局状态、Toast 管理器、弹窗 |
+| 策略 | 用映射表替代多重 if/switch | 表单校验规则、权限判断、价格计算 |
+| 代理 | 控制对目标的访问 | Vue3 响应式、图片懒加载、缓存代理 |
+| 装饰器 | 动态增强能力 | 高阶组件、方法计时/日志（见 [2.7](./02-typescript.md#_2-7-装饰器)） |
+| 观察者 | 目标直接维护观察者列表 | React 的 setState 订阅、RxJS |
+| 命令 | 把"操作"封装为对象 | 撤销/重做（编辑器、画板）、操作队列 |
+| 状态 | 状态机替代状态标志位的 if 长链 | 订单流、播放器状态、Promise 本身 |
+| 适配器 | 把不兼容接口包一层转换 | 多支付渠道统一封装、旧接口迁移垫片 |
+
+#### 观察者 vs 发布订阅：一张图分清
+
+两者最容易被混为一谈，区别在于**是否有中间的事件中心**：
+
+```mermaid
+graph LR
+    subgraph 观察者模式 - 耦合
+        S[Subject 目标对象] -- 直接维护列表 --> O1[Observer A]
+        S --> O2[Observer B]
+    end
+    subgraph 发布订阅模式 - 解耦
+        P[发布者] -- 不知晓订阅者 --> E((事件中心 EventBus))
+        E --> T1[订阅者 A]
+        E --> T2[订阅者 B]
+    end
+```
+
+- **观察者**：目标直接持有观察者列表并逐个通知（React 组件订阅 store 就是这种）；
+- **发布订阅**：双方只认识事件中心，发布者与订阅者互不知晓（跨模块通信用这种）；
+- ⚠️ 面试高频：能说清"有没有中间人、双方是否感知彼此"就是合格答案。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/11-01-patterns.ts
+// ============ 四个高频模式的前端落地 ============
+
+// ---- 1. 单例:全局唯一的弹窗管理器(闭包 + 惰性创建)----
+class ToastManager {
+    private static instance: ToastManager | null = null;
+    private container: HTMLElement | null = null;
+
+    private constructor() {} // 禁止外部 new
+
+    static getInstance(): ToastManager {
+        if (!ToastManager.instance) {
+            ToastManager.instance = new ToastManager();
+        }
+        return ToastManager.instance;
+    }
+
+    show(message: string) {
+        // 惰性创建 DOM 容器
+        this.container ??= document.createElement('div');
+        const toast = document.createElement('div');
+        toast.textContent = message;
+        this.container.appendChild(toast);
+        setTimeout(() => toast.remove(), 2000);
+    }
+}
+// ToastManager.getInstance() === ToastManager.getInstance() // true
+
+// ---- 2. 策略:消灭表单校验的 if 长链 ----
+type ValidateFn = (value: string) => string | null; // 返回 null 表示通过
+
+const validators: Record<string, ValidateFn> = {
+    required: (v) => (v.trim() ? null : '必填项'),
+    phone: (v) => (/^1[3-9]\d{9}$/.test(v) ? null : '手机号格式不正确'),
+    password: (v) => (v.length >= 8 ? null : '密码至少 8 位'),
+};
+
+// 新增规则 = 加一行注册,不改已有逻辑(开闭原则)
+validators.email = (v) => (/^\S+@\S+\.\S+$/.test(v) ? null : '邮箱格式不正确');
+
+function validateField(value: string, rules: ValidateFn[]): string | null {
+    for (const rule of rules) {
+        const error = rule(value);
+        if (error) return error; // 返回第一个错误
+    }
+    return null;
+}
+
+console.log(validateField('13800138000', [validators.required, validators.phone])); // null
+console.log(validateField('123', [validators.required, validators.password]));      // '密码至少 8 位'
+
+// ---- 3. 代理:图片懒加载(IntersectionObserver + 缓存去重)----
+function createLazyImageLoader(rootMargin = '200px') {
+    const loaded = new WeakSet<HTMLImageElement>();
+    const observer = new IntersectionObserver((entries, obs) => {
+        entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            const img = entry.target as HTMLImageElement;
+            if (loaded.has(img)) return;
+            img.src = img.dataset.src ?? '';
+            loaded.add(img);
+            obs.unobserve(img); // 加载一次即停止观察
+        });
+    }, { rootMargin: `${rootMargin} 0px` }); // 提前 200px 预加载
+
+    return (img: HTMLImageElement) => observer.observe(img);
+}
+// 所有 img[data-src] 交给它:const lazyLoad = createLazyImageLoader();
+
+// ---- 4. 装饰器思想的高阶函数:给任意异步函数加缓存 + 去重 ----
+function withCache<A extends unknown[], R>(
+    fn: (...args: A) => Promise<R>,
+    keyFn: (...args: A) => string = (...args) => JSON.stringify(args),
+) {
+    const cache = new Map<string, Promise<R>>();
+    return (...args: A): Promise<R> => {
+        const key = keyFn(...args);
+        if (!cache.has(key)) {
+            const promise = fn(...args).catch((e) => {
+                cache.delete(key); // 失败不缓存,下次重试
+                throw e;
+            });
+            cache.set(key, promise);
+        }
+        return cache.get(key)!; // 并发调用共享同一个 Promise(请求去重)
+    };
+}
+
+let fetchCount = 0;
+const fetchUserCached = withCache(async (id: string) => {
+    fetchCount++;
+    await new Promise((r) => setTimeout(r, 50));
+    return { id, name: 'Alice' };
+});
+
+await Promise.all([fetchUserCached('1'), fetchUserCached('1')]); // 并发去重:实际只发一次
+await fetchUserCached('1'); // 命中缓存
+console.log('实际请求次数:', fetchCount); // 1
+export {};
+```
+
+> 运行方式：`npx tsx examples/11-01-patterns.ts`（Toast/懒加载部分需浏览器环境，以阅读理解为主）。
+
+#### 发布订阅 EventBus：类型安全的完整实现
+
+EventBus 是前端出镜率最高的模式，难点在 **TypeScript 类型安全**与 **once/off 的清理语义**：
+
+```typescript
+// 文件: examples/11-04-eventbus.ts
+// ============ 类型安全的 EventBus:on/once/off/emit 全语义 ============
+
+type Handler<T = unknown> = (payload: T) => void;
+
+class EventBus<Events extends Record<string, unknown>> {
+    private map = new Map<keyof Events, Set<Handler>>();
+
+    /** 订阅;返回取消函数(比手动存引用再 off 更不易泄漏) */
+    on<K extends keyof Events>(event: K, handler: Handler<Events[K]>): () => void {
+        let set = this.map.get(event);
+        if (!set) {
+            set = new Set();
+            this.map.set(event, set);
+        }
+        set.add(handler as Handler);
+        return () => this.off(event, handler); // ✅ 返回解绑函数,组件卸载时直接调用
+    }
+
+    /** 一次性订阅:执行后自动移除 */
+    once<K extends keyof Events>(event: K, handler: Handler<Events[K]>): () => void {
+        const wrap: Handler<Events[K]> = (payload) => {
+            this.off(event, wrap); // 先移除再执行,防止 handler 内再次 emit 造成重入
+            handler(payload);
+        };
+        return this.on(event, wrap);
+    }
+
+    off<K extends keyof Events>(event: K, handler: Handler<Events[K]>) {
+        this.map.get(event)?.delete(handler as Handler);
+    }
+
+    emit<K extends keyof Events>(event: K, payload: Events[K]) {
+        // 复制一份再遍历:防止 handler 内 on/off 修改集合导致遍历异常
+        [...this.map.get(event) ?? []].forEach((h) => {
+            try {
+                h(payload);
+            } catch (e) {
+                // ✅ 单个订阅者出错不阻断其他订阅者(与 DOM 事件语义一致)
+                console.error(`[EventBus] handler for "${String(event)}" failed:`, e);
+            }
+        });
+    }
+}
+
+// ---- 使用:事件名与载荷类型强关联,emit 传错参数直接编译报错 ----
+interface AppEvents {
+    'user:login': { userId: string; from: 'email' | 'oauth' };
+    'cart:changed': { count: number };
+}
+
+const bus = new EventBus<AppEvents>();
+
+const offLogin = bus.on('user:login', (p) => console.log('欢迎', p.userId, '登录方式', p.from));
+bus.once('cart:changed', (p) => console.log('首次加购,数量:', p.count));
+
+bus.emit('user:login', { userId: 'u_1', from: 'oauth' }); // 欢迎登录
+bus.emit('cart:changed', { count: 1 }); // 首次加购
+bus.emit('cart:changed', { count: 2 }); // 已被 once 移除,无输出
+offLogin(); // 组件卸载时解绑
+
+// bus.emit('user:login', { userId: 'u_1', from: 'wechat' }); // ❌ 编译报错:from 类型不符
+
+// ---- ⚠️ 坑:handler 引用必须一致才能 off —— 匿名函数解绑永远失败 ----
+const h1 = (p: { count: number }) => console.log(p);
+bus.on('cart:changed', h1);
+bus.off('cart:changed', h1); // ✅ 同一引用,解绑成功
+// bus.on('cart:changed', (p) => console.log(p)); bus.off(..., 同样字面量) // ❌ 不同引用
+export {};
+```
+
+> 运行方式：`npx tsx examples/11-04-eventbus.ts`。
+
+⚠️ **EventBus 三大坑**：
+
+1. **内存泄漏**：常驻总线 + 页面级订阅，组件卸载忘记 off —— 订阅者闭包引用整个组件树，无法回收。✅ 统一用 `on` 返回的解绑函数，配合 `useEffect` cleanup / `onUnmounted`；
+2. **事件风暴**：高频事件（scroll/input）直接上总线，每个 handler 同步串行执行 —— 先防抖/节流再 emit；
+3. **调试黑洞**：事件链路过长后"谁发的、谁改的"无从查起 —— emit 处打日志或约定 payload 只读（`Readonly<T>`）。
+
+#### 命令模式：撤销与重做的标准解法
+
+把"一次操作"封装成 `{ do, undo }` 对象，配合历史栈实现 undo/redo——编辑器、画板（Fabric.js 也有对应 API）、表格操作的通用架构：
+
+```typescript
+// 文件: examples/11-05-command-undo.ts
+// ============ 命令模式:画板/编辑器的撤销重做栈 ============
+
+/** 命令抽象:do 与 undo 必须严格互逆 */
+interface Command<T> {
+    do(state: T): T;
+    undo(state: T): T;
+    label: string; // 便于调试与"撤销了 XX"提示
+}
+
+class History<T> {
+    private past: Command<T>[] = [];
+    private future: Command<T>[] = []; // redo 栈
+
+    constructor(private state: T) {}
+
+    /** 执行命令:清空 redo 栈(分叉后旧未来作废) */
+    execute(cmd: Command<T>): T {
+        this.state = cmd.do(this.state);
+        this.past.push(cmd);
+        this.future = []; // ⚠️ 忘记清空 redo 栈是 undo/redo 最常见的 bug
+        return this.state;
+    }
+
+    undo(): T {
+        const cmd = this.past.pop();
+        if (!cmd) return this.state;
+        this.state = cmd.undo(this.state);
+        this.future.unshift(cmd);
+        return this.state;
+    }
+
+    redo(): T {
+        const cmd = this.future.shift();
+        if (!cmd) return this.state;
+        this.state = cmd.do(this.state);
+        this.past.push(cmd);
+        return this.state;
+    }
+
+    get current() { return this.state; }
+}
+
+// ---- 用不可变快照实现命令(比 diff 逆运算简单可靠,适合中小状态)----
+type Doc = { lines: string[] };
+
+const addLine = (text: string): Command<Doc> => ({
+    label: `添加行:${text}`,
+    do: (s) => ({ lines: [...s.lines, text] }),          // 不可变追加
+    undo: (s) => ({ lines: s.lines.slice(0, -1) }),       // 逆操作:去掉最后一行
+});
+
+const history = new History<Doc>({ lines: [] });
+history.execute(addLine('第一行'));
+history.execute(addLine('第二行'));
+console.log(history.current.lines);              // ['第一行', '第二行']
+console.log(history.undo()!.lines);              // ['第一行']
+console.log(history.undo()!.lines);              // []
+console.log(history.redo()!.lines);              // ['第一行']
+
+// ---- ⚠️ 大状态(如图像像素)快照太贵:改为记录"逆操作参数"(位置+旧值),即 diff 型命令 ----
+// ⚠️ undo/redo 边界:undo 到头/redo 到头必须是无操作而非抛错;连续 undo 的 UI 按钮态用 canUndo 派生
+export {};
+```
+
+> 运行方式：`npx tsx examples/11-05-command-undo.ts`。
+
+#### 状态模式：用状态机替代布尔标志位组合
+
+当逻辑出现 `if (loading && !error && isLastPage)` 这类标志位组合时，就该上**有限状态机**——状态互斥、转移显式、非法转移直接拒绝：
+
+```typescript
+// 文件: examples/11-06-state-machine.ts
+// ============ 状态模式:下拉加载的状态机(对比标志位写法) ============
+
+// ❌ 反例:三个布尔值有 2^3 = 8 种组合,其中一半是非法态(loading && error 同时为 true?)
+// let loading = false; let error = false; let hasMore = true;
+
+// ✅ 正例:互斥状态 + 显式转移表
+type LoadState =
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'success'; hasMore: boolean }
+    | { status: 'error'; retryable: true };
+
+type LoadEvent =
+    | { type: 'FETCH' }
+    | { type: 'RESOLVE'; hasMore: boolean }
+    | { type: 'REJECT' }
+    | { type: 'RESET' };
+
+function transition(state: LoadState, event: LoadEvent): LoadState {
+    switch (event.type) {
+        case 'FETCH':
+            return state.status === 'loading' ? state : { status: 'loading' }; // loading 中忽略重复 FETCH(防重复请求)
+        case 'RESOLVE':
+            return state.status === 'loading' ? { status: 'success', hasMore: event.hasMore } : state;
+        case 'REJECT':
+            return state.status === 'loading' ? { status: 'error', retryable: true } : state;
+        case 'RESET':
+            return { status: 'idle' };
+    }
+}
+
+let state: LoadState = { status: 'idle' };
+const send = (e: LoadEvent) => { state = transition(state, e); console.log(state); };
+
+send({ type: 'FETCH' });                    // { status: 'loading' }
+send({ type: 'FETCH' });                    // 忽略:仍是 loading(天然防重复提交)
+send({ type: 'RESOLVE', hasMore: true });   // { status: 'success', hasMore: true }
+send({ type: 'FETCH' });
+send({ type: 'REJECT' });                   // { status: 'error', retryable: true }
+send({ type: 'FETCH' });                    // error 态允许重试
+
+// ---- 视图层依据状态渲染,不再出现组合判断 ----
+function render(s: LoadState) {
+    switch (s.status) {
+        case 'idle': return '点击加载';
+        case 'loading': return '加载中...';
+        case 'success': return s.hasMore ? '加载更多' : '没有更多了';
+        case 'error': return '加载失败,点击重试';
+    }
+}
+console.log(render(state));
+
+// 生产中复杂交互流(播放器/审批流)推荐 XState:可视化转移图 + 完整 actor 模型,思路与本例一致
+export {};
+```
+
+> 运行方式：`npx tsx examples/11-06-state-machine.ts`。状态机与 [6.5 竞态处理](./06-network.md#_6-5-竞态处理与请求取消) 是天然搭档：`loading` 态忽略 `FETCH` 就是最朴素的去重。
+
+#### 适配器模式：多渠道支付的统一封装
+
+业务依赖"稳定接口"，把各渠道的"多变实现"包成适配器——新增渠道不改业务代码：
+
+```typescript
+// 文件: examples/11-07-adapter-pay.ts
+// ============ 适配器:把三家支付 SDK 的异构 API 抹平成一个接口 ============
+
+/** 业务侧依赖的稳定抽象(依赖倒置,见 11.4) */
+interface PaymentGateway {
+    pay(amountCents: number, orderId: string): Promise<{ transactionId: string }>;
+}
+
+// ---- 渠道 1:支付宝 SDK(假设回调风格、金额单位是元)----
+const alipaySDK = {
+    createOrder(yuan: number, subject: string): Promise<string> { return Promise.resolve(`alipay_${subject}_${yuan}`); },
+};
+
+const alipayAdapter: PaymentGateway = {
+    async pay(amountCents, orderId) {
+        // 适配点:分 → 元、参数名映射
+        const id = await alipaySDK.createOrder(amountCents / 100, orderId);
+        return { transactionId: id };
+    },
+};
+
+// ---- 渠道 2:微信 SDK(参数是对象、回调风格)----
+const wechatSDK = {
+    unifiedorder(params: { total_fee: number; out_trade_no: string }, cb: (err: Error | null, tradeNo?: string) => void) {
+        cb(null, `wx_${params.out_trade_no}`);
+    },
+};
+
+const wechatAdapter: PaymentGateway = {
+    pay(amountCents, orderId) {
+        return new Promise((resolve, reject) => {
+            // 适配点:回调 → Promise、字段重命名
+            wechatSDK.unifiedorder({ total_fee: amountCents, out_trade_no: orderId }, (err, tradeNo) => {
+                err ? reject(err) : resolve({ transactionId: tradeNo! });
+            });
+        });
+    },
+};
+
+// ---- 业务侧只认抽象,渠道切换是配置问题 ----
+const gateways: Record<'alipay' | 'wechat', PaymentGateway> = { alipay: alipayAdapter, wechat: wechatAdapter };
+
+async function checkout(channel: keyof typeof gateways, amountCents: number, orderId: string) {
+    const result = await gateways[channel].pay(amountCents, orderId); // 业务代码零渠道知识
+    console.log(`[${channel}] 支付成功`, result.transactionId);
+}
+
+await checkout('alipay', 9900, 'A_001');
+await checkout('wechat', 9900, 'A_001');
+export {};
+```
+
+> 运行方式：`npx tsx examples/11-07-adapter-pay.ts`。
+
+#### React / Vue 中的模式落地
+
+框架本身就是模式的产物：React Hooks（闭包 + 观察者）、Vue 响应式（代理）、组合式 API（策略/依赖注入）。下面是"EventBus 在两个框架中的正确接入方式"——关键都是**生命周期对齐**：
+
+```tsx
+// 文件: examples/11-08-react-use-event.tsx —— [React 19]
+// React 侧:useSyncExternalStore 是官方给"外部事件源"的正解,比 useEffect + setState 少一次渲染
+import { useSyncExternalStore, useEffect } from 'react';
+
+type CartEvents = { 'cart:changed': { count: number } };
+// import { EventBus } from './11-04-eventbus';
+// const bus = new EventBus<CartEvents>(); // 实际项目中 EventBus 从模块导入并单例导出;此处示意
+declare const bus: {
+    on<K extends keyof CartEvents>(event: K, handler: (p: CartEvents[K]) => void): () => void;
+};
+
+let snapshotCount = 0;
+// bus.on('cart:changed', (p) => { snapshotCount = p.count; }); // 模块加载时同步缓存快照(emit 时更新)
+
+function useCartCount() {
+    // getSnapshot 返回缓存值;订阅变化时 bus emit 内部更新 snapshot 并触发重渲染
+    return useSyncExternalStore(
+        (cb) => bus.on('cart:changed', cb) as unknown as () => void, // subscribe:返回解绑函数
+        () => snapshotCount,                                          // getSnapshot:读缓存快照
+        () => 0,                                                      // getServerSnapshot(SSR 初始值)
+    );
+}
+
+function Header() {
+    const count = useCartCount();
+    return <span>购物车({count})</span>;
+}
+
+// ⚠️ 普通事件订阅(不参与渲染)用 useEffect + cleanup:
+function useEventListener<K extends keyof CartEvents>(event: K, handler: (p: CartEvents[K]) => void) {
+    useEffect(() => bus.on(event, handler), [event, handler]); // on 返回解绑函数,正好是 cleanup
+}
+export {};
+```
+
+```vue
+<!-- 文件: examples/11-09-vue-use-event.vue —— [Vue 3.4+] -->
+<script setup lang="ts">
+import { ref, onUnmounted, watchEffect } from 'vue';
+// (bus 定义同上,示意)
+
+const count = ref(0);
+// ✅ 订阅回调里只改 ref,模板自动响应 —— Vue 的响应式天然就是观察者模式的产物
+// const off = bus.on('cart:changed', (p) => { count.value = p.count; });
+// onUnmounted(off); // 卸载解绑,防止泄漏
+
+// ⚠️ 坑:handler 若是每次渲染重建的函数,off 会失败 —— 处理器定义在 setup 顶层即天然稳定
+// ⚠️ 坑:watchEffect 里 emit 同源事件会造成无限循环 —— 事件方向:emit 向外、watch 向内,别闭环
+</script>
+
+<template>
+    <span>购物车({{ count }})</span>
+</template>
+```
+
+> 运行方式：React/Vue 示例需放入对应脚手架项目（Vite），示意代码以阅读理解为主；纯 TS 部分（11-04~11-07）可直接 `npx tsx` 运行。
+
+#### 最佳实践
+
+- ✅ 学习目标不是背 UML，而是：看到 if-else 长链想到策略，看到全局状态想到单例，看到重复请求想到代理缓存，看到撤销重做想到命令，看到布尔标志位组合想到状态机；
+- ✅ EventBus 优先用 `on()` 返回的解绑函数而非手动保存引用——和框架生命周期天然对齐；
+- ⚠️ 模式是为可读性服务的，两层抽象能解决就不上三层；
+- ⚠️ EventBus 跨页面/跨 Tab 是不工作的（各页面实例独立）——跨 Tab 通信用 [BroadcastChannel](./18-worker-messaging.md#模块六-跨-tab-窗口通信全方案)，两者不要混用。
+
+## 11.2 前端监控与错误上报
+
+#### 概念解析
+
+监控三支柱：**错误监控**（JS 异常、资源失败、接口失败、Promise 未捕获）、**性能监控**（Web Vitals + 自定义埋点）、**行为回溯**（用户操作轨迹，用于复现）。原则：**采样上报、批量合并、sendBeacon 兜底**。
+
+#### 监控体系全景：数据怎么流动
+
+一个生产级监控 SDK 的完整链路（前端只负责前三层）：
+
+```mermaid
+graph LR
+    subgraph 采集层 - 浏览器
+        A1[window.onerror / error]
+        A2[unhandledrejection]
+        A3[请求层拦截器]
+        A4[Web Vitals / 埋点]
+        A5[行为轨迹栈]
+    end
+    subgraph 处理层 - SDK 内部
+        B[错误指纹聚合<br/>去重 + 采样 + 限流]
+        C[上报队列<br/>批量合并 + 兜底 flush]
+    end
+    subgraph 传输层
+        D[sendBeacon / fetch keepalive]
+    end
+    subgraph 服务端 - 平台侧
+        E[接收网关<br/>鉴权 + 削峰]
+        F[sourcemap 还原<br/>堆栈聚合建 issue]
+        G[告警 / 看板]
+    end
+    A1 --> B
+    A2 --> B
+    A3 --> B
+    A4 --> C
+    A5 --> C
+    B --> C --> D --> E --> F --> G
+```
+
+#### Web Vitals 指标速查（面试与立项都够用）
+
+| 指标 | 全称 | 含义 | 良好阈值 | 常见元凶 |
+| ---- | ---- | ---- | -------- | -------- |
+| LCP | Largest Contentful Paint | 最大内容元素渲染完成 | ≤ 2.5s | 大图、阻塞的字体/CSS、慢接口 |
+| INP | Interaction to Next Paint | 全程最差的输入响应延迟（替代 FID） | ≤ 200ms | 长任务阻塞主线程、大列表同步渲染 |
+| CLS | Cumulative Layout Shift | 累积布局偏移 | ≤ 0.1 | 图片无宽高、动态插入横幅、字体交换 |
+| FCP | First Contentful Paint | 首个内容绘制 | ≤ 1.8s | 关键资源未压缩、白屏过长 |
+| TTFB | Time to First Byte | 首字节时间 | ≤ 800ms | 无 CDN、服务端慢、重定向链长 |
+
+> INP 取的是**整个会话中最差（或接近最差）的交互延迟**，不是平均值——优化目标是"最差的那次点击别卡"。LCP/CLS 关注 [10.1](./10-browser-rendering.md#_10-1-从输入-url-到页面呈现) 渲染链路。
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/11-02-monitor.ts —— [浏览器] 20 行起步的生产级监控 SDK 骨架
+
+type ReportData = Record<string, unknown>;
+
+/** 上报:优先 sendBeacon(页面卸载也不丢),退化为 fetch keepalive */
+function report(data: ReportData) {
+    const payload = JSON.stringify({
+        ...data,
+        page: location.href,
+        ua: navigator.userAgent,
+        ts: Date.now(),
+        sessionId: sessionStorage.getItem('sid'),
+    });
+    const blob = new Blob([payload], { type: 'application/json' });
+    if (navigator.sendBeacon?.('/api/monitor', blob)) return;
+    fetch('/api/monitor', { method: 'POST', body: payload, keepalive: true }).catch(() => {});
+}
+
+// ---- 1. JS 错误 + 资源错误(第三个参数 true:捕获阶段才能拿到资源错误)----
+window.addEventListener('error', (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target && ['IMG', 'SCRIPT', 'LINK'].includes(target.tagName)) {
+        report({ type: 'resource-error', url: (target as HTMLImageElement).src || (target as HTMLLinkElement).href });
+    } else {
+        report({ type: 'js-error', message: event.message, stack: event.error?.stack?.slice(0, 2000), file: event.filename, line: event.lineno });
+    }
+}, true);
+
+// ---- 2. Promise 未捕获拒绝 ----
+window.addEventListener('unhandledrejection', (event) => {
+    report({ type: 'promise-error', message: String(event.reason) });
+});
+
+// ---- 3. 接口错误:在请求层(6.4)的拦截器里调用 report({ type: 'api-error', ... }) ----
+
+// ---- 4. Web Vitals 性能上报 ----
+// import { onLCP, onINP, onCLS } from 'web-vitals';
+// onLCP((m) => report({ type: 'perf', metric: 'LCP', value: m.rating === 'good' ? m.value : m.value }));
+// onINP((m) => report({ type: 'perf', metric: 'INP', value: m.value }));
+// onCLS((m) => report({ type: 'perf', metric: 'CLS', value: m.value }));
+
+// ---- 5. sourcemap 还原:构建时上传 .map 到监控平台,错误 stack 自动还原为源码位置 ----
+// ⚠️ .map 文件绝不能部署到公网(会暴露源码)
+export {};
+```
+
+> 运行方式：初始化代码放在应用入口最先执行；配合 6.4 的请求拦截器上报接口错误。生产选型可直接用 Sentry（自建版 GlitchTip）或阿里 ARMS 等平台。
+
+#### 从骨架到生产 SDK：批量队列、限流、指纹聚合
+
+上面的骨架"每错一次发一次请求"，生产上必须加三件事——**批量合并**、**限流采样**、**错误指纹聚合**。这是一个可直接抄进项目的精简版：
+
+```typescript
+// 文件: examples/11-10-monitor-queue.ts —— [浏览器] 生产级上报队列
+// ============ 核心:一个带兜底 flush 的批量上报队列 ============
+
+interface MonitorItem {
+    type: string;
+    fingerprint?: string; // 聚合指纹
+    payload: Record<string, unknown>;
+    ts: number;
+}
+
+class MonitorQueue {
+    private queue: MonitorItem[] = [];
+    private sentCount = 0;               // 本周期已发送条数(限流用)
+    private timer: ReturnType<typeof setInterval> | null = null;
+    // 兜底 flush 必须存为成员:add/removeEventListener 传同一引用才能真正解绑
+    private onHidden = () => {
+        if (document.visibilityState === 'hidden') this.flush();
+    };
+    // 采样率:0.1 = 只上报 10% 的数据(错误类可不采样,性能类必采样)
+    constructor(
+        private readonly send: (items: MonitorItem[]) => void,
+        private readonly opts = { batch: 10, intervalMs: 5000, maxPerMinute: 60, sampleRate: 1 },
+    ) {
+        this.start();
+    }
+
+    private start() {
+        this.timer = setInterval(() => this.flush(), this.opts.intervalMs);
+        // ⚠️ 关键兜底:页面隐藏/卸载时 setInterval 可能不再触发,必须主动 flush
+        // visibilitychange 比 beforeunload 更可靠(移动端切后台、关闭页签都会触发)
+        document.addEventListener('visibilitychange', this.onHidden);
+    }
+
+    /** 入队:采样 → 限流 → 批量 */
+    push(type: string, payload: Record<string, unknown>, fingerprint?: string) {
+        // 1) 采样:随机丢弃(哈希采样更公平,这里示意)
+        if (Math.random() > this.opts.sampleRate) return;
+        // 2) 限流:防止雪崩时监控请求把自己拖垮
+        if (this.sentCount >= this.opts.maxPerMinute) return;
+        this.queue.push({ type, payload, fingerprint, ts: Date.now() });
+        // 3) 批量:攒够一批立即发,不必等 interval
+        if (this.queue.length >= this.opts.batch) this.flush();
+    }
+
+    flush() {
+        if (!this.queue.length) return;
+        const items = this.queue.splice(0, this.opts.batch); // 一次最多发 batch 条
+        this.sentCount += items.length;
+        try {
+            this.send(items);
+        } catch {
+            // ⚠️ 监控 SDK 自身的错误绝不能递归上报(否则死循环),只吞掉
+        }
+    }
+
+    /** 每 60s 重置限流计数(真实实现里用滑动窗口更精确) */
+    resetBudget = () => { this.sentCount = 0; };
+    destroy() {
+        this.timer && clearInterval(this.timer);
+        document.removeEventListener('visibilitychange', this.onHidden); // 与 add 传同一引用才能解绑
+        this.flush(); // 销毁前清空
+    }
+}
+
+// ============ 错误指纹:同一 bug 聚合成一条 issue ============
+
+/** 简单字符串 hash(比引依赖轻) */
+function hash32(str: string): string {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+}
+
+/**
+ * 指纹 = message + stack 前两帧(去掉行号/列号)
+ * ⚠️ 只用 message 会把"undefined is not a function"所有错误混成一条;带行号会把同一 bug 的不同触发点拆成多条
+ */
+function errorFingerprint(message: string, stack?: string): string {
+    const frames = (stack ?? '')
+        .split('\n')
+        .filter((l) => l.includes('at '))
+        .slice(0, 2)                                     // 只取前两帧:根因通常在最内层
+        .map((l) => l.replace(/:\d+:\d+/, ''))           // 去行列号:同函数不同行算同一个 issue
+        .join('|');
+    return hash32(`${message}::${frames}`);
+}
+
+// ---- 组装:错误走"不采样 + 指纹聚合",性能走"10% 采样" ----
+const queue = new MonitorQueue((items) => {
+    // navigator.sendBeacon('/api/monitor/batch', new Blob([JSON.stringify(items)], { type: 'application/json' }))
+    console.log('批量上报', items.length, '条');
+}, { batch: 10, intervalMs: 5000, maxPerMinute: 60, sampleRate: 1 });
+
+window.addEventListener('error', (e) => {
+    queue.push('js-error', { message: e.message }, errorFingerprint(e.message, e.error?.stack));
+});
+
+// setInterval(queue.resetBudget, 60_000); // 限流预算重置(生产实现)
+export {};
+```
+
+> 运行方式：浏览器环境运行；`send` 回调替换为真实上报端点即可。要点回顾：**采样省流量、批量省请求、指纹聚合成 issue、visibilitychange 兜底不丢尾部数据**。
+
+#### 接口耗时埋点与行为轨迹
+
+错误发生时只有报错信息往往无法复现，需要**行为轨迹**（最近 N 步操作）随错误一起上报：
+
+```typescript
+// 文件: examples/11-11-monitor-trace.ts —— [浏览器] 接口耗时 + 行为轨迹随错误上报
+
+// ---- 1. 接口耗时:拦截 fetch(比拦截 XHR 简单,建议请求层统一用 fetch)----
+type FetchLike = typeof fetch;
+const rawFetch: FetchLike = globalThis.fetch;
+
+globalThis.fetch = async function tracedFetch(input, init) {
+    const url = typeof input === 'string' ? input : input instanceof Request ? input.url : input.toString();
+    const start = performance.now();
+    try {
+        const res = await rawFetch.call(globalThis, input, init);
+        monitorTrace.push({ kind: 'api', url, ms: Math.round(performance.now() - start), status: res.status });
+        return res;
+    } catch (err) {
+        monitorTrace.push({ kind: 'api', url, ms: Math.round(performance.now() - start), status: 'network-error' });
+        throw err;
+    }
+};
+
+// ---- 2. 行为轨迹:环形缓冲区,只保留最近 20 步(内存可控)----
+interface TraceItem { kind: string; url?: string; ms?: number; status?: number | string; label?: string; ts: number; }
+
+const TRACE_LIMIT = 20;
+const monitorTrace: TraceItem[] = [];
+
+function pushTrace(item: Omit<TraceItem, 'ts'>) {
+    monitorTrace.push({ ...item, ts: Date.now() });
+    if (monitorTrace.length > TRACE_LIMIT) monitorTrace.shift(); // 满了丢最旧的
+}
+
+// 关键用户操作也入轨迹:点击用事件委托一次搞定
+document.addEventListener('click', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-track]');
+    if (el) pushTrace({ kind: 'click', label: el.dataset.track! });
+}, true); // 捕获阶段:防止业务 stopPropagation 后丢轨迹
+
+// ---- 3. 错误发生时:报错 + 最近轨迹一起上报 ----
+window.addEventListener('error', (e) => {
+    // sendBeacon(JSON.stringify({ type: 'js-error', message: e.message, trace: [...monitorTrace] }))
+    console.log('上报错误与轨迹:', e.message, monitorTrace.slice(-5));
+});
+
+pushTrace({ kind: 'click', label: '提交订单' });
+export {};
+```
+
+> 运行方式：浏览器环境，与 11-10 的队列配合使用（示例中 `pushTrace` 入环形缓冲区，报错时快照上报）。UI 曝光埋点同理：`IntersectionObserver` 观察带 `data-expose` 的元素，进入视口即记录——见 [11.1 代理模式](#_11-1-前端常用设计模式) 的懒加载同款写法。
+
+#### 最佳实践
+
+- ✅ 上报必须**采样 + 限流**（如 10% 采样、每分钟最多 N 条），否则高峰期监控请求会拖垮自己；
+- ✅ 错误聚合维度：按 `message + stack 首帧` 聚类去重，避免同一 bug 刷爆存储；
+- ✅ 上报数据三要素齐全：`sessionId`（串联一次会话）、`release/版本号`（对应 sourcemap）、`环境`（prod/test 分流）——少了任何一个，线上问题都查不动；
+- ⚠️ 跨域脚本的报错信息只有 `Script error.`——需要给 `<script>` 加 `crossorigin` 且 CDN 返回 CORS 头；
+- ⚠️ 监控 SDK 自身报错不能递归上报（try/catch 包死），防止死循环；
+- ⚠️ sourcemap 只上传平台、绝不部署到公网；版本回滚时老版本的 map 也要保留，否则历史错误的堆栈无法还原。
+
+## 11.3 微前端概览
+
+#### 概念解析
+
+微前端要解决的是**多团队异构应用（React + Vue + 老项目）聚合为一个产品**的问题。三大核心难题与主流解法（以 qiankun / wujie 为例）：
+
+| 难题 | 解法 |
+| ---- | ---- |
+| JS 沙箱 | Proxy 代理 window（qiankun）、iframe 隔离（wujie，天然沙箱） |
+| CSS 隔离 | Shadow DOM、scoped + 前缀、动态 style 卸载 |
+| 应用通信/路由 | 自定义事件总线 + URL 同步 |
+
+#### 主流方案全景对比
+
+| 方案 | 沙箱原理 | 技术栈约束 | 上手成本 | 适用场景 |
+| ---- | -------- | ---------- | -------- | -------- |
+| iframe | 浏览器原生，最彻底 | 无 | 低 | 独立性极强的嵌入（客服、文档）；⚠️ 弹窗/路由/通信都割裂 |
+| **qiankun** | Proxy 代理 window（单实例/多实例） | 基于单 SPA，子应用需导出生命周期 | 中 | 存量多技术栈聚合的主流选择，生态最成熟 |
+| **wujie（无界）** | iframe JS 隔离 + web component 渲染 | 无硬约束 | 中低 | 想要 iframe 级隔离又要"无弹窗割裂"体验 |
+| micro-app | Web Component + Proxy | 无硬约束 | 低 | 嵌入方改造量最小的场景 |
+| Module Federation | **无沙箱**（共享运行时） | Rspack/Webpack 5/部分 Vite 支持 | 中高 | 同技术栈大型团队**按需共享模块/依赖**，而非隔离 |
+| 什么都不用（路由级拆分） | 不需要 | 无 | 最低 | 全新业务 90% 的"伪微前端"需求 |
+
+#### 选型决策流程
+
+```mermaid
+flowchart TD
+    A[想上微前端] --> B{真的是多团队<br/>异构应用并行开发吗?}
+    B -- 否 --> C[❌ 别上微前端<br/>路由级代码分割 + 组件库就够<br/>详见 3.4]
+    B -- 是 --> D{子应用技术栈是否一致?}
+    D -- 一致 --> E{需要共享业务组件/依赖<br/>且团队具备基建能力?}
+    E -- 是 --> F[Module Federation<br/>按需共享 + 独立部署]
+    E -- 否 --> G[单仓多模块 Monorepo<br/>详见 3.6]
+    D -- 不一致/有老项目 --> H{对 JS 隔离强度要求高?<br/>三方应用/不可信代码}
+    H -- 极高 --> I[wujie / iframe]
+    H -- 一般 --> J[qiankun<br/>生态成熟文档全]
+```
+
+#### 完整代码示例
+
+```typescript
+// 文件: examples/11-03-sandbox.ts —— 简易 JS 沙箱:理解 qiankun 的核心机制
+// ============ Proxy 沙箱:子应用的所有 window 操作被劫持到假 window 上 ============
+
+function createSandbox() {
+    const fakeWindow: Record<PropertyKey, unknown> = {};
+    const sandbox = new Proxy(fakeWindow, {
+        get(target, key) {
+            // 子应用代码里的 window/self 应指向沙箱自身,嵌套取值才能继续走代理
+            if (key === 'window' || key === 'self' || key === 'globalThis') return sandbox;
+            // 先查子应用自己的命名空间,没有再回退到真实全局(只读共享)
+            return key in target ? target[key] : (globalThis as any)[key];
+        },
+        set(target, key, value) {
+            target[key] = value; // 写操作只落在沙箱里,不污染全局
+            return true;
+        },
+        has(target, key) {
+            return true; // 让 `xxx in window` 判断始终成立,兼容各种环境嗅探代码
+        },
+    });
+    return sandbox;
+}
+
+// 用 Function 构造器把子应用代码跑在沙箱 window 中(与 qiankun 的 with/Proxy 方案同思路)
+function runInSandbox(code: string) {
+    const sandbox = createSandbox();
+    // with(window){...}:子应用代码中的所有全局引用都会先经过沙箱代理
+    const fn = new Function('window', 'self', `with (window) {\n${code}\n}`);
+    fn(sandbox, sandbox);
+    return sandbox;
+}
+
+// 演示:两个"子应用"互不污染
+const app1 = runInSandbox(`
+    var config = { theme: 'dark' }; // 不小心没写 let/var 也不会泄漏到真全局(有 with 代理时)
+    window.counter = 1;
+`);
+const app2 = runInSandbox(`
+    window.counter = 999;
+`);
+console.log((app1 as any).counter); // 1 —— 不受 app2 影响
+console.log((app2 as any).counter); // 999
+console.log((window as any).counter); // undefined —— 真实 window 未被污染
+export {};
+```
+
+> 运行方式：示例后半段依赖 `window`（模拟浏览器环境逃逸），Node 环境运行到该处会报错，以阅读理解为主。
+
+#### qiankun 实战：主应用与子应用的完整对接
+
+理解沙箱原理后，落地就是**主应用注册 + 子应用导出生命周期**的约定协议：
+
+```typescript
+// 文件: examples/11-12-qiankun-main.ts —— [浏览器] 主应用侧(React/Vue 均适用)
+
+// import { registerMicroApps, start, initGlobalState, loadMicroApp } from 'qiankun';
+
+// ---- 1. 注册子应用:activeRule 与子应用路由前缀必须一致 ----
+// registerMicroApps(
+//     [
+//         {
+//             name: 'sub-react',
+//             entry: '//localhost:7001',      // 子应用入口,生产建议由配置中心下发
+//             container: '#sub-container',    // 挂载点
+//             activeRule: '/react',           // URL 前缀匹配即挂载
+//             props: { token: 'xxx', theme: 'dark' }, // 下发全局数据(只读约定)
+//         },
+//         { name: 'sub-vue', entry: '//localhost:7002', container: '#sub-container', activeRule: '/vue' },
+//     ],
+//     {
+//         // 生命周期钩子:全局 loading / 埋点都挂这里
+//         beforeLoad: (app) => console.log('开始加载', app.name),
+//         afterMount: (app) => console.log('挂载完成', app.name),
+//         // ⚠️ beforeUnmount 里记得清掉主应用为子应用挂的定时器/全局监听(如果有)
+//     },
+// );
+
+// ---- 2. 启动:预加载 + 沙箱配置 ----
+// start({
+//     prefetch: 'all',          // 首屏空闲时预取所有子应用资源
+//     sandbox: { strictStyleIsolation: false }, // true = Shadow DOM,样式彻底隔离但弹窗/全局样式会有坑
+//     // experimentalStyleIsolation: true,     // 折中:给子应用样式加作用域前缀(用 scoped 思路)
+// });
+
+// ---- 3. 全局状态:主/子应用共享的响应式 store ----
+// const actions = initGlobalState({ user: null, locale: 'zh-CN' });
+// actions.onGlobalStateChange((state, prev) => console.log('主应用感知到变化', state, prev));
+// // 子应用里:export const onGlobalStateChange = actions.onGlobalStateChange(同款回调)
+
+export {};
+```
+
+```typescript
+// 文件: examples/11-13-qiankun-sub.ts —— [浏览器] 子应用侧:导出约定好的三个生命周期
+// ============ qiankun 协议:子应用必须导出 bootstrap / mount / unmount ============
+// (以 Vue 3 子应用为例,React 同理换成 createRoot)
+
+// import { createApp, type App as VueApp } from 'vue';
+// import Router from './router';
+// import AppComponent from './App.vue';
+
+// ⚠️ 坑:qiankun 环境下资源是动态插入的,publicPath 必须在运行时修正
+// 否则生产环境子应用 js/css 404。webpack: __webpack_public_path__ = window.__INJECTED_PUBLIC_PATH_BY_QIANKUN__
+// Vite 需在 index.html 里用 <script src="%BASE_URL%"> 动态注入或改用 vite-plugin-qiankun
+
+// let app: VueApp | null = null;
+//
+// export async function bootstrap() {
+//     console.log('[sub-vue] bootstrap:只执行一次,做全局初始化');
+// }
+//
+// export async function mount(props: { container: HTMLElement; onGlobalStateChange: Function; setGlobalState: Function }) {
+//     console.log('[sub-vue] mount:每次进入都执行');
+//     app = createApp(AppComponent);
+//     app.use(Router);
+//     app.mount((props.container ?? document).querySelector('#app')!); // ⚠️ 挂到主应用给的容器里
+// }
+//
+// export async function unmount() {
+//     console.log('[sub-vue] unmount:必须彻底清理,否则切回时报"app 已挂载"');
+//     app?.unmount();
+//     app = null; // ✅ 置空实例 —— 最常见的子应用二进宫报错就是忘了这行
+// }
+
+// ---- 独立运行兼容:直接打开子应用自身也能跑(联调必备)----
+// if (!window.__POWERED_BY_QIANKUN__) {
+//     mount({ container: document.body } as any);
+// }
+export {};
+```
+
+#### 应用间通信的三种方式（按推荐度排序）
+
+```typescript
+// 文件: examples/11-14-qiankun-communicate.ts —— [浏览器] 微前端通信选型
+
+// ---- 方式 1:props 下发(推荐:数据流单向,最像组件通信)----
+// registerMicroApps([{ name: 'sub', entry: '...', props: { token, getUser } }])
+// 子应用在 mount(props) 里读取;主应用主动更新则用 loadMicroApp 手动重新下发
+
+// ---- 方式 2:initGlobalState(全局响应式状态,适合 user/locale 等全局数据)----
+// const actions = initGlobalState({ locale: 'zh-CN' });
+// actions.setGlobalState({ locale: 'en-US' });           // 任意一方改,双方都收到通知
+// actions.offGlobalStateChange();                        // ⚠️ unmount 时解绑,防泄漏
+
+// ---- 方式 3:CustomEvent 总线(事件型通信,一次性动作如"打开弹窗")----
+// 主应用:
+// window.dispatchEvent(new CustomEvent('micro:notify', { detail: { type: 'toast', message: '保存成功' } }));
+// 子应用:
+// const handler = (e: Event) => console.log((e as CustomEvent).detail);
+// window.addEventListener('micro:notify', handler);
+// // ⚠️ unmount 时 window.removeEventListener('micro:notify', handler) —— 事件名加业务前缀防止冲突
+
+// ---- 方式 4(最被低估):URL 参数(适合"跳到子应用某详情页"类导航)----
+// history.pushState({}, '', '/vue/order/123'); 子应用路由自己解析 —— 天然可分享、可回退
+export {};
+```
+
+> 选型口诀：**全局数据用 globalState，一次性动作用 CustomEvent，页面导航用 URL，其余用 props**。
+
+#### Module Federation：共享模块而非聚合应用
+
+MF 与 qiankun 的本质区别：qiankun 是"**多个独立应用拼一页**"（要沙箱），MF 是"**多个构建产物共享一个运行时**"（不要沙箱，同技术栈才有意义）。适合中大型同栈团队的"依赖共享 + 独立部署"：
+
+```javascript
+// 文件: examples/11-15-module-federation.js —— Rspack/Webpack5 配置(两端)
+// ============ 远端(提供方):把组件库/工具库"暴露"出去 ============
+// rspack.config.js of remote(共享组件方)
+const remoteConfig = {
+    plugins: [
+        {
+            name: 'ModuleFederationPlugin',
+            options: {
+                name: 'shared_ui',
+                filename: 'remoteEntry.js',                          // 对外入口,host 按此加载
+                exposes: {
+                    './Button': './src/components/Button.vue',        // 暴露的模块路径:import('shared_ui/Button')
+                    './useAuth': './src/composables/useAuth.ts',
+                },
+                shared: {
+                    vue: { singleton: true, requiredVersion: '^3.4' }, // ⚠️ singleton:全站只允许一份 Vue 实例
+                },                                                    //    否则两个 Vue 实例互不识别响应式对象
+            },
+        },
+    ],
+};
+
+// ============ 本地(消费方):声明"我要用谁的什么" ============
+const hostConfig = {
+    plugins: [
+        {
+            name: 'ModuleFederationPlugin',
+            options: {
+                name: 'host_app',
+                remotes: {
+                    shared_ui: 'shared_ui@https://cdn.example.com/remoteEntry.js', // 远端可独立发版
+                },
+                shared: { vue: { singleton: true } },
+            },
+        },
+    ],
+};
+
+// 消费代码:运行时异步加载(必须动态 import,构建时不存在)
+// const Button = defineAsyncComponent(() => import('shared_ui/Button'));
+
+module.exports = { remoteConfig, hostConfig };
+```
+
+> ⚠️ MF 三个高频坑：① `shared` 必须两端同时声明且版本兼容，否则会出现**双份 React/Vue 实例**（Hooks 报错"Invalid hook call"的隐形元凶）；② 远端 remoteEntry.js 的**发布顺序**要先于 host，且要考虑回滚时 host 还引用旧路径；③ MF 没有沙箱——共享的还有全局变量和 CSS，命名空间要约定好。
+
+#### CSS 隔离的分层策略
+
+| 层级 | 手段 | 代价 |
+| ---- | ---- | ---- |
+| 首选 | 子应用样式全部 `scoped`/CSS Modules + 父级前缀（如 `.sub-vue .el-button`） | 几乎零成本，覆盖 90% 场景 |
+| 进阶 | 构建时给子应用所有选择器自动加前缀（postcss 插件） | 需要构建配置 |
+| 彻底 | `strictStyleIsolation: true`（Shadow DOM） | 弹窗默认挂 body 跑出沙箱、全局字体/主题失效 |
+| 奇技 | 运行时动态切换 `disableScooperCSS`、卸载时移除子应用 style 标签 | qiankun 已内置，注意自定义挂载点时验证 |
+
+> ⚠️ 组件库弹窗是重灾区：Element/Ant Design 的 Modal 默认挂 `document.body`——在 Shadow DOM 或前缀隔离下样式必挂。统一把弹窗挂到子应用根容器（`appendTo`/`getPopupContainer`）是必配项。
+
+#### 什么时候"不需要"微前端
+
+先把这句话印在脑子里：**微前端是组织问题的解药，不是技术问题的解药**。以下情况不要上：
+
+- 单团队单仓库想"拆成多个小项目"——用 [Monorepo](./03-engineering.md#_3-6-monorepo-实践) + 路由级懒加载；
+- 只是想复用一个业务模块——抽 npm 包 / Git submodule / 直接 iframe 嵌；
+- 团队没有基建人力维护沙箱兼容性——qiankun 的坑（全局事件泄漏、polyfill 冲突、样式逃逸）需要专人兜底；
+- 性能极敏感的首屏页面——微前端每切一个子应用就多一次 entry 加载 + JS 沙箱开销。
+
+#### 最佳实践
+
+- ✅ 先用决策流程图确认真的需要，再选型；存量聚合默认 qiankun，重隔离选 wujie，同栈大团队选 MF；
+- ✅ 子应用 `unmount` 清理清单：Vue/React 实例、路由实例、全局事件（window/document）、定时器、globalState 订阅——列成 checklist 逐一核对；
+- ✅ 子应用必须支持**独立运行**（`!window.__POWERED_BY_QIANKUN__` 分支），联调效率天差地别；
+- ⚠️ qiankun 的 Proxy 沙箱不隔离 `document`（只有 wujie 的 iframe 方案彻底隔离）——子应用往 document 里塞的全局监听会互相影响；
+- ⚠️ 子应用 publicPath 必须运行时修正，否则"本地好好的，一上线资源 404"是最经典的翻车现场；
+- ⚠️ 主子应用的路由基座要提前约定（子应用 base = activeRule 前缀），后期改路由前缀是牵一发动全身。
+
+---
+
+## 11.4 前端架构设计方法
+
+> 前两节讲"点"（模式）与"面"（微前端聚合），本节回到日常：一个应用内部怎么分层、组件怎么设计、边界怎么划。架构能力 = 在变化的成本最低处做决策。
+
+#### 分层架构：依赖只能自上而下
+
+前端应用的经典四层，**上层可以依赖下层，下层绝不感知上层**（这条违反了就是架构腐化的开始）：
+
+```mermaid
+graph TD
+    V[视图层 Views<br/>页面组件 / 布局 / 路由出口] --> B[业务层 Features<br/>业务组件 / 状态 / 流程编排]
+    B --> S[服务层 Services<br/>API 封装 / 领域模型 / 缓存策略]
+    S --> I[基建层 Infra<br/>请求库 / 监控 SDK / 工具 / 常量]
+    I -.不依赖任何上层.-> I
+```
+
+| 层 | 判断标准："这一行代码属于哪层" | 变更频率 |
+| -- | ---- | ---- |
+| 视图层 | 只做渲染与交互转发，不写业务判断 | 最高 |
+| 业务层 | 出现了业务名词（订单/审批/库存）的业务流程 | 高 |
+| 服务层 | 出现接口名/数据结构转换，但没有"业务流程" | 中 |
+| 基建层 | 换一个业务仍然成立（请求、埋点、工具） | 最低 |
+
+⚠️ 最常见的腐化：**视图层直接 fetch**（跳过服务层）——接口一改，N 个组件要改 N 处；✅ 组件只调 service 函数，service 内部管 [6.4 请求层](./06-network.md#_6-4-请求层封装实战) 的实例与 [5.5 服务端状态](./05-state-management.md#_5-5-服务端状态管理-tanstack-query) 的缓存键。
+
+#### 目录组织：按"功能"分，不按"类型"分
+
+```
+❌ 按类型分(改一个需求要跳 4 个目录):      ✅ 按功能分(一个 feature 自包含):
+src/                                       src/
+├── components/   (50 个组件混在一起)      ├── features/
+├── hooks/        (30 个 hook)             │   ├── order/               # 订单域
+├── services/                              │   │   ├── components/      # 只属于订单的组件
+├── utils/                                 │   │   ├── api.ts           # 订单接口
+└── views/                                 │   │   ├── store.ts         # 订单状态
+                                           │   │   └── index.ts         # 对外出口(别的域只能 import 这里)
+                                           │   └── inventory/           # 库存域
+                                           ├── shared/                  # 跨域通用组件/工具
+                                           └── app/                     # 路由/布局/全局配置
+```
+
+- ✅ 按功能分的核心收益：**删除一个功能 = 删一个目录**；域与域之间通过 `index.ts` 出口单向引用，循环依赖在目录层面就被掐死；
+- ✅ `shared/` 里的东西必须是"业务无关"的——一旦放进了业务组件，赶紧下放到对应 feature；
+- ⚠️ 跨域调用只有两条正路：父页面编排（各自渲染自己的 feature）、或被调域暴露**纯函数 service**，不允许直接 import 别的域的组件/store。
+
+#### 组件设计三条铁律
+
+1. **受控与非受控双模**：输入类组件内部值允许 `v-model`/`value+onChange` 外部接管，同时保留默认内部状态——只做单模的组件在第二次复用时必翻车；
+2. **组合优于配置**：想加"带图标/带描述/带操作按钮"不是加第 5 个 boolean prop，而是用 slot/children 让调用方塞内容——boolean prop 组合爆炸是组件库腐化的头号信号；
+3. **Headless 拆分**：逻辑（分页、排序、选择）与 UI 分离，逻辑层做成 `useTable()` Hook / `useTable()` Composable，UI 层随便换皮——TanStack Table 就是这个思路的标杆（见 [5.5](./05-state-management.md#_5-5-服务端状态管理-tanstack-query)）。
+
+```typescript
+// 文件: examples/11-16-headless-use-list.ts —— Headless 列表逻辑:逻辑与 UI 彻底分离
+// ============ 一个"零 UI"的分页列表 Hook,任何皮肤都能接 ============
+
+interface UseListOptions<T> {
+    fetcher: (page: number, pageSize: number) => Promise<{ items: T[]; total: number }>;
+    pageSize?: number;
+}
+
+/** 只管"取数与翻页状态",不渲染任何东西 —— 可单测、可跨项目复用 */
+function useList<T>(opts: UseListOptions<T>) {
+    const page = { current: 1 };
+    const items: { value: T[] } = { value: [] };
+    const loading = { value: false };
+
+    async function load(p = 1) {
+        if (loading.value) return; // 状态机思想(11.1):loading 中忽略重复请求
+        loading.value = true;
+        try {
+            const { items: list } = await opts.fetcher(p, opts.pageSize ?? 20);
+            items.value = p === 1 ? list : [...items.value, ...list]; // 第 1 页重置,否则追加
+            page.current = p;
+        } finally {
+            loading.value = false;
+        }
+    }
+    return {
+        items, loading,
+        next: () => load(page.current + 1),
+        reload: () => load(1), // 下拉刷新/筛选变化
+    };
+}
+
+// ---- 演示:Node 环境直接跑通逻辑层(无 UI)----
+const list = useList<{ id: number; name: string }>({
+    fetcher: async (page, pageSize) => {
+        console.log(`请求第 ${page} 页,每页 ${pageSize}`);
+        return {
+            items: Array.from({ length: pageSize }, (_, i) => ({ id: (page - 1) * pageSize + i + 1, name: `条目${(page - 1) * pageSize + i + 1}` })),
+            total: 100,
+        };
+    },
+    pageSize: 3,
+});
+
+await list.reload();
+console.log('第 1 页:', list.items.value.map((i) => i.id));
+await list.next();
+console.log('追加后:', list.items.value.map((i) => i.id));
+await list.reload();
+console.log('刷新后(重置):', list.items.value.map((i) => i.id));
+
+// UI 层(React/Vue 均可)只负责把 items 画出来 —— 逻辑可独立 vitest 单测,不用渲染组件
+export {};
+```
+
+> 运行方式：`npx tsx examples/11-16-headless-use-list.ts`（示例用普通对象模拟响应式，接 Vue 时换成 `ref`、接 React 时用 `useState`，骨架不变）。
+
+#### 服务层的依赖倒置：换后端不动业务
+
+[11.1 适配器模式](#_11-1-前端常用设计模式) 的支付例子放在架构视角就是**依赖倒置**：业务层 import 的是 `interface PaymentGateway`（抽象），具体渠道在**应用入口**注入一次：
+
+```typescript
+// 文件: examples/11-17-di-composition-root.ts —— 组合根:全应用唯一"知道具体实现"的地方
+// ============ 依赖注入最朴素的做法:入口组装,层层透传 ============
+
+interface PaymentGateway { pay(cents: number, orderId: string): Promise<{ transactionId: string }> }
+interface Logger { info(msg: string): void }
+
+/** 业务服务:只依赖抽象参数,完全不知道支付渠道/日志实现 */
+class CheckoutService {
+    constructor(private gateway: PaymentGateway, private logger: Logger) {}
+    async submit(cents: number, orderId: string) {
+        const r = await this.gateway.pay(cents, orderId);
+        this.logger.info(`订单 ${orderId} 支付成功 ${r.transactionId}`);
+        return r;
+    }
+}
+
+// ---- 生产环境组合根(main.ts)----
+const logger: Logger = { info: (m) => console.log('[INFO]', m) };                 // 可换上报版
+const gateway: PaymentGateway = { pay: (c, o) => Promise.resolve({ transactionId: `wx_${o}_${c}` }) }; // 可换渠道
+const checkout = new CheckoutService(gateway, logger);
+
+// ---- 测试环境:两行 mock,业务代码零改动(这就是倒置的回报)----
+const fakeGateway: PaymentGateway = { pay: () => Promise.resolve({ transactionId: 'TEST_001' }) };
+const testCheckout = new CheckoutService(fakeGateway, { info: () => {} });
+
+await checkout.submit(9900, 'A_001');
+await testCheckout.submit(9900, 'A_001');
+console.log('✅ 同一份业务代码,两套依赖注入完成生产/测试切换');
+export {};
+```
+
+> 运行方式：`npx tsx examples/11-17-di-composition-root.ts`。前端不需要 Spring 式 IoC 容器——**"组合根 + 构造函数注入"已覆盖 95% 场景**；React 生态的 Context、Vue 的 `provide/inject` 本质都是它的框架化版本。
+
+#### 架构演进的时机判断
+
+架构没有一步到位，关键是识别"该升级了"的信号：
+
+| 信号 | 升级动作 |
+| ---- | ---- |
+| 同一逻辑在 3 处以上复制粘贴 | 下沉到服务层/共享 Hook（先有重复，再抽象——顺序别反） |
+| `components/` 超过 40 个文件互相 import | 改按功能域组织目录 |
+| 单次构建超过 3 分钟、多团队互相阻塞发布 | 拆包 Monorepo（[3.6](./03-engineering.md#_3-6-monorepo-实践)）甚至评估微前端（[11.3](#_11-3-微前端概览)） |
+| 接口字段变更引发大面积 UI 崩坏 | 补服务层数据转换层，UI 不再直接吃接口原始结构 |
+| 测试必须"渲染整页"才能写 | 引入 Headless/分层拆分，让逻辑可独立测试 |
+
+> ✅ 推荐节奏：**小步演进 + 每步可回滚**，与"先跑单测、再提 PR"的固定节奏配套——架构升级同样走 PR，禁止"推倒重写"式的大爆炸重构（一次性大重写是最高风险的技术决策）。
+
+---
+
+## 11.5 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【进阶】观察者模式与发布订阅模式的本质区别?</b></summary>
+
+观察者:目标(Subject)直接维护观察者列表并通知,双方彼此知道对方(耦合)。发布订阅:双方只与事件中心通信,发布者与订阅者完全解耦互不知晓。EventBus 是后者的典型实现。
+</details>
+
+<details>
+<summary><b>2. 【进阶】用策略模式重构多重 if-else 的核心思路?</b></summary>
+
+把每个分支抽成独立策略函数,组织成注册表(Record&lt;条件, 处理函数&gt;),执行时查表调用。新增规则 = 注册一条新策略,不修改已有代码(开闭原则),每条规则还可独立测试。
+</details>
+
+<details>
+<summary><b>3. 【进阶】前端监控上报为什么用 sendBeacon?还需要配套什么措施?</b></summary>
+
+sendBeacon 在页面卸载(关闭/跳转)时也能异步可靠发送且不阻塞导航,普通请求会被浏览器取消。配套:采样率控制 + 频率限流(防止高峰期上报拖垮自己与后端),sendBeacon 失败降级 fetch keepalive,visibilitychange(hidden)时兜底 flush 队列。
+</details>
+
+<details>
+<summary><b>4. 【基础】微前端的三大难题与主流解法?</b></summary>
+
+① JS 沙箱:Proxy 代理 window(qiankun)或 iframe 天然隔离(wujie);② CSS 隔离:Shadow DOM、样式前缀、动态卸载;③ 应用通信与路由:自定义事件总线 + URL 同步。
+</details>
+
+<details>
+<summary><b>5. 【挑战】EventBus 导致内存泄漏的完整链条是什么?怎么系统性防止?</b></summary>
+
+链:常驻总线持有 handler 引用 → handler 闭包引用组件实例 → 组件卸载后实例无法回收。防:① on() 返回解绑函数,统一在 useEffect cleanup / onUnmounted 调用;② once 用于一次性事件;③ 排查手段:DevTools Memory 快照对比 detached 组件。另外 off 必须传同一函数引用,匿名函数永远解绑失败。
+</details>
+
+<details>
+<summary><b>6. 【挑战】撤销/重做用什么模式实现?执行新操作时最容易漏掉什么?</b></summary>
+
+命令模式:每条命令封装 do/undo,配 past/future 双栈。执行新命令必须清空 redo(future)栈——漏掉这一步,撤销后发新指令再点重做会出现"幽灵操作"。边界:undo/redo 到头应静默返回;大状态用 diff 型命令(记录逆操作参数)替代全量快照。
+</details>
+
+<details>
+<summary><b>7. 【进阶】错误指纹为什么用"message + stack 前两帧并去掉行列号"?</b></summary>
+
+只用 message:所有同类报错(如 undefined is not a function)混成一个 issue,无法区分根因。带完整 stack + 行列号:同一次发版同一 bug 因触发数据不同(不同行)被拆成多个 issue,聚合失效。取前两帧并抹去行列号 = "同一函数里出的同一类错"聚为一条,恰好对应"一个 bug"。
+</details>
+
+<details>
+<summary><b>8. 【进阶】监控队列为什么用 visibilitychange 兜底而不是 beforeunload?</b></summary>
+
+beforeunload 在移动端浏览器(切后台、被系统回收)和部分场景下不可靠且已被渐进废弃;visibilitychange → hidden 覆盖切后台、关闭页签、导航离开等所有"不再回来"的前兆,且此时 sendBeacon 仍可发出。双保险写法:visibilitychange(hidden) flush + pagehide 兜底。
+</details>
+
+<details>
+<summary><b>9. 【挑战】qiankun 子应用"二进宫"(切走再切回)报错"app 已挂载"的根因?</b></summary>
+
+unmount 里没有彻底销毁:Vue app.unmount() 没执行或实例没置空、路由实例没销毁、createRoot 没有 root.unmount()(React)。修复:unmount 中销毁实例并置 null、销毁路由、移除挂到全局的监听/定时器;开发环境另外注意 vite-plugin-qiankun 的 dev 模式热更新实例残留。
+</details>
+
+<details>
+<summary><b>10. 【挑战】Module Federation 与 qiankun 的本质区别?shared 配置错误会出什么灵异问题?</b></summary>
+
+qiankun 是"多个独立应用拼一页",核心价值是隔离(沙箱),可异构技术栈;MF 是"多个构建产物共享一个运行时",核心价值是共享依赖与独立部署,无沙箱、同技术栈才有意义。shared 配置两端不一致/版本不兼容 → 运行时加载出两份 React/Vue → Hooks 报 Invalid hook call、Vue 响应式对象跨实例不识别,这类问题不报配置错误、只在运行时灵异发作,是最难排查的一类。
+</details>
+
+---
+
+## 11.6 本章避坑清单
+
+> 把本章散落在各节的原则收口成一份可检索清单，按日常出现频率排序；详情回上方对应小节。
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| EventBus 内存泄漏 | `on` 注册后卸载忘了 `off`，监听器与闭包长期驻留 | 订阅与卸载成对 `off`；用返回的取消函数统一收集并在销毁时调用 |
+| EventBus 重复监听 | 热更新、重复挂载让同一事件被监听多次，回调执行多遍 | 注册前先 `off` 再 `on` 保证幂等；用具名 key 管理，禁止匿名重复注册 |
+| EventBus 难追踪 | 全局事件满天飞，谁发的谁收的查不清 | 事件名集中常量化、只传最小数据并加日志；复杂链路改用状态机 |
+| 响应式闭环 | `watchEffect` 里改被依赖的状态、`emit` 后又改父级，形成回环 | 副作用与数据变更解耦；用标志位防重入，避免自触发死循环 |
+| qiankun 二进宫 | 切走再切回报 app 已挂载，根因是 unmount 没彻底销毁 | unmount 里销毁实例并置 `null`、销毁路由、移除全局监听与定时器 |
+| Module Federation | 两端 `shared` 配置不一致，运行时加载出两份 React | 统一 `shared` 版本并设 `singleton`、锁定依赖版本，避免 Invalid hook call |
+| 状态机非法迁移 | 用零散布尔标志位拼状态，出现不可能的中间态 | 用状态机枚举合法迁移表，非法迁移直接抛错，拒绝标志位长链 |
+| 单例跨请求污染 | SSR 下单例在请求间共享，A 用户的态泄漏给 B 用户 | 单例改按请求创建（工厂函数 + 请求上下文），杜绝模块级可变全局 |
