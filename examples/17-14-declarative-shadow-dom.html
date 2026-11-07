@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /></head>
+<body>
+    <!-- 声明式 Shadow DOM:无需 JS 即可渲染隔离内容(SSR 可直接输出这段 HTML)-->
+    <my-ssr-card>
+        <template shadowrootmode="open">
+            <style>
+                .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+                h3 { color: #1890ff; }
+            </style>
+            <div class="card">
+                <h3><slot name="title">默认标题</slot></h3>
+                <p><slot>默认内容</slot></p>
+            </div>
+        </template>
+        <!-- 以下内容在光 DOM 中,被投射到上面的 slot -->
+        <span slot="title">SSR 标题</span>
+        <p>这段内容由服务端渲染,无需客户端 JS 即可显示。</p>
+    </my-ssr-card>
+
+    <script>
+        // 浏览器解析 <template shadowrootmode="open"> 时自动调用 attachShadow
+        // 如果已有声明式 Shadow DOM,JS 中的 attachShadow 会报"已经挂载" —— 用 getShadowRoot 检测
+        class MySSRCard extends HTMLElement {
+            connectedCallback() {
+                // ✅ 优先使用已存在的声明式 Shadow DOM,不存在才手动 attach
+                const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
+                // 已有内容(来自 <template>),不需要再 innerHTML
+                // 这里只做增强:加事件监听、动态更新等
+            }
+        }
+        customElements.define('my-ssr-card', MySSRCard);
+    </script>
+</body>
+</html>

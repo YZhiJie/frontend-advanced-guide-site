@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /></head>
+<body>
+    <!-- 命名 slot:内容投射到指定位置 -->
+    <my-card>
+        <span slot="title">用户管理</span>
+        <p>这里是默认 slot 的内容,会被投射到未命名的 <slot> 中。</p>
+        <button slot="actions">编辑</button>
+    </my-card>
+
+    <script>
+        class MyCard extends HTMLElement {
+            connectedCallback() {
+                const root = this.attachShadow({ mode: 'open' });
+                root.innerHTML = `
+                    <style>
+                        .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+                        header { font-weight: bold; margin-bottom: 8px; }
+                        footer { margin-top: 12px; text-align: right; }
+                    </style>
+                    <div class="card">
+                        <header><slot name="title">默认标题</slot></header>
+                        <div><slot>默认内容 fallback</slot></div>     <!-- 未命名 slot:接收无 slot 属性的内容 -->
+                        <footer><slot name="actions"></slot></footer>
+                    </div>
+                `;
+            }
+        }
+        customElements.define('my-card', MyCard);
+    </script>
+</body>
+</html>

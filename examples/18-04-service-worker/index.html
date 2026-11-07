@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>18-04 ServiceWorker 离线缓存与更新</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 680px; margin: 40px auto; padding: 0 16px; }
+        button { padding: 8px 16px; margin: 4px 8px 4px 0; cursor: pointer; }
+        #status { padding: 8px 12px; border-radius: 6px; background: #f1f5f9; display: inline-block; font-size: 14px; }
+        pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; min-height: 80px; white-space: pre-wrap; }
+        #toast { display: none; position: fixed; right: 16px; bottom: 16px; background: #1e293b; color: #fff; padding: 12px 16px; border-radius: 8px; }
+        #toast button { margin-left: 12px; }
+    </style>
+</head>
+<body>
+    <h2>ServiceWorker 演示</h2>
+    <p>SW 状态：<span id="status">未注册</span></p>
+    <p>
+        <button id="fetchData">请求 data.json（Network Only）</button>
+        <button id="checkUpdate">检查 SW 更新</button>
+        <button id="unregister">注销 SW</button>
+    </p>
+    <pre id="out">操作步骤：
+1. 首次打开本页（SW 安装并预缓存）；
+2. DevTools → Network 勾 Offline（或断网）后刷新：页面仍可打开（Network First 回退缓存）；
+3. 离线时点"请求 data.json"会失败（接口不缓存），但导航被 offline.html 兜底；
+4. 修改 sw.js 任意字节后刷新，会弹出更新提示。</pre>
+
+    <div id="toast">发现新版本 <button id="reload">刷新</button></div>
+    <script src="./app.js"></script>
+</body>
+</html>

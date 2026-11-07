@@ -1,0 +1,20 @@
+{
+  "name": "高级前端进阶指南",
+  "short_name": "前端进阶指南",
+  "description": "系统整理现代前端开发必备高级技术知识点，含概念解析、应用场景、可运行代码示例、最佳实践与自测题。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#0891b2",
+  "icons": [
+    {
+      "src": "logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

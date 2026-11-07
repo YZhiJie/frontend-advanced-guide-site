@@ -1,0 +1,240 @@
+# 前端生产发布流水线（GitHub Actions）
+# 放置位置：.github/workflows/deploy.yml
+# 前置资源：S3 桶（版本化开启）+ CloudFront + GitHub OIDC Provider + IAM Role
+# 关键设计：
+#   1. verify 矩阵跑 20/22，build 只跑一次（产物唯一，避免矩阵产物分叉）
+#   2. 产物用 artifact 传递，部署作业不重新构建
+#   3. production environment 配置 Required reviewers，审批后才拿得到 OIDC 临时凭证
+#   4. 先传哈希资源、再传 index.html、最后传 sw.js —— 任何时刻回滚都能对上旧 HTML
+#   5. smoke test 失败自动按 current.txt 指回上一版并刷新 CDN
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      rollback_to:
+        description: "回滚到指定 commit SHA（留空则正常发布）"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write # OIDC 换取 AWS 临时凭证，不落长效 AK
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  AWS_REGION: ap-southeast-1
+  AWS_ROLE_ARN: arn:aws:iam::123456789012:role/github-actions-frontend-deploy
+  S3_BUCKET: example-frontend-prod
+  CDN_DISTRIBUTION_ID: EXXXXXXXXXXXXX
+  PROD_URL: https://app.example.com
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test -- --run
+      - run: pnpm exec tsc --noEmit
+
+  build:
+    name: build
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+        env:
+          # 公开值：构建期注入；密钥一律不要放这里
+          VITE_API_BASE: /api
+          VITE_RELEASE: ${{ github.sha }}
+      # 构建产物里必须能查到 release 标记，smoke test 靠它确认「新版本真的生效」
+      - run: grep -rq "${{ github.sha }}" dist || (echo "dist 缺少 release 标记" && exit 1)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: dist
+          retention-days: 30
+          if-no-files-found: error
+
+  deploy-staging:
+    name: deploy staging
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.app.example.com
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: dist
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Sync staging
+        run: |
+          aws s3 sync dist/assets "s3://${S3_BUCKET}-staging/assets" \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp dist/index.html "s3://${S3_BUCKET}-staging/index.html" \
+            --cache-control "no-cache"
+          aws s3 cp dist/sw.js "s3://${S3_BUCKET}-staging/sw.js" \
+            --cache-control "no-cache" --content-type application/javascript
+          aws cloudfront create-invalidation \
+            --distribution-id "${CDN_DISTRIBUTION_ID_STAGING}" \
+            --paths "/" "/index.html" "/sw.js"
+      - name: Smoke test staging
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${STAGING_URL}/healthz" || true)
+            [ "$code" = "200" ] && break
+            sleep 5
+          done
+          [ "$code" = "200" ] || { echo "staging healthz=$code"; exit 1; }
+          curl -fsS "${STAGING_URL}/" | grep -q "${{ github.sha }}"
+        env:
+          STAGING_URL: https://staging.app.example.com
+
+  deploy-prod:
+    name: deploy production
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    # environment 上配置 Required reviewers：审批通过后本作业才开始，OIDC 才可用
+    environment:
+      name: production
+      url: https://app.example.com
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: dist
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve rollback pointer
+        id: pointer
+        run: |
+          prev=$(aws s3 cp "s3://${S3_BUCKET}/current.txt" - 2>/dev/null || true)
+          echo "prev=${prev:-none}" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve previous release
+        run: |
+          prev="${{ steps.pointer.outputs.prev }}"
+          if [ "$prev" != "none" ] && [ -n "$prev" ]; then
+            aws s3 sync "s3://${S3_BUCKET}/" "s3://${S3_BUCKET}/releases/${prev}/" \
+              --exclude "releases/*"
+          fi
+
+      - name: Upload immutable assets first
+        run: |
+          aws s3 sync dist/assets "s3://${S3_BUCKET}/assets" \
+            --cache-control "public,max-age=31536000,immutable"
+
+      - name: Publish HTML entry
+        run: |
+          aws s3 cp dist/index.html "s3://${S3_BUCKET}/index.html" \
+            --cache-control "no-cache"
+          aws s3 cp dist/manifest.webmanifest "s3://${S3_BUCKET}/manifest.webmanifest" \
+            --cache-control "public,max-age=3600" || true
+          aws s3 cp dist/sw.js "s3://${S3_BUCKET}/sw.js" \
+            --cache-control "no-cache" --content-type application/javascript || true
+
+      - name: Invalidate CDN
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${CDN_DISTRIBUTION_ID}" \
+            --paths "/" "/index.html" "/manifest.webmanifest" "/sw.js"
+
+      - name: Smoke test
+        id: smoke
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS "${PROD_URL}/" | grep -q "${{ github.sha }}"; then
+              echo "新版本已生效（第 ${i} 次探测）"
+              break
+            fi
+            [ "$i" = "60" ] && { echo "60 次探测仍未生效"; exit 1; }
+            sleep 5
+          done
+          curl -fsS -o /dev/null "${PROD_URL}/healthz"
+          # 断言 SPA 回退与静态资源缓存头
+          curl -fsS -o /dev/null -w '%{http_code}' "${PROD_URL}/orders/123" | grep -q 200
+          curl -fsSI "${PROD_URL}/index.html" | grep -qi 'cache-control: *no-cache'
+
+      - name: Advance rollback pointer
+        if: success()
+        run: |
+          printf '%s' "${{ github.sha }}" > current.txt
+          aws s3 cp current.txt "s3://${S3_BUCKET}/current.txt" \
+            --cache-control "no-cache"
+
+      - name: Rollback on failure
+        if: failure() && steps.pointer.outputs.prev != 'none'
+        run: |
+          prev="${{ steps.pointer.outputs.prev }}"
+          echo "发布失败，回滚到 ${prev}"
+          aws s3 cp "s3://${S3_BUCKET}/releases/${prev}/index.html" \
+            "s3://${S3_BUCKET}/index.html" --cache-control "no-cache"
+          aws s3 cp "s3://${S3_BUCKET}/releases/${prev}/sw.js" \
+            "s3://${S3_BUCKET}/sw.js" --cache-control "no-cache" \
+            --content-type application/javascript || true
+          aws cloudfront create-invalidation \
+            --distribution-id "${CDN_DISTRIBUTION_ID}" \
+            --paths "/" "/index.html" "/sw.js"
+
+  rollback:
+    name: manual rollback
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.rollback_to != ''
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://app.example.com
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Restore release
+        run: |
+          target="${{ github.event.inputs.rollback_to }}"
+          aws s3 cp "s3://${S3_BUCKET}/releases/${target}/index.html" \
+            "s3://${S3_BUCKET}/index.html" --cache-control "no-cache"
+          aws s3 cp "s3://${S3_BUCKET}/releases/${target}/sw.js" \
+            "s3://${S3_BUCKET}/sw.js" --cache-control "no-cache" \
+            --content-type application/javascript || true
+          aws cloudfront create-invalidation \
+            --distribution-id "${CDN_DISTRIBUTION_ID}" \
+            --paths "/" "/index.html" "/sw.js"

@@ -1,0 +1,249 @@
+# 第八十六部分 · Recharts 轻量化可视化（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/86-recharts-visualization
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第八十六部分 · Recharts 轻量化可视化
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第八十五部分 · React Hook Form 表单工程](./85-react-hook-form.md)｜关联章节：[第四十一部分 · 数据可视化大屏](./41-dashboard-visualization.md) · [第五十八部分 · 可视化实战 ECharts/AntV/D3](./58-visualization-practice.md) · [第十七部分 · Web 平台新能力](./17-web-platform.md)
+
+> 💡 **本章特色**：JD 技术栈要求 ECharts / Recharts。[第 58 册](./58-visualization-practice.md) 已覆盖 ECharts，但 Recharts 未涉及。Recharts 是 React 生态最流行的**声明式 SVG 图表库**——用 JSX 写图表，组件即配置。它的核心难点不在 API，而在**数据管线**：把后端返回的不规则数据转成 Recharts 需要的格式。本章重点讲：**时间序列对齐**（多系列合并到同一 x 轴）、**缺失值填充**（null/zero/previous/linear 四种策略）、**周期聚合**（日→周→月）。配套示例 [86-01-chart-data-pipeline.ts](./examples/86-01-chart-data-pipeline.ts) 跑通对齐、填充、聚合。
+
+## 本部分内容
+
+- [86.1 Recharts 定位：声明式 SVG 图表](#_86-1-recharts-定位-声明式-svg-图表)
+- [86.2 数据管线：时间序列对齐与缺失值填充](#_86-2-数据管线-时间序列对齐与缺失值填充)
+- [86.3 常用图表组合与定制](#_86-3-常用图表组合与定制)
+- [86.4 响应式、性能与 ECharts 选型对比](#_86-4-响应式、性能与-echarts-选型对比)
+- [86.5 自测题](#_86-5-自测题)
+- [86.6 本章避坑清单](#_86-6-本章避坑清单)
+
+---
+
+## 86.1 Recharts 定位：声明式 SVG 图表
+
+### 概念解析
+
+Recharts 的核心哲学：**用 JSX 写图表，组件即配置**。和 ECharts 的 option 对象不同，Recharts 把图表拆成一个个 React 组件：
+
+```tsx
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+
+function RevenueChart({ data }) {
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis dataKey="date" />
+        <YAxis />
+        <Tooltip />
+        <Line type="monotone" dataKey="revenue" stroke="#8884d8" />
+        <Line type="monotone" dataKey="cost" stroke="#82ca9d" />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+```
+
+数据格式：**一个数组，每个元素是一个对象，key 是系列名，value 是数值**。x 轴字段通常是 `date` 或 `name`。
+
+### 应用实践
+
+- **Recharts 适合中小规模数据**：几百个点以内流畅，超过 1000 个点 SVG 渲染会卡顿，此时换 ECharts（Canvas 渲染）；
+- **`ResponsiveContainer` 是标配**：外层包一层，宽度自适应父容器，不用手动算尺寸；
+- **`type="monotone"` 平滑曲线**：折线图默认用 monotone 插值，比直线更美观，但数据波动大时可能误导，看场景选。
+
+---
+
+## 86.2 数据管线：时间序列对齐与缺失值填充
+
+### 概念解析
+
+后端返回的图表数据往往是**不规则**的：系列 A 有 1/1、1/3 的数据，系列 B 有 1/2、1/3 的数据。但 Recharts 需要**统一的 x 轴**——一个数组，每个元素包含所有系列在该 x 值上的数据。所以要做三步：
+
+1. **对齐**：合并所有系列的 x 值，缺失的填 null；
+2. **填充**：根据业务选择 null（断线）、zero（填 0）、previous（继承前值）、linear（线性插值）；
+3. **聚合**：x 轴点太密时按周/月聚合，避免挤在一起。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/86-01-chart-data-pipeline.ts（节选：对齐 + 填充）
+export function alignTimeSeries(series: Record<string, RawPoint[]>) {
+  const allDates = [...new Set(series.flatMap(s => s.map(p => p.date)))].sort();
+  const maps = Object.entries(series).map(([name, points]) => {
+    const m = new Map(points.map(p => [p.date, p.value]));
+    return { name, map: m };
+  });
+  return allDates.map(date => {
+    const row = { date };
+    for (const { name, map } of maps) row[name] = map.get(date) ?? null;
+    return row;
+  });
+}
+```
+
+> 运行方式：`npx tsx examples/86-01-chart-data-pipeline.ts`
+
+四种填充策略的选择：
+
+| 策略 | 效果 | 适用场景 |
+| --- | --- | --- |
+| `null` | 保留空缺，折线断开 | 明确表示"这天没数据"，不让用户误以为是 0 |
+| `zero` | 填 0 | 计数类指标（如订单数），没数据就是 0 |
+| `previous` | 继承上一个非空值 | 存量类指标（如库存），没新数据就延续上次 |
+| `linear` | 线性插值 | 趋势类指标（如温度），平滑过渡 |
+
+### 应用实践
+
+- **先和后端约定数据格式**：最好让后端直接返回对齐好的数据，前端只做展示。如果后端做不到，前端再用上面的管线处理；
+- **缺失值不要盲目填 0**：收入类指标填 0 会让趋势图骤降，误导决策。用 null 断线或 previous 继承更合理；
+- **聚合要考虑业务含义**：日收入按月聚合是"求和"，日转化率按月聚合是"加权平均"，不能一概求和。
+
+---
+
+## 86.3 常用图表组合与定制
+
+### 概念解析
+
+Recharts 的组件可以自由组合，实现复杂图表：
+
+- **柱状图 + 折线图**：`ComposedChart` 里放 `Bar` 和 `Line`，双 Y 轴用两个 `YAxis`（`yAxisId` 区分）；
+- **堆叠柱状图**：`Bar` 上加 `stackId`，相同 stackId 的柱子堆叠；
+- **面积图**：`Area` 组件，`type="monotone"` 平滑；
+- **饼图**：`PieChart` + `Pie`，`dataKey` 指向数值字段，`nameKey` 指向标签字段。
+
+```tsx
+// 双 Y 轴：收入（柱状，左轴）+ 转化率（折线，右轴）
+<ComposedChart data={data}>
+  <XAxis dataKey="date" />
+  <YAxis yAxisId="left" />
+  <YAxis yAxisId="right" orientation="right" />
+  <Bar yAxisId="left" dataKey="revenue" fill="#8884d8" />
+  <Line yAxisId="right" type="monotone" dataKey="rate" stroke="#82ca9d" />
+</ComposedChart>
+```
+
+### 应用实践
+
+- **颜色要有语义**：收入用绿色、成本用红色、目标用虚线。不要随便选色，颜色本身要传达信息；
+- **Tooltip 要自定义**：默认 Tooltip 显示原始数据，业务里需要格式化（金额加千分位、百分比加 %）。用 `content` prop 传自定义组件；
+- **图例位置要合理**：数据系列多时，图例放底部比放右侧更省横向空间。
+
+---
+
+## 86.4 响应式、性能与 ECharts 选型对比
+
+### 概念解析
+
+Recharts 和 ECharts 的选型对比：
+
+| 维度 | Recharts | ECharts |
+| --- | --- | --- |
+| 渲染方式 | SVG | Canvas（默认）/ SVG |
+| 数据量 | <1000 点流畅 | 万级以上流畅 |
+| API 风格 | 声明式 JSX | 命令式 option |
+| React 集成 | 原生 React 组件 | 需要 echarts-for-react 封装 |
+| 定制能力 | 中等（受 SVG 限制） | 极强 |
+| 包体积 | ~100KB gzip | ~300KB gzip |
+| 适用场景 | 中小数据、B 端报表 | 大数据、大屏、复杂交互 |
+
+**选型原则**：B 端管理后台的常规报表（数据量小、要和 React 组件深度集成）用 Recharts；大屏、实时监控、万级数据点用 ECharts。
+
+### 应用实践
+
+- **大数据量做降采样**：如果非要用 Recharts 展示万级数据，先在前端做降采样（LTTB 算法），把点降到几百个再渲染；
+- **`isAnimationActive={false}` 关动画**：数据更新频繁时，动画会导致卡顿和视觉干扰，实时图表关掉动画；
+- **`ResponsiveContainer` 要给高度**：宽度 100% 没问题，但高度必须显式指定（数字或父容器有高度），否则图表高度为 0。
+
+---
+
+## 86.5 自测题
+
+<details>
+<summary><b>1. 【基础】Recharts 的数据格式是什么？为什么要做时间序列对齐？</b></summary>
+
+Recharts 需要一个数组，每个元素是包含所有系列数据的对象（如 `{date, revenue, cost}`）。后端返回的多系列数据往往日期不一致（A 有 1/1、1/3，B 有 1/2、1/3），需要合并所有日期到同一 x 轴，缺失的填 null，这样折线才能正确绘制。
+</details>
+
+<details>
+<summary><b>2. 【进阶】缺失值填充的四种策略分别适用于什么场景？</b></summary>
+
+① null（断线）：明确表示这天没数据，不让用户误以为是 0；② zero：计数类指标（订单数），没数据就是 0；③ previous：存量类指标（库存），没新数据延续上次；④ linear：趋势类指标（温度），平滑过渡。选错策略会误导决策——收入填 0 会让趋势骤降。
+</details>
+
+<details>
+<summary><b>3. 【进阶】Recharts 和 ECharts 怎么选？</b></summary>
+
+数据量 <1000 点、B 端常规报表、要和 React 深度集成 → Recharts（SVG，声明式，体积小）。数据量万级以上、大屏、复杂交互 → ECharts（Canvas，性能强，定制能力极强）。核心区别是渲染方式：SVG 适合矢量小数据，Canvas 适合大数据。
+</details>
+
+<details>
+<summary><b>4. 【挑战】为什么聚合时"收入求和"但"转化率要加权平均"？</b></summary>
+
+收入是可加指标——1 月每天的收入加起来就是月收入。转化率是比率——不能直接把每天的转化率相加，需要用「总转化数 / 总访问数」重新计算，即按权重（访问数）加权平均。直接求和会得到超过 100% 的荒谬结果。聚合方式取决于指标的业务语义。
+</details>
+
+---
+
+## 86.6 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 数据未对齐 | 多系列日期不一致，折线错位 | 合并所有 x 值到同一轴，缺失填 null |
+| 缺失值盲目填 0 | 收入类指标填 0，趋势骤降误导 | 根据指标语义选填充策略（null/zero/previous/linear） |
+| 聚合方式错 | 转化率直接求和，超过 100% | 可加指标求和，比率指标加权平均 |
+| 大数据量卡顿 | 万级数据用 SVG 渲染，掉帧 | 换 ECharts（Canvas），或前端降采样（LTTB） |
+| 高度为 0 | ResponsiveContainer 没给高度，图表不显示 | 显式给 height，或确保父容器有高度 |
+| 实时图表动画干扰 | 数据频繁更新时动画导致卡顿 | `isAnimationActive={false}` 关闭动画 |
+| Tooltip 未格式化 | 金额显示 1234567 而不是 1,234,567 | 自定义 Tooltip content，按业务格式化 |
+
+---
+
+## 86.7 面试问答
+
+<details>
+<summary><b>【L2】Recharts 和 ECharts 怎么选？核心区别是什么？</b></summary>
+
+**回答框架**：核心区别是渲染方式——Recharts 用 SVG，ECharts 默认用 Canvas。① 数据量：<1000 点用 Recharts（流畅），万级以上用 ECharts（Canvas 性能强）；② API 风格：Recharts 声明式 JSX，ECharts 命令式 option；③ 场景：B 端常规报表、要和 React 深度集成用 Recharts；大屏、复杂交互、大数据用 ECharts。
+
+**评分要点**：知道 SVG vs Canvas 的区别；知道数据量阈值；能说出选型场景。
+
+**加分项**：提到 Recharts 体积小（~100KB）ECharts 大（~300KB）；提到 Recharts 定制受 SVG 限制；提到大数据可用 LTTB 降采样。
+</details>
+
+<details>
+<summary><b>【L2】后端返回的两个系列日期不一致，Recharts 怎么处理？</b></summary>
+
+**回答框架**：① 后端可能返回系列 A 有 1/1、1/3，系列 B 有 1/2、1/3；② Recharts 需要统一 x 轴——合并所有日期，缺失的填 null；③ 填充策略根据业务：null（断线）、zero（计数类）、previous（存量类）、linear（趋势类）。不能直接把两个数组拼一起，会错位。
+
+**评分要点**：知道要对齐到同一 x 轴；知道缺失填 null；知道四种填充策略。
+
+**加分项**：提到最好让后端直接返回对齐好的数据；提到收入不能填 0 会误导。
+</details>
+
+<details>
+<summary><b>【L3】日收入数据要按月聚合成趋势图，怎么聚合？为什么不能直接求和每天的转化率？</b></summary>
+
+**回答框架**：① 收入是可加指标——每天收入求和就是月收入；② 转化率是比率指标——不能把每天的转化率相加（会超过 100%），要用总转化数/总访问数重新算，即按访问数加权平均；③ 聚合方式取决于指标的业务语义，不是所有指标都求和。
+
+**评分要点**：知道可加指标求和、比率指标加权平均；能说出转化率为什么不能求和。
+
+**加分项**：提到平均客单价也要加权（总收入/总订单数）；提到环比同比的计算。
+</details>
+
+---
+
+## 86.8 代码审查清单
+
+| 审查项 | 关注点 | 常见问题 | 建议 |
+| --- | --- | --- | --- |
+| 数据对齐 | 多系列是否对齐到同一 x 轴 | 日期不一致折线错位 | 合并所有 x 值，缺失填 null |
+| 填充策略 | 是否按指标语义选填充 | 收入填 0 导致趋势骤降 | null/zero/previous/linear 按需选 |
+| 聚合方式 | 可加/比率指标是否区分 | 转化率直接求和超 100% | 可加求和，比率加权平均 |
+| 大数据量 | 是否超过 SVG 承载 | 万级数据掉帧 | 换 ECharts 或 LTTB 降采样 |
+| 容器高度 | ResponsiveContainer 是否给高度 | 图表不显示高度为 0 | 显式 height 或父容器有高度 |
+| 实时动画 | 频繁更新是否关动画 | 动画卡顿干扰 | isAnimationActive={false} |
+| Tooltip 格式化 | 是否按业务格式化 | 金额无千分位 | 自定义 content 格式化 |
+| 颜色语义 | 颜色是否传达含义 | 随便选色 | 收入绿、成本红、目标虚线 |
+| 响应式 | 是否用 ResponsiveContainer | 固定宽度不自适应 | 外层包 ResponsiveContainer |
+| 空数据 | 空数组是否有空态 | 图表空白无提示 | data 为空时显示空状态组件 |

@@ -1,0 +1,296 @@
+# 第八十四部分 · shadcn/ui 与 Radix UI：现代 B 端组件体系（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/84-shadcn-radix-ui
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第八十四部分 · shadcn/ui 与 Radix UI：现代 B 端组件体系
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第八十三部分 · 项目管理前端](./83-project-management.md)｜关联章节：[第十二部分 · CSS 工程化与现代 CSS](./12-css-engineering.md) · [第四十九部分 · 组件库工程](./49-component-library.md) · [第三十三部分 · Zod 运行时校验](./33-zod.md)
+
+> 💡 **本章特色**：JD 技术栈明确要求 shadcn/ui、Radix UI、Tailwind CSS。这套组合正在成为现代 B 端 SaaS 的标配。shadcn/ui 不是传统组件库（不是 npm install 后 import），而是**把组件源码拷贝到你的项目里**，你拥有完全控制权。Radix UI 提供无障碍基础组件，Tailwind 提供样式，shadcn 把两者粘合成开箱即用的组件。本章讲清：**令牌驱动的主题系统**、**Radix Primitive 的无障碍能力**、**shadcn 组件的组合方式**。配套示例 [84-01-design-tokens.ts](./examples/84-01-design-tokens.ts) 演示设计令牌的 CSS Variables 生成、深色翻转、品牌覆盖、完整性校验。
+
+## 本部分内容
+
+- [84.1 shadcn/ui 的核心理念：不是组件库，是代码拷贝](#_84-1-shadcn-ui-的核心理念-不是组件库-是代码拷贝)
+- [84.2 Radix UI Primitives：无障碍基础组件](#_84-2-radix-ui-primitives-无障碍基础组件)
+- [84.3 设计令牌与主题系统：CSS Variables + Tailwind](#_84-3-设计令牌与主题系统-css-variables-tailwind)
+- [84.4 组合模式：用 shadcn 组件拼业务页面](#_84-4-组合模式-用-shadcn-组件拼业务页面)
+- [84.5 自测题](#_84-5-自测题)
+- [84.6 本章避坑清单](#_84-6-本章避坑清单)
+
+---
+
+## 84.1 shadcn/ui 的核心理念：不是组件库，是代码拷贝
+
+### 概念解析
+
+shadcn/ui 最反直觉的一点：**它不是一个 npm 包**。你不会 `import { Button } from 'shadcn-ui'`。正确用法是：
+
+```bash
+npx shadcn@latest add button
+```
+
+这条命令会把 `button.tsx` 的**源码**拷贝到你项目的 `components/ui/` 目录下。然后你直接 import：
+
+```tsx
+import { Button } from "@/components/ui/button";
+```
+
+这种设计的核心优势：**你拥有组件的完全控制权**。想改样式、改逻辑、加 prop，直接改源码，不需要等库作者发版，也不需要 fork。
+
+代价是：组件不会自动更新，升级需要手动重新 `add` 并 diff。但对 B 端产品来说，**可控 > 自动更新**——你不希望一个组件库的 minor 升级把全公司的按钮样式改了。
+
+### 应用实践
+
+- **不要改 shadcn 组件的核心逻辑**，而是通过 `className` prop 覆盖样式，或包一层业务组件。直接改源码会让后续升级困难；
+- **统一从 `@/components/ui` 导入**，不要到处写相对路径。配置 `tsconfig.json` 的 `paths` 别名；
+- **升级策略**：定期 `npx shadcn@latest diff` 看变更，有价值的更新手动合并，不要盲目全量覆盖。
+
+---
+
+## 84.2 Radix UI Primitives：无障碍基础组件
+
+### 概念解析
+
+Radix UI 提供**无障碍的无头（headless）基础组件**——它只提供行为和可访问性，不提供样式。比如 `Dialog` 组件处理了：
+
+- 焦点陷阱（打开时焦点锁在弹窗内）；
+- ESC 关闭；
+- 点击遮罩关闭；
+- 滚动锁定；
+- ARIA 属性（role、aria-modal、aria-labelledby）；
+- 返回焦点（关闭后焦点回到触发元素）。
+
+这些无障碍细节自己实现非常容易漏。Radix 把它们封装好，shadcn 在上层加 Tailwind 样式。
+
+```tsx
+// shadcn 的 Dialog 组件本质上就是 Radix Dialog + Tailwind 样式
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+
+export const Dialog = DialogPrimitive.Root;
+export const DialogTrigger = DialogPrimitive.Trigger;
+export const DialogContent = React.forwardRef<HTMLDivElement, DialogPrimitive.DialogContentProps>(
+  ({ className, children, ...props }, ref) => (
+    <DialogPrimitive.Portal>
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80" />
+      <DialogPrimitive.Content
+        ref={ref}
+        className={`fixed left-1/2 top-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2 ${className}`}
+        {...props}
+      >
+        {children}
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Portal>
+  ),
+);
+```
+
+### 应用实践
+
+- **优先用 Radix 的有状态组件**：Dialog、DropdownMenu、Tooltip、Popover、Tabs、Accordion 这些，自己实现无障碍太容易出问题；
+- **自定义组件也要考虑无障碍**：不要只做视觉效果，键盘导航、焦点管理、ARIA 属性都要到位（见 [15 册可访问性](./15-accessibility-i18n.md)）；
+- **Radix 的 Portal 很重要**：Dialog、Tooltip 用 Portal 渲染到 body 下，避免被父级 `overflow: hidden` 或 `z-index` 裁切。
+
+---
+
+## 84.3 设计令牌与主题系统：CSS Variables + Tailwind
+
+### 概念解析
+
+shadcn/ui 的主题系统基于**设计令牌（Design Tokens）**：用 CSS Variables 定义语义化的颜色、圆角、阴影，Tailwind 通过 `theme.extend` 引用这些变量。换肤只需切换变量值，组件代码不用改。
+
+颜色用 **HSL 格式**（`h  s%  l%`，不带 `hsl()` 包裹），这样 Tailwind 可以加透明度：`bg-primary/80` 会生成 `hsl(var(--primary) / 0.8)`。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/84-01-design-tokens.ts（节选：令牌 → CSS Variables）
+export function tokensToCssVars(tokens: DesignTokens): string {
+  const map = {
+    background: tokens.background,
+    foreground: tokens.foreground,
+    primary: tokens.primary,
+    "primary-foreground": tokens.primaryForeground,
+    border: tokens.border,
+    radius: tokens.radius,
+    // ...
+  };
+  return Object.entries(map).map(([k, v]) => `  --${k}: ${v};`).join("\n");
+}
+```
+
+对应的 `globals.css`：
+
+```css
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --border: 240 3.7% 15.9%;
+  }
+}
+```
+
+`tailwind.config.ts` 里引用变量：
+
+```ts
+export default {
+  theme: {
+    extend: {
+      colors: {
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        border: "hsl(var(--border))",
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+    },
+  },
+};
+```
+
+> 运行方式：`npx tsx examples/84-01-design-tokens.ts` 验证令牌生成、深色翻转、品牌覆盖、完整性校验。
+
+### 应用实践
+
+- **颜色用语义名不用色值名**：`bg-primary` 而不是 `bg-blue-500`。换品牌色时只改变量，组件不用动；
+- **深色模式靠 `.dark` 类切换变量**，不是写两套 Tailwind 类。在 `html` 上加 `class="dark"` 即可；
+- **品牌定制只覆盖令牌**：租户有自己的品牌色时，只覆盖 `--primary` 等令牌，不要改组件代码。
+
+---
+
+## 84.4 组合模式：用 shadcn 组件拼业务页面
+
+### 概念解析
+
+shadcn/ui 提供原子组件（Button、Input、Card、Table、Dialog…），业务页面是**组件的组合**，不是继承。典型模式：
+
+```
+Page
+ ├── Card（容器）
+ │    ├── CardHeader（标题 + 描述）
+ │    ├── CardContent
+ │    │    ├── Table（数据列表）
+ │    │    │    └── TableRow → TableCell（含 Badge 状态标签）
+ │    │    └── Pagination（分页）
+ │    └── CardFooter（操作按钮）
+ └── Dialog（新建/编辑弹窗）
+      └── Form（表单，见第 85 册）
+```
+
+组合的关键：**每个组件只管自己的事，通过 props 通信，不互相依赖内部实现**。
+
+### 应用实践
+
+- **业务组件包一层 shadcn 组件**：比如 `DataTable` 封装 shadcn 的 `Table` + 分页 + 排序 + 空态，业务页面直接用 `DataTable`，不直接用 `Table`；
+- **Props 透传用 `React.ComponentProps`**：包装组件时用 `React.ComponentProps<typeof Button>` 继承原组件的所有 props，避免漏 prop；
+- **变体用 `cva`**：shadcn 用 `class-variance-authority`（cva）管理组件变体（如 Button 的 variant: default/secondary/destructive），比手写 className 拼接清晰。
+
+---
+
+## 84.5 自测题
+
+<details>
+<summary><b>1. 【基础】shadcn/ui 为什么不是 npm 包，而是拷贝源码？</b></summary>
+
+为了让你拥有组件的完全控制权。传统组件库（如 Ant Design）的样式和逻辑封装在 npm 包里，想改得等作者发版或 fork。shadcn 把源码拷贝到你的项目，你可以直接改、直接控。代价是不会自动更新，但对 B 端产品来说可控性比自动更新更重要——你不希望一个库的 minor 升级把全公司的按钮样式改了。
+</details>
+
+<details>
+<summary><b>2. 【进阶】Radix UI 的价值是什么？为什么不自己写 Dialog？</b></summary>
+
+Radix 提供无障碍的无头基础组件，处理了自己实现很容易漏的细节：焦点陷阱、ESC 关闭、点击遮罩关闭、滚动锁定、ARIA 属性、返回焦点。这些细节涉及 WAI-ARIA 规范和键盘交互标准，自己实现很容易出 accessibility 问题。Radix 把行为封装好，你只管加样式。
+</details>
+
+<details>
+<summary><b>3. 【进阶】设计令牌为什么用 HSL 格式且不带 hsl() 包裹？</b></summary>
+
+为了支持透明度。Tailwind 的 `bg-primary/80` 需要生成 `hsl(var(--primary) / 0.8)`。如果变量里已经包了 `hsl()`，就无法在后面加 `/ 0.8`。所以变量只存 `h s% l%`（如 `240 5.9% 10%`），使用时才包 `hsl(var(--primary) / 0.8)`。HSL 比 HEX 更适合做明暗调节（改 L 就行）。
+</details>
+
+<details>
+<summary><b>4. 【挑战】深色模式为什么用 CSS Variables 切换，而不是写两套 Tailwind 类？</b></summary>
+
+用 CSS Variables 切换只需在 `:root` 和 `.dark` 下定义不同的变量值，组件代码用 `bg-primary` 一套类即可，自动响应主题变化。如果写两套类（`bg-white dark:bg-gray-900`），每个组件都要写两遍颜色，维护成本高且容易漏。变量方案让主题切换集中在一个地方。
+</details>
+
+---
+
+## 84.6 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 直接改 shadcn 源码 | 改了 button.tsx 核心逻辑，升级时全丢 | 通过 className 覆盖样式，或包一层业务组件，不改核心逻辑 |
+| 颜色用色值名 | `bg-blue-500` 写死，换品牌色要全局改 | 用语义令牌名 `bg-primary`，换肤只改变量值 |
+| HSL 带 hsl() | 变量写成 `--primary: hsl(240 5.9% 10%)`，透明度失效 | 变量只存 `240 5.9% 10%`，使用时 `hsl(var(--primary) / 0.8)` |
+| 深色模式写两套类 | 每个组件都写 `bg-white dark:bg-gray-900` | 用 CSS Variables，`:root` 和 `.dark` 各定义一套，组件只写 `bg-background` |
+| 忽略无障碍 | 自己写 Dialog/Tooltip，漏掉焦点陷阱和 ARIA | 用 Radix Primitives，它处理了无障碍细节 |
+| Portal 被裁切 | Dialog 渲染在父容器内，被 overflow:hidden 裁掉 | Radix 的 Portal 渲染到 body 下，不受父级裁切 |
+| 升级盲目覆盖 | `shadcn add` 时全量覆盖，自己改的逻辑丢失 | 先用 `shadcn diff` 看变更，手动合并有价值的更新 |
+
+---
+
+## 84.7 面试问答
+
+<details>
+<summary><b>【L2】shadcn/ui 和 Ant Design 有什么区别？什么场景选 shadcn？</b></summary>
+
+**回答框架**：① shadcn 是"拷贝源码到你的项目"，你完全拥有和控制组件；Ant Design 是 npm 包，封装好的黑盒；② shadcn 基于 Tailwind + Radix，样式用 Tailwind 类，无障碍用 Radix；Ant Design 自带样式和行为；③ 选 shadcn 的场景：需要深度定制样式、想用 Tailwind 体系、B 端 SaaS 要统一设计语言；选 Ant Design 的场景：后台管理系统要快速开发、不想折腾样式。
+
+**评分要点**：知道 shadcn 是拷贝源码不是 npm 包；知道基于 Tailwind+Radix；能说出选型场景。
+
+**加分项**：提到 shadcn 升级要手动 diff；提到 Radix 的无障碍能力；提到设计令牌驱动换肤。
+</details>
+
+<details>
+<summary><b>【L2】为什么设计令牌用 HSL 且不带 hsl() 包裹？深色模式怎么实现？</b></summary>
+
+**回答框架**：① 不带 hsl() 是为了支持透明度——`bg-primary/80` 生成 `hsl(var(--primary) / 0.8)`，如果变量里包了 hsl() 就无法加透明度；② HSL 比 HEX 更适合明暗调节（改 L 值）；③ 深色模式用 CSS Variables：`:root` 定义浅色变量，`.dark` 定义深色变量，组件用 `bg-primary` 一套类自动响应，不用写 `dark:` 前缀。
+
+**评分要点**：知道不带 hsl() 是为了透明度；知道深色模式用变量切换。
+
+**加分项**：提到圆角等非色值令牌不随主题变；提到品牌定制只覆盖语义层。
+</details>
+
+<details>
+<summary><b>【L3】你们团队要从 Ant Design 迁移到 shadcn/ui，你怎么规划？</b></summary>
+
+**回答框架**：① 先建设计令牌体系（CSS Variables），定义颜色/间距/圆角；② 用 `shadcn add` 引入基础组件（Button/Input/Card/Dialog），封装成业务组件；③ 按页面逐步迁移，新旧并存（一个页面一个页面换，不要大爆炸）；④ 迁移完一个页面做视觉走查和无障碍测试；⑤ 最后清理 Ant Design 依赖。
+
+**评分要点**：知道先建设计令牌再迁组件；知道逐步迁移不搞大爆炸；知道视觉和无障碍验证。
+
+**加分项**：提到用 `React.ComponentProps` 做 props 透传；提到 cva 管理组件变体；提到迁移期间的兼容层（旧组件包新组件）。
+</details>
+
+---
+
+## 84.8 代码审查清单
+
+| 审查项 | 关注点 | 常见问题 | 建议 |
+| --- | --- | --- | --- |
+| 源码控制权 | 是否直接改 shadcn 核心逻辑 | 改了 button.tsx 核心，升级全丢 | 用 className 覆盖或包业务组件 |
+| 颜色语义化 | 是否用语义令牌名 | 写死 bg-blue-500 | 用 bg-primary，换肤只改变量 |
+| HSL 格式 | 变量是否带 hsl() | --primary: hsl(...) 导致透明度失效 | 变量只存 h s% l% |
+| 深色模式 | 是否用 CSS Variables 切换 | 每个组件写 dark: 前缀 | :root 和 .dark 各定义变量 |
+| 无障碍 | 是否用 Radix Primitives | 自己写 Dialog 漏焦点陷阱 | 用 Radix 处理无障碍 |
+| Portal | Dialog/Tooltip 是否用 Portal | 被父级 overflow 裁切 | Radix Portal 渲染到 body |
+| Props 透传 | 包装组件是否透传 props | 漏传导致功能缺失 | 用 React.ComponentProps 继承 |
+| 变体管理 | 是否用 cva 管理变体 | 手写 className 拼接混乱 | 用 class-variance-authority |
+| 升级方式 | 是否盲目全量覆盖 | shadcn add 覆盖自己的改动 | 先 shadcn diff 再手动合并 |
+| 组件组合 | 是否用组合而非继承 | 继承 Button 改逻辑 | 组合 Button + Icon 等原子组件 |

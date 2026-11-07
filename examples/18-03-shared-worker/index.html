@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>18-03 SharedWorker 多 Tab 共享状态</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+        button { padding: 8px 16px; margin: 4px 8px 4px 0; cursor: pointer; }
+        .card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; background: #f8fafc; }
+        html[data-theme='dark'] .card { background: #1e293b; border-color: #334155; }
+    </style>
+</head>
+<body>
+    <h2>SharedWorker 共享计数器</h2>
+    <div class="card">
+        <p>本页端口 ID：<b id="pid">连接中…</b></p>
+        <p>共享计数：<b id="count" style="font-size:24px;color:#2563eb">0</b>　在线 Tab 数：<b id="online">0</b></p>
+        <p><button id="inc">计数 +1（所有 Tab 同步）</button></p>
+        <p style="color:#64748b;font-size:13px">
+            操作：开多个本页窗口，任一窗口 +1，其余窗口实时更新；逐个关闭窗口观察在线数下降（含心跳剔除僵尸端口）。
+        </p>
+    </div>
+
+    <script src="./main.js"></script>
+</body>
+</html>

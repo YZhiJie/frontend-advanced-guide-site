@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>生产级 deepClone 实验室 · 在线预览</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#2a2f3a;--tx:#dde1e8;--dim:#8b93a3;--brand:#5eead4;--err:#f87171;--ok:#86efac;--info:#93c5fd}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--bg);color:var(--tx);font:14px/1.6 ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;padding:16px 18px 28px}
+h1{font-size:16px;margin-bottom:2px}
+header p{color:var(--dim);font-size:12px;margin-bottom:12px}
+.sec{margin-top:16px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.sec h2{font-size:13px;margin-bottom:8px;color:var(--brand)}
+.hint{font-size:12px;color:var(--dim);margin:-4px 0 8px}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+button{font:12px/1 inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:#1f2430;color:var(--tx);cursor:pointer}
+button:hover{border-color:var(--brand);color:var(--brand)}
+button.primary{background:var(--brand);border-color:var(--brand);color:#06281f;font-weight:600}
+button.danger{border-color:#7f1d1d;color:var(--err)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.in,.ta{width:100%;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0c0e13;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.ta{resize:vertical;white-space:pre}
+.out{background:#0c0e13;border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-height:300px;overflow:auto;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
+.ln{white-space:pre-wrap;word-break:break-all}
+.ln.ok{color:var(--ok)}.ln.err{color:var(--err)}.ln.dim{color:var(--dim)}.ln.info{color:var(--info)}
+.blk{white-space:pre-wrap;word-break:break-all;color:var(--tx)}
+.blk.ok{color:var(--ok)}.blk.err{color:var(--err)}.blk.dim{color:var(--dim)}
+.tbl .tr{display:flex;gap:10px;padding:1px 0}
+.tbl code{color:var(--info);min-width:140px;flex-shrink:0}
+footer{margin-top:14px;color:var(--dim);font-size:11px}
+footer a{color:var(--brand)}
+</style>
+</head>
+<body>
+<div id="app">
+<header><h1>🎯 生产级 deepClone 实验室</h1><p>实战案例在线预览 · cases/01-deep-clone-lab · 完整源码见仓库 cases/01-deep-clone-lab 目录（cases.md 有直达锚点）</p></header>
+</div>
+<script>(()=>{var R=new TextEncoder,A=new TextDecoder("utf-8");function g(e){return{createConnection(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)},request(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)}}}var x=g("node:http"),T=g("node:https"),D={...x,...T};function L(e){return e instanceof WeakMap||e instanceof WeakSet||e instanceof Promise}function l(e,t){if(e===null||typeof e!="object"&&typeof e!="function"||typeof e=="function")return e;let n=e;if(t.has(n))return t.get(n);if(n instanceof Date)return new Date(n.getTime());if(n instanceof RegExp)return new RegExp(n.source,n.flags);if(L(n))return n;if(n instanceof Map){let c=new Map;return t.set(n,c),n.forEach((s,a)=>{c.set(l(a,t),l(s,t))}),c}if(n instanceof Set){let c=new Set;return t.set(n,c),n.forEach(s=>c.add(l(s,t))),c}if(Array.isArray(n)){let c=[];t.set(n,c);let s=n,a=c;for(let u of Reflect.ownKeys(n))u!=="length"&&(a[u]=l(s[u],t));return c}let r=Object.create(Object.getPrototypeOf(n));t.set(n,r);let o=n;for(let c of Reflect.ownKeys(n))r[c]=l(o[c],t);return r}function m(e){return l(e,new WeakMap)}function i(e){if(typeof e=="string")return e;if(e==null||typeof e=="number"||typeof e=="boolean")return String(e);if(e instanceof Error)return`${e.name}: ${e.message}`;if(e instanceof Date)return e.toISOString();if(e instanceof Map)return`Map(${e.size}) { ${[...e.entries()].map(([t,n])=>`${i(t)} => ${i(n)}`).join(", ")} }`;if(e instanceof Set)return`Set(${e.size}) { ${[...e].map(t=>i(t)).join(", ")} }`;try{return JSON.stringify(e,(t,n)=>typeof n=="bigint"?String(n):n,2)??String(e)}catch{return String(e)}}function w(e,t=""){let n=document.createElement("section");n.className="sec";let r=document.createElement("h2");if(r.textContent=e,n.appendChild(r),t){let o=document.createElement("p");o.className="hint",o.textContent=t,n.appendChild(o)}return document.body.querySelector("#app").appendChild(n),n}function h(e){let t=document.createElement("div");return t.className="btn-row",e.appendChild(t),t}function d(e,t,n,r=""){let o=document.createElement("button");return o.textContent=t,r&&(o.className=r),o.addEventListener("click",()=>{try{n()}catch(c){C(e,`\u2717 ${i(c)}`,"err")}}),e.appendChild(o),o}function k(e){let t=document.createElement("div");return t.className="out",e.appendChild(t),t}function y(e){if(e?.classList.contains("out"))return e;let t=e?.querySelectorAll(":scope > .out");if(t&&t.length)return t[t.length-1];let n=document.querySelectorAll("#app .out");return n[n.length-1]}function C(e,t,n=""){let r=y(e),o=document.createElement("div");o.className=`ln ${n}`,o.textContent=i(t),r.appendChild(o),r.scrollTop=r.scrollHeight}function b(e,t,n=""){let r=y(e),o=document.createElement("pre");o.className=`blk ${n}`,o.textContent=i(t),r.appendChild(o),r.scrollTop=r.scrollHeight}function E(e,t){let n=y(e),r=document.createElement("div");r.className="tbl";for(let[o,c]of t){let s=document.createElement("div");s.className="tr";let a=document.createElement("code");a.textContent=o;let u=document.createElement("span");u.textContent=i(c),s.append(a,u),r.appendChild(s)}return n.appendChild(r),n.scrollTop=n.scrollHeight,r}var p=w("\u6DF1\u514B\u9686\u6F14\u793A","\u793A\u4F8B\u5BF9\u8C61\u5305\u542B Date\u3001RegExp\u3001Map\uFF08\u542B\u5BF9\u8C61\u952E\uFF09\u3001Set\u3001Symbol \u952E\u4E0E\u5FAA\u73AF\u5F15\u7528"),M=k(p);function H(){let e={name:"sample",createdAt:new Date("2026-01-01T00:00:00Z"),pattern:/a+b/gi,tags:new Set(["a","b"]),meta:new Map([["k",1]])};return e.self=e,e[Symbol("id")]="sym",e}var S=null;h(p);d(p,"\u25B6 \u514B\u9686\u793A\u4F8B\u5BF9\u8C61",()=>{let e=H(),t=m(e);S={src:e,dst:t},E(M,[["Date \u4FDD\u7559\u7C7B\u578B",t.createdAt instanceof Date],["RegExp \u4FDD\u7559\u7C7B\u578B",t.pattern instanceof RegExp],["Map / Set \u514B\u9686",t.meta instanceof Map&&t.tags instanceof Set],["\u5FAA\u73AF\u5F15\u7528\u4FDD\u6301",t.self===t],["\u539F\u5BF9\u8C61\u5FAA\u73AF\u5F15\u7528",e.self===e],["Symbol \u952E\u590D\u5236",Object.getOwnPropertySymbols(t).length>=1],["\u514B\u9686 \u2260 \u539F\u5F15\u7528",t!==e]])});d(p,"Map \u952E\u4E3A\u5BF9\u8C61\uFF1A\u5F15\u7528\u4E00\u81F4\u6027",()=>{let e={id:1},t=new Map([[e,"v"]]),n=m(t);b(M,{"\u539F Map \u952E\u662F\u540C\u4E00\u5F15\u7528":[...t.keys()][0]===e,"\u514B\u9686\u540E\u952E\u5DF2\u88AB\u514B\u9686\uFF08\u2260 \u539F\u952E\uFF09":[...n.keys()][0]!==e,"\u514B\u9686 Map \u503C":[...n.values()][0]})});})();
+</script>
+</body>
+</html>

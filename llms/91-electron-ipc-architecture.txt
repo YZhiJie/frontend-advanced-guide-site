@@ -1,0 +1,224 @@
+# 第九十一部分 · Electron 桌面开发深化（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/91-electron-ipc-architecture
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九十一部分 · Electron 桌面开发深化
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第九十部分 · 可视化画布与节点编辑器](./90-node-editor-canvas.md)｜关联章节：[第七十部分 · 桌面应用开发 Tauri](./70-desktop-app-tauri.md) · [第八部分 · 跨平台开发全景](./08-cross-platform.md) · [第五十三部分 · Nginx 部署](./53-nginx-deploy.md)
+
+> 💡 **本章特色**：数字人直播控台 JD 硬要求"Electron 多线程、主进程/渲染进程/preload、IPC、electron-builder 打包"。[第 70 册](./70-desktop-app-tauri.md) 以 Tauri 为主，本章深化 Electron 特有的架构：**三层进程模型**（main/preload/renderer）、**contextBridge 安全 IPC**、**IPC 通道注册与权限校验**、**electron-builder 多平台打包与自动更新**。配套示例 [91-01-electron-ipc-architecture.ts](./examples/91-01-electron-ipc-architecture.ts) 跑通 IPC 校验、事件推送、打包配置校验。
+
+## 本部分内容
+
+- [91.1 Electron 三层进程模型](#_91-1-electron-三层进程模型)
+- [91.2 contextBridge 与安全 IPC](#_91-2-contextbridge-与安全-ipc)
+- [91.3 IPC 通道设计与权限校验](#_91-3-ipc-通道设计与权限校验)
+- [91.4 主进程能力：窗口、菜单、系统交互](#_91-4-主进程能力-窗口、菜单、系统交互)
+- [91.5 electron-builder 打包与自动更新](#_91-5-electron-builder-打包与自动更新)
+- [91.6 自测题](#_91-6-自测题)
+- [91.7 本章避坑清单](#_91-7-本章避坑清单)
+
+---
+
+## 91.1 Electron 三层进程模型
+
+### 概念解析
+
+Electron 应用有三类进程，职责严格分离：
+
+| 进程 | 环境 | 职责 | 能访问 |
+| --- | --- | --- | --- |
+| **main 主进程** | Node.js | 管理窗口、应用生命周期、系统 API、原生模块 | fs、net、os、electron API |
+| **preload 预加载** | Node.js + DOM 桥 | 用 contextBridge 暴露受限 API 给渲染进程 | Node API + DOM（桥接期） |
+| **renderer 渲染进程** | Chromium | 渲染 UI，跑前端代码 | 只能用 preload 暴露的 API |
+
+核心安全原则：**渲染进程不能直接用 Node.js**。所有需要 Node 能力的操作（读文件、调系统 API）都要通过 preload 暴露的接口，由主进程执行。
+
+### 应用实践
+
+- **main 进程只做"重活"**：文件操作、网络请求、系统托盘、自动更新；UI 逻辑全在 renderer；
+- **preload 是安全闸门**：只暴露必要的最小 API，不要把整个 Node 对象挂到 window 上；
+- **多窗口是多 renderer 进程**：每个 BrowserWindow 是独立的渲染进程，通过 main 中转通信。
+
+---
+
+## 91.2 contextBridge 与安全 IPC
+
+### 概念解析
+
+`contextBridge` 是 preload 脚本暴露 API 的唯一安全方式：
+
+```js
+// preload.js
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("api", {
+  readFile: (path) => ipcRenderer.invoke("fs:readFile", path),
+  writeFile: (path, content) => ipcRenderer.invoke("fs:writeFile", path, content),
+  onUpdateAvailable: (cb) => {
+    ipcRenderer.on("app:update-available", (_, v) => cb(v));
+    return () => ipcRenderer.removeAllListeners("app:update-available");
+  },
+});
+```
+
+渲染进程只能用 `window.api.readFile()`，不能直接 `require('fs')`。
+
+两种 IPC 模式：
+
+| 模式 | API | 方向 | 适用 |
+| --- | --- | --- | --- |
+| **invoke/handle** | `ipcRenderer.invoke` / `ipcMain.handle` | renderer → main（请求-响应） | 读文件、调系统 API |
+| **send/on** | `webContents.send` / `ipcRenderer.on` | main → renderer（推送） | 更新通知、进度推送 |
+
+### 应用实践
+
+- **invoke 返回 Promise**：渲染进程 `await window.api.readFile()`，主进程 handle 里 return 值；
+- **send 要返回取消函数**：on 返回一个 unsubscribe 函数，组件卸载时调用，避免内存泄漏；
+- **不要用 `ipcRenderer.sendSync`**：同步 IPC 会阻塞渲染进程，导致 UI 卡顿，用 invoke 替代。
+
+---
+
+## 91.3 IPC 通道设计与权限校验
+
+### 概念解析
+
+Electron 安全的核心是**控制渲染进程能调什么**。实践：
+
+1. **通道注册制**：所有 IPC 通道先在主进程注册（名称、方向、参数、权限），未注册的通道直接拒绝；
+2. **权限校验**：敏感操作（写文件、退出应用、系统命令）需要 auth token；
+3. **参数校验**：用 Zod 校验参数类型和范围，防止恶意调用。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/91-01-electron-ipc-architecture.ts（节选：通道校验）
+export function validateInvoke(channel: string, args: unknown[], authToken?: string) {
+  const ch = IPC_CHANNELS[channel];
+  if (!ch) return { ok: false, reason: `未注册的通道: ${channel}` };
+  if (ch.requiresAuth && !authToken) return { ok: false, reason: "需要权限认证" };
+  if (args.length !== ch.params.length) return { ok: false, reason: "参数数量错误" };
+  return { ok: true };
+}
+```
+
+> 运行方式：`npx tsx examples/91-01-electron-ipc-architecture.ts`
+
+### 应用实践
+
+- **通道名用命名空间**：`fs:readFile`、`app:quit`、`window:minimize`，前缀表示所属模块；
+- **敏感操作二次确认**：退出应用、清空数据等操作，主进程弹确认框再执行；
+- **日志记录所有 IPC 调用**：记录通道名、参数、调用者，出问题时可追溯。
+
+---
+
+## 91.4 主进程能力：窗口、菜单、系统交互
+
+### 概念解析
+
+主进程通过 Electron API 控制桌面能力：
+
+- **BrowserWindow**：创建窗口，配置尺寸、标题栏、webPreferences（contextIsolation、nodeIntegration 必须 false）；
+- **Menu**：应用菜单、上下文菜单；
+- **Tray**：系统托盘；
+- **shell**：打开外部链接、用默认应用打开文件；
+- **dialog**：文件选择框、消息框。
+
+```js
+// main.js
+const { BrowserWindow, Menu, Tray, shell, dialog } = require("electron");
+
+const win = new BrowserWindow({
+  width: 1200, height: 800,
+  webPreferences: {
+    preload: path.join(__dirname, "preload.js"),
+    contextIsolation: true,  // 必须 true
+    nodeIntegration: false,  // 必须 false
+  },
+});
+```
+
+### 应用实践
+
+- **`contextIsolation: true` + `nodeIntegration: false`** 是安全标配，不要为了方便关掉；
+- **自定义标题栏**：Electron 默认标题栏丑，用 `frame: false` + 自绘标题栏，注意实现拖拽区（`-webkit-app-region: drag`）；
+- **单实例锁**：`app.requestSingleInstanceLock()` 防止用户开多个窗口，第二个实例聚焦第一个。
+
+---
+
+## 91.5 electron-builder 打包与自动更新
+
+### 概念解析
+
+electron-builder 是 Electron 打包标配，支持多平台：
+
+- **macOS**：dmg / zip，需要签名和公证（Developer ID）；
+- **Windows**：nsis 安装包，需要代码签名证书；
+- **Linux**：AppImage / deb / rpm。
+
+自动更新用 `electron-updater`：检查服务端 latest.yml，有新版本则下载并提示重启更新。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/91-01-electron-ipc-architecture.ts（节选：打包配置校验）
+export function validateBuildConfig(config: BuildConfig): string[] {
+  if (!config.appId) errors.push("appId 不能为空");
+  if (!config.files.includes("dist/**")) errors.push("files 必须包含 dist/**");
+  if (config.asar && config.files.includes("*.node")) {
+    errors.push("asar 模式下 .node 原生模块需要配置 asarUnpack");
+  }
+  return errors;
+}
+```
+
+### 应用实践
+
+- **asar 打包**：默认开启，把源码打包成 asar 归档。但 `.node` 原生模块要 `asarUnpack`，否则加载失败；
+- **代码签名**：macOS 不签名会被 Gatekeeper 拦截，Windows 不签名会被 SmartScreen 警告。发布前必须签名；
+- **自动更新服务端**：用 generic provider 指向你的 CDN/OSS，放 latest.yml 和安装包；
+- **分平台构建**：macOS 只能在 macOS 上构建签名，Windows 可在任何平台构建（签名建议在 Windows）。
+
+---
+
+## 91.6 自测题
+
+<details>
+<summary><b>1. 【基础】Electron 的 main/preload/renderer 三层各负责什么？为什么 renderer 不能直接用 Node？</b></summary>
+
+main 是 Node 环境，管窗口和系统 API；preload 是桥接层，用 contextBridge 暴露受限 API；renderer 是 Chromium，渲染 UI。renderer 不能直接用 Node 是安全考虑——渲染进程跑第三方网页代码，如果能直接用 fs 会被 XSS 攻击利用读取本地文件。所有 Node 操作通过 preload 暴露的受控接口走。
+</details>
+
+<details>
+<summary><b>2. 【进阶】invoke/handle 和 send/on 有什么区别？分别用在什么场景？</b></summary>
+
+invoke/handle 是 renderer→main 的请求-响应模式，返回 Promise，用于读文件、调系统 API；send/on 是 main→renderer 的推送模式，用于主进程主动通知渲染进程（如更新可用、下载进度）。不要用 sendSync，会阻塞渲染进程。
+</details>
+
+<details>
+<summary><b>3. 【进阶】contextIsolation 和 nodeIntegration 为什么必须分别设为 true 和 false？</b></summary>
+
+contextIsolation: true 保证 preload 和 renderer 的上下文隔离，preload 暴露的 API 不会被 renderer 篡改；nodeIntegration: false 禁止 renderer 直接用 Node。两者配合防止 XSS 攻击获取系统权限。这是 Electron 安全的标配，不要为了方便关掉。
+</details>
+
+<details>
+<summary><b>4. 【挑战】electron-builder 打包时，.node 原生模块在 asar 里加载失败，怎么解决？</b></summary>
+
+.asar 是归档文件，原生模块 .node 需要从文件系统加载，在 asar 里会加载失败。解决方案：在配置里加 `asarUnpack: ["**/*.node"]`，把 .node 文件解压到 asar 外的 resources/app.asar.unpacked 目录，运行时从那里加载。
+</details>
+
+---
+
+## 91.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 安全配置错误 | contextIsolation: false / nodeIntegration: true | 必须 contextIsolation: true, nodeIntegration: false |
+| 暴露过多 API | preload 把整个 Node 挂到 window | 只暴露最小必要 API，用 contextBridge |
+| 同步 IPC 卡顿 | 用 sendSync 阻塞渲染进程 | 用 invoke 异步替代 sendSync |
+| 未校验通道 | 渲染进程可调用任意 IPC | 通道注册制 + 权限校验 + 参数校验 |
+| 内存泄漏 | on 监听不取消 | on 返回取消函数，组件卸载时调用 |
+| asar 原生模块 | .node 在 asar 里加载失败 | 配置 asarUnpack 解压 .node 文件 |
+| 未签名发布 | macOS/Windows 拦截 | 发布前必须代码签名 + 公证 |
+| 多开实例 | 用户开多个窗口数据冲突 | app.requestSingleInstanceLock() 单实例锁 |
+| 标题栏拖拽 | frame:false 后窗口拖不动 | 拖拽区加 -webkit-app-region: drag |

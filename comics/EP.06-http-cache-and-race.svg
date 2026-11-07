@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#101a33"/>
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#22d3ee" opacity="0.04"/>
+  <polygon points="150,0 220,0 1040,840 970,840" fill="#a78bfa" opacity="0.03"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#7C3AED"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#ffffff">EP.06</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad)">HTTP 缓存与竞态</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad)" opacity="0.6"/>
+
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#22d3ee" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：列表刷新慢</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#1d4ed8"/>
+      <path d="M-5,18 L5,18 L3.5,27 L0,29 L-3.5,27 Z" fill="#f97316"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 L-11,-13 L-6,-4 L0,-14 L6,-4 L11,-13 L16,-2 Q0,-11 -16,-2 Z" fill="#f97316"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="82" width="330" height="52" rx="10" fill="#f8fafc"/>
+    <text x="102" y="104" font-size="15" fill="#0b1220">列表刷新要等好几秒，</text>
+    <text x="102" y="126" font-size="15" fill="#0b1220">每次都从头全量拉取。</text>
+    <rect x="24" y="152" width="524" height="94" rx="8" fill="#0a0f1c" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// 页面加载，每次都请求：</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">fetch('/api/list?uid=7')</text>
+    <text x="38" y="210" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// 没有缓存头，每次全量 2MB</text>
+    <text x="38" y="228" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// 弱网 5 秒，用户直接关页面</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#22d3ee"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">没有缓存策略，每次请求都</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">走完整网络，既浪费流量又慢。</text>
+  </g>
+
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#a78bfa" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：强缓存</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="82" width="340" height="52" rx="10" fill="#f8fafc"/>
+    <text x="102" y="104" font-size="15" fill="#0b1220">强缓存让浏览器直接用</text>
+    <text x="102" y="126" font-size="15" fill="#0b1220">本地副本，连请求都不发。</text>
+    <rect x="24" y="152" width="524" height="94" rx="8" fill="#0a0f1c" stroke="#a78bfa" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// 服务器响应头：</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">Cache-Control: max-age=31536000</text>
+    <text x="38" y="210" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// 时长内浏览器不发请求</text>
+    <text x="38" y="228" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 命中 → 直接读本地，约 0ms</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#a78bfa"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">强缓存完全不走网络，</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">是最快的资源加载方式。</text>
+  </g>
+
+  <g transform="translate(20,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#f472b6" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：协商缓存</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#7C3AED"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-13 -16,-13 q-13,0 -16,13 z" fill="#22d3ee"/>
+      <circle cx="15" cy="4" r="6.5" fill="#22d3ee"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="82" width="330" height="52" rx="10" fill="#f8fafc"/>
+    <text x="102" y="104" font-size="15" fill="#0b1220">那内容更新了怎么办？</text>
+    <text x="102" y="126" font-size="15" fill="#0b1220">找服务器对一下新鲜度。</text>
+    <rect x="24" y="152" width="524" height="94" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// 请求带上上次的内容指纹：</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">If-None-Match: "abc123"</text>
+    <text x="38" y="210" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// 一致 → 304，无 body 省流量</text>
+    <text x="38" y="228" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 变了 → 200，新内容 + 新 ETag</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#f472b6"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">协商缓存保证内容新鲜，</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">ETag 比时间戳更精确可靠。</text>
+  </g>
+
+  <g transform="translate(608,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#f97316" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f97316"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：竞态与坑</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="82" width="320" height="52" rx="10" fill="#f8fafc"/>
+    <text x="102" y="104" font-size="15" fill="#0b1220">除了缓存，还有竞态</text>
+    <text x="102" y="126" font-size="15" fill="#0b1220">这样的隐形坑。</text>
+    <rect x="24" y="154" width="96" height="26" rx="13" fill="#f97316"/>
+    <text x="72" y="172" text-anchor="middle" font-size="13" font-weight="bold" fill="#0b1220">⚠ 坑点</text>
+    <rect x="32" y="200" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="209" font-size="14" fill="#e2e8f0">快速输入：旧响应后到覆盖新结果</text>
+    <rect x="32" y="228" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="237" font-size="14" fill="#e2e8f0">index.html 千万别用强缓存</text>
+    <rect x="32" y="256" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="265" font-size="14" fill="#e2e8f0">max-age 过长，更新会不及时</text>
+    <rect x="24" y="290" width="524" height="50" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="290" width="4" height="50" rx="2" fill="#22d3ee"/>
+    <text x="40" y="311" font-size="13.5" font-weight="bold" fill="#22d3ee">码叔总结</text>
+    <text x="40" y="331" font-size="13.5" fill="#e2e8f0">强缓存省请求，协商缓存保新鲜，竞态靠取消。</text>
+  </g>
+
+  <text x="1180" y="832" text-anchor="end" font-size="11" fill="#475569">NEON INK · frontend-advanced-guide · EP.06</text>
+</svg>

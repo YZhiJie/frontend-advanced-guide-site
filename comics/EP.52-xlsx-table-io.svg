@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg52" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#0d1528"/>
+    </linearGradient>
+    <linearGradient id="titleGrad52" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#10b981"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg52)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#10b981" opacity="0.05"/>
+  <polygon points="150,0 220,0 1040,840 970,840" fill="#22d3ee" opacity="0.04"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#10b981"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#ffffff">EP.52</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad52)">表格那三层模型</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad52)" opacity="0.6"/>
+
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#10b981" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#10b981"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：Excel 读写有坑</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#1d4ed8"/>
+      <path d="M-5,18 L5,18 L3.5,27 L0,29 L-3.5,27 Z" fill="#f97316"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 L-11,-13 L-6,-4 L0,-14 L6,-4 L11,-13 L16,-2 Q0,-11 -16,-2 Z" fill="#f97316"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">用户上传的 Excel，我读了能改，但是——</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">样式没了？CSV 里藏公式？大文件卡死？</text>
+    <rect x="24" y="152" width="524" height="82" rx="8" fill="#0a0f1c" stroke="#10b981" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">const wb = XLSX.read(file.buffer)</text>
+    <text x="38" y="194" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// 但是 s（样式）字段拿不到！</text>
+    <text x="38" y="214" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// CSV 里 =HYPERLINK 会被执行…</text>
+    <rect x="24" y="244" width="524" height="98" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="244" width="4" height="98" rx="2" fill="#10b981"/>
+    <text x="40" y="268" font-size="13.5" fill="#e2e8f0">Excel = Workbook → Worksheet → Cell 三层</text>
+    <text x="40" y="288" font-size="13.5" fill="#e2e8f0">社区版只读数据，样式半残</text>
+    <text x="40" y="308" font-size="13.5" fill="#94a3b8">CSV 公式注入 = 钓鱼攻击面</text>
+  </g>
+
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#22d3ee" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：三层 + 社区版局限</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">Workbook → Sheet → Cell，Cell 是稀疏对象</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">社区版能读 v/t/f/s，但 s 写不回去</text>
+    <rect x="24" y="152" width="524" height="82" rx="8" fill="#0a0f1c" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">Cell = { v, t, f?, s? }</text>
+    <text x="38" y="194" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">  v = 值, t = 类型, f = 公式</text>
+    <text x="38" y="214" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">  s = 样式（社区版半残）</text>
+    <rect x="24" y="244" width="524" height="98" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="266" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">社区版能写数据，不能写样式</text>
+    <text x="38" y="286" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">合并/图片/图表 pro 版才能搞</text>
+    <text x="38" y="302" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">要样式换 xlsx-js-style</text>
+  </g>
+
+  <g transform="translate(20,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#f472b6" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：CSV 前缀一贴就安全</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#7C3AED"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-2,-11 -16,-11 q-14,0 -16,11 z" fill="#22d3ee"/>
+      <circle cx="15" cy="-11" r="6.5" fill="#22d3ee"/>
+      <rect x="12" y="-9" width="6" height="4" rx="2" fill="#7C3AED"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">Excel 把 = + - @ 开头当公式执行</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">用户填的就是钓鱼 payload</text>
+    <rect x="24" y="152" width="524" height="174" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">const safe = (v) =&gt; {</text>
+    <text x="50" y="194" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">  const s = String(v ?? '')</text>
+    <text x="50" y="210" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">  if (/^[=+-\@\t\r]/.test(s)) return \"'\" + s</text>
+    <text x="50" y="226" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">  return s</text>
+    <text x="38" y="242" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">}</text>
+    <text x="38" y="264" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// 攻击者输入：</text>
+    <text x="38" y="280" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">//   =HYPERLINK('evil.com', '点我')</text>
+    <text x="38" y="296" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">// safe() 输出：</text>
+    <text x="38" y="312" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">//   '=HYPERLINK(...)  ← 变成普通文本 ✓</text>
+  </g>
+
+  <g transform="translate(608,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#a78bfa" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：三个最坑</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">XLSX 好用但三个地方别踩</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">踩了轻则丢样式，重则被钓鱼</text>
+    <rect x="24" y="148" width="96" height="26" rx="13" fill="#a78bfa"/>
+    <text x="72" y="166" text-anchor="middle" font-size="13" font-weight="bold" fill="#0b1220">⚠ 坑点</text>
+    <rect x="32" y="183" width="9" height="9" rx="2" fill="#a78bfa"/>
+    <text x="52" y="192" font-size="13.5" fill="#e2e8f0">大数据量主线程卡死 → 上 Worker</text>
+    <rect x="32" y="207" width="9" height="9" rx="2" fill="#a78bfa"/>
+    <text x="52" y="216" font-size="13.5" fill="#e2e8f0">CSV 公式注入 → safeCsv 前缀过滤</text>
+    <rect x="32" y="231" width="9" height="9" rx="2" fill="#a78bfa"/>
+    <text x="52" y="240" font-size="13.5" fill="#e2e8f0">社区版样式写不回 → 换 xlsx-js-style</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#a78bfa"/>
+    <text x="40" y="300" font-size="13" font-weight="bold" fill="#a78bfa">码叔总结</text>
+    <text x="118" y="300" font-size="13" fill="#e2e8f0">Workbook → Sheet → Cell，</text>
+    <text x="40" y="320" font-size="13" fill="#e2e8f0">社区版只负责数据，样式 pro 或 js-style 上。</text>
+  </g>
+
+  <text x="1180" y="832" text-anchor="end" font-size="11" fill="#475569">NEON INK · frontend-advanced-guide · EP.52</text>
+</svg>

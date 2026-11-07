@@ -1,0 +1,258 @@
+# 第九十五部分 · Next.js Google SEO 与海外站点（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/95-nextjs-google-seo
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九十五部分 · Next.js Google SEO 与海外站点
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第九十四部分 · 微信小程序原生开发](./94-wechat-miniprogram.md)｜关联章节：[第十三部分 · SSR 与元框架](./13-ssr-meta-frameworks.md) · [第五十九部分 · 前端监控与可观测性](./59-monitoring-observability.md)
+
+> 💡 **本章特色**：海外 Web JD 明确要求"Next.js + Google SEO、SSR/SSG、结构化数据、Core Web Vitals、多语言"。海外站点的成败很大程度取决于 Google 搜索排名，SEO 是核心竞争力。本章讲清五件事：**渲染策略选型**（SSG/SSR/ISR/CSR）、**SEO Metadata**（title/OG/Twitter）、**sitemap + robots + JSON-LD**、**Core Web Vitals 优化**、**多语言 i18n 与海外部署**。配套示例 [95-01-nextjs-google-seo.ts](./examples/95-01-nextjs-google-seo.ts) 跑通策略路由、Metadata 校验、sitemap/robots 生成、JSON-LD 校验、CWV 评分。
+
+## 本部分内容
+
+- [95.1 渲染策略：SSG / SSR / ISR / CSR 选型](#_95-1-渲染策略-ssg-ssr-isr-csr-选型)
+- [95.2 SEO Metadata：title / Open Graph / Twitter](#_95-2-seo-metadata-title-open-graph-twitter)
+- [95.3 sitemap.xml + robots.txt + JSON-LD 结构化数据](#_95-3-sitemap-xml-robots-txt-json-ld-结构化数据)
+- [95.4 Core Web Vitals 性能优化](#_95-4-core-web-vitals-性能优化)
+- [95.5 多语言 i18n 与海外部署](#_95-5-多语言-i18n-与海外部署)
+- [95.6 自测题](#_95-6-自测题)
+- [95.7 本章避坑清单](#_95-7-本章避坑清单)
+
+---
+
+## 95.1 渲染策略：SSG / SSR / ISR / CSR 选型
+
+### 概念解析
+
+Next.js（App Router）提供四种渲染策略，核心区别在于** HTML 何时生成、是否需要 SEO**：
+
+| 策略 | 生成时机 | 适用场景 | 函数 |
+|---|---|---|---|
+| SSG | 构建时 | 静态内容（文档、营销页） | 默认 |
+| SSR | 每次请求 | 实时数据（仪表盘、个性化） | `dynamic = "force-dynamic"` |
+| ISR | 构建时 + 定时重建 | 内容定期更新（商品、文章） | `revalidate = 3600` |
+| CSR | 客户端 | 纯交互、无需 SEO | `"use client"` + useEffect |
+
+### 完整代码示例
+
+```ts
+// 文件: examples/95-01-nextjs-google-seo.ts（节选：策略路由）
+function selectStrategy(ctx: PageContext): RenderStrategy {
+  if (ctx.userSpecific && !ctx.seo) return "CSR";
+  if (ctx.dataFreshness === "realtime") return "SSR";
+  if (ctx.dataFreshness === "static") return "SSG";
+  return "ISR"; // hourly/daily
+}
+```
+
+> 运行方式：`npx tsx examples/95-01-nextjs-google-seo.ts`
+
+### 应用实践
+
+```tsx
+// app/page.tsx - ISR 示例
+export const revalidate = 3600; // 每小时重建
+export default async function Home() {
+  const data = await fetch("https://api.example.com/products", {
+    next: { revalidate: 3600 }, // 缓存 1 小时
+  });
+  // ...
+}
+```
+
+- **SEO 页面必须用 SSG/SSR/ISR**，CSR 页面 Google 爬虫可能抓不到内容
+- **ISR 是性价比最高的方案**：有 SSG 的性能，又能定期更新内容
+- **流式渲染**：用 `loading.tsx` + Suspense 实现渐进式渲染，提升 LCP
+
+## 95.2 SEO Metadata：title / Open Graph / Twitter
+
+### 概念解析
+
+Next.js App Router 用 **Metadata API** 管理 `<head>`：
+
+```tsx
+// app/layout.tsx
+export const metadata: Metadata = {
+  title: { default: "My SaaS", template: "%s | My SaaS" },
+  description: "The best SaaS tool for teams.",
+  metadataBase: new URL("https://example.com"),
+  openGraph: {
+    title: "My SaaS",
+    description: "...",
+    images: [{ url: "/og.png", width: 1200, height: 630 }],
+  },
+  twitter: { card: "summary_large_image", title: "My SaaS" },
+  alternates: { canonical: "https://example.com" },
+};
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/95-01-nextjs-google-seo.ts（节选：校验）
+function validateSeo(meta) {
+  if (meta.title.length > 60) errors.push("title 过长 Google 会截断");
+  if (meta.description.length > 160) errors.push("description 过长");
+  if (meta.openGraph && !meta.openGraph.image) errors.push("OG image 缺失");
+}
+```
+
+### 应用实践
+
+- **title**：核心关键词放前面，< 60 字符，模板 `%s | 品牌名`
+- **description**：< 160 字符，含行动号召（CTA），Google 搜索结果展示
+- **OG image**：1200×630px，社交分享卡片，用 `next/og` 动态生成
+- **canonical**：防止重复内容（同一页面多个 URL），指定权威地址
+- **动态 metadata**：用 `generateMetadata({ params })` 为每个动态路由生成
+
+## 95.3 sitemap.xml + robots.txt + JSON-LD 结构化数据
+
+### 概念解析
+
+让 Google 正确索引你的站点，需要三件套：
+1. **sitemap.xml**：告诉爬虫有哪些页面
+2. **robots.txt**：告诉爬虫哪些可以爬、哪些不可以
+3. **JSON-LD 结构化数据**：告诉爬虫页面内容的语义（文章/商品/FAQ）
+
+### 完整代码示例
+
+```ts
+// 文件: examples/95-01-nextjs-google-seo.ts（节选：sitemap + robots）
+function generateSitemap(urls) {
+  return `<urlset xmlns="...">${urls.map(u => `<url><loc>${u.loc}</loc><priority>${u.priority}</priority></url>`).join("")}</urlset>`;
+}
+function generateRobots({ allow, disallow, sitemap }) {
+  return `User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: ${sitemap}`;
+}
+```
+
+### 应用实践
+
+**Next.js 约定式文件**（App Router）：
+```
+app/
+  sitemap.ts     // 生成 /sitemap.xml
+  robots.ts      // 生成 /robots.txt
+  manifest.ts    // PWA manifest
+```
+
+```ts
+// app/sitemap.ts
+export default function sitemap(): MetadataRoute.Sitemap {
+  return [
+    { url: "https://example.com/", lastModified: new Date(), priority: 1 },
+    { url: "https://example.com/about", priority: 0.8 },
+  ];
+}
+```
+
+**JSON-LD 示例**（FAQ 结构化数据，能在搜索结果显示 FAQ 片段）：
+```tsx
+<script type="application/ld+json">{JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    { "@type": "Question", "name": "价格？",
+      "acceptedAnswer": { "@type": "Answer", "text": "起步 $29/月" } }
+  ]
+})}</script>
+```
+
+## 95.4 Core Web Vitals 性能优化
+
+### 概念解析
+
+Google 用 **Core Web Vitals** 衡量用户体验，直接影响搜索排名：
+
+| 指标 | 含义 | Good | 改进方向 |
+|---|---|---|---|
+| LCP | 最大内容绘制 | < 2.5s | 首图用 `<Image>`、preload、CDN |
+| CLS | 累计布局偏移 | < 0.1 | 图片固定宽高、字体 font-display |
+| INP | 交互到下一帧 | < 200ms | 拆分长任务、useTransition、Web Worker |
+
+### 完整代码示例
+
+```ts
+// 文件: examples/95-01-nextjs-google-seo.ts（节选：评分）
+function assessVitals(v) {
+  const lcp = v.lcp < 2500 ? "good" : v.lcp < 4000 ? "needs-improvement" : "poor";
+  const cls = v.cls < 0.1 ? "good" : v.cls < 0.25 ? "needs-improvement" : "poor";
+  const inp = v.inp < 200 ? "good" : v.inp < 500 ? "needs-improvement" : "poor";
+}
+```
+
+### 应用实践
+
+- **LCP 优化**：用 Next.js `next/image`（自动压缩/WebP/响应式），首屏关键图 `priority`
+- **CLS 优化**：图片加 `width/height`，字体用 `font-display: swap` + 预留空间，广告位固定尺寸
+- **INP 优化**：重计算放 Web Worker，长列表虚拟滚动，`React.startTransition` 标记非紧急更新
+- **监测**：用 `web-vitals` 库上报到 Google Analytics，或 Vercel Analytics
+
+## 95.5 多语言 i18n 与海外部署
+
+### 概念解析
+
+海外站点通常需要支持多语言，Next.js App Router 的做法是**按语言分路由**：`/en/about`、`/zh/about`。
+
+```
+app/
+  [lang]/
+    layout.tsx     // 语言检测 + 字典
+    page.tsx
+    about/page.tsx
+```
+
+### 应用实践
+
+- **语言检测**：用 `next-intl` 或 `next-i18next`，根据 `Accept-Language` 或 URL 前缀选语言
+- **hreflang**：在 `<head>` 加 `<link rel="alternate" hreflang="en" href="...">`，告诉 Google 不同语言版本
+- **翻译管理**：JSON 字典文件，或接入 Lokalise / Crowdin 平台
+- **海外部署**：
+  - **Vercel**：最省事，全球 CDN 边缘节点，自动 ISR
+  - **Cloudflare Pages / Workers**：边缘 SSR，价格低
+  - **AWS CloudFront + S3**：完全控制
+- **合规**：GDPR（Cookie 同意）、CCPA、数据本地化（欧盟用户数据存欧盟）
+
+## 95.6 自测题
+
+<details>
+<summary>1. Next.js 四种渲染策略（SSG/SSR/ISR/CSR）的生成时机和适用场景分别是什么？</summary>
+
+SSG（构建时生成，静态内容/文档/营销页）、SSR（每次请求生成，实时数据/个性化）、ISR（构建时+定时重建，商品/文章等定期更新内容）、CSR（客户端渲染，纯交互无需 SEO）。需要 SEO 的页面不能用 CSR。
+</details>
+
+<details>
+<summary>2. SEO 的 title 和 description 最佳长度是多少？OG image 的尺寸要求？</summary>
+
+title < 60 字符（Google 截断），description 50-160 字符，核心关键词放前面。OG image 推荐 1200×630px（1.91:1），用于社交分享卡片。
+</details>
+
+<details>
+<summary>3. JSON-LD 结构化数据有什么用？FAQPage 类型怎么写？</summary>
+
+JSON-LD 让 Google 理解页面语义，在搜索结果展示富片段（FAQ、评分、面包屑等）。FAQPage 需要 `@context: https://schema.org`、`@type: FAQPage`、`mainEntity` 数组，每个元素是 Question + acceptedAnswer。
+</details>
+
+<details>
+<summary>4. Core Web Vitals 的三个指标是什么？Good 阈值分别是多少？</summary>
+
+LCP（最大内容绘制）< 2.5s、CLS（累计布局偏移）< 0.1、INP（交互到下一帧）< 200ms。三项都 Good 才算整体 Good，任一项 Poor 则整体 Poor。
+</details>
+
+<details>
+<summary>5. 海外站点多语言方案中 hreflang 的作用是什么？</summary>
+
+hreflang 告诉 Google 同一页面的不同语言版本，避免被判定为重复内容，并让搜索结果按用户语言展示对应版本。写法：`<link rel="alternate" hreflang="en" href="https://x.com/en/about">`，还要加 `hreflang="x-default"` 指向默认版本。
+</details>
+
+## 95.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+|---|---|---|
+| 渲染策略 | 用 CSR 做 SEO 页面 | 需要 SEO 的页面用 SSG/SSR/ISR，CSR 只放纯交互页 |
+| title | 超过 60 字符被截断 | 控制在 50-60 字符，核心关键词放前面 |
+| OG image | 社交分享无图/图不对 | 配 1200×630 OG 图，用 metadataBase 转绝对 URL |
+| sitemap | 动态页面没进 sitemap | 用 `app/sitemap.ts` 遍历数据生成所有 URL |
+| CLS | 图片加载后布局跳动 | 给图片加 width/height 或 aspect-ratio，字体 font-display:swap |
+| 重复内容 | 多 URL 指向同一页 | 用 canonical 指定权威 URL，多语言用 hreflang |
+| 部署 | 国内访问 Vercel 慢 | 海外用 Vercel/Cloudflare，国内需独立部署或用国内 CDN |

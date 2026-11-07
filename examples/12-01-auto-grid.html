@@ -1,0 +1,30 @@
+<!-- 文件: examples/12-01-auto-grid.html —— [浏览器] 无媒体查询的响应式卡片栅格 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        .grid {
+            display: grid;
+            /* 核心一行:每列最小 220px,放得下几列放几列,空间不足自动换行 */
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 16px;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 拖动窗口宽度:列数自动 5 → 4 → 3 → 2 → 1,没有任何媒体查询 -->
+    <div class="grid">
+        <div class="card">卡片 1</div>
+        <div class="card">卡片 2</div>
+        <div class="card">卡片 3</div>
+        <div class="card">卡片 4</div>
+        <div class="card">卡片 5</div>
+    </div>
+</body>
+</html>

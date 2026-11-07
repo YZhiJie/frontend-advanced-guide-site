@@ -1,0 +1,16 @@
+/* 文件: examples/12-10-selector-perf.css —— 选择器开销的真相 */
+
+/* ❌ 反直觉:嵌套过深 + 无谓通配,主要代价是可读性与权重失控,现代引擎性能差异已很小 */
+div#app .list ul li a.item span:not(.active) { color: red; }
+
+/* ✅ 一个类名解决同样的事 */
+.item-text--active { color: red; }
+
+/* 真正要避免的两类:
+   1. 全局通配 + 高频属性变化(如 * { transition: all }) —— 大量元素参与样式失效
+   2. 低成本属性动画(如 width/left) —— 触发 Layout,与选择器无关但常被误怪给选择器 */
+
+/* 性能检查清单(DevTools → Performance → 录制交互):
+   - Recalculate Style 耗时长 → 检查失效范围过大的选择器/属性
+   - Layout 频繁 → 改用 transform
+   - Paint 大面积 → 检查大面积渐变/阴影动画 */

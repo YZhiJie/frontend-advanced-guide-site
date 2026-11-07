@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#101a33"/></linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#22d3ee" opacity="0.04"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#7C3AED"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#fff">EP.66</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad)">3D 场景里的孪生兄弟</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad)" opacity="0.6"/>
+
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：3D 场景点击没反应</text>
+    <text x="28" y="130" font-size="14" fill="#94a3b8">智慧能源大屏：想点击设备看详情，</text>
+    <text x="28" y="152" font-size="14" fill="#f97316">但鼠标点上去什么都不触发……</text>
+    <rect x="24" y="175" width="524" height="94" rx="8" fill="#0a0f1c" stroke="#f97316" stroke-opacity="0.4"/>
+    <text x="38" y="198" font-size="13" fill="#fdba74" font-family="monospace">3D 物体不是 DOM，</text>
+    <text x="38" y="220" font-size="13" fill="#fdba74" font-family="monospace">没有 onclick 事件</text>
+    <text x="38" y="242" font-size="13" fill="#fdba74" font-family="monospace">→ 需要射线拾取</text>
+    <rect x="24" y="295" width="524" height="44" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <text x="40" y="322" font-size="13.5" fill="#e2e8f0">3D 交互靠 Raycaster，不是 DOM 事件。</text>
+  </g>
+
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：射线拾取</text>
+    <rect x="24" y="50" width="524" height="180" rx="8" fill="#0a0f1c" stroke="#a78bfa" stroke-opacity="0.3"/>
+    <text x="38" y="72" font-size="12.5" fill="#7dd3fc" font-family="monospace">鼠标 → NDC 坐标(-1~1)</text>
+    <text x="38" y="92" font-size="12.5" fill="#94a3b8">    ↓</text>
+    <text x="38" y="112" font-size="12.5" fill="#7dd3fc" font-family="monospace">Raycaster.setFromCamera(mouse, cam)</text>
+    <text x="38" y="132" font-size="12.5" fill="#94a3b8">    ↓ 射线与物体包围盒求交</text>
+    <text x="38" y="152" font-size="12.5" fill="#f472b6" font-family="monospace">intersectObjects(scene.children)</text>
+    <text x="38" y="172" font-size="12.5" fill="#94a3b8">    ↓ 返回按距离排序的命中列表</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="monospace">hits[0].object ← 点中的物体</text>
+    <text x="38" y="214" font-size="12.5" fill="#94a3b8">AABB 包围盒检测：射线与长方体求交</text>
+    <rect x="24" y="250" width="524" height="80" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <text x="40" y="274" font-size="13.5" fill="#e2e8f0">从相机发出一条射线，</text>
+    <text x="40" y="294" font-size="13.5" fill="#94a3b8">穿到哪个物体，就是点中了谁。</text>
+    <text x="40" y="314" font-size="13.5" fill="#94a3b8">这就是 3D 世界的"点击"。</text>
+  </g>
+
+  <g transform="translate(20,465)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#34d399"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：数字孪生数据绑定</text>
+    <text x="28" y="70" font-size="14" fill="#94a3b8">3D 模型是死的，要让它"活"起来，</text>
+    <text x="28" y="90" font-size="14" fill="#94a3b8">把传感器数据绑到 Mesh 属性上。</text>
+    <rect x="24" y="110" width="524" height="150" rx="8" fill="#0a0f1c" stroke="#34d399" stroke-opacity="0.3"/>
+    <text x="38" y="132" font-size="12.5" fill="#7dd3fc" font-family="monospace">传感器数据 → Mesh 属性</text>
+    <text x="38" y="152" font-size="12.5" fill="#94a3b8">  温度 → material.color (蓝→红)</text>
+    <text x="38" y="172" font-size="12.5" fill="#94a3b8">  功率 → scale.y (高度变化)</text>
+    <text x="38" y="192" font-size="12.5" fill="#94a3b8">  状态 → opacity (在线/离线/告警)</text>
+    <text x="38" y="212" font-size="12.5" fill="#f472b6" font-family="monospace">WebSocket 推送 → 按设备 ID 匹配 Mesh</text>
+    <text x="38" y="240" font-size="12.5" fill="#94a3b8">数据驱动视觉，模型随实时数据变化</text>
+    <rect x="24" y="280" width="524" height="56" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <text x="40" y="305" font-size="13.5" fill="#e2e8f0">数字孪生 = 3D 模型 + 实时数据，</text>
+    <text x="40" y="325" font-size="13.5" fill="#94a3b8">建立"设备 ID → Mesh"的映射。</text>
+  </g>
+
+  <g transform="translate(608,465)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：坐标与性能</text>
+    <text x="28" y="70" font-size="14" fill="#94a3b8">GIS 经纬度要转成场景坐标，</text>
+    <text x="28" y="90" font-size="14" fill="#94a3b8">海量物体用实例化降 Draw Call。</text>
+    <rect x="24" y="110" width="524" height="130" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.3"/>
+    <text x="38" y="132" font-size="12.5" fill="#7dd3fc" font-family="monospace">WGS84 经纬度 → 局部坐标</text>
+    <text x="38" y="152" font-size="12.5" fill="#94a3b8">  1°纬度 ≈ 111km</text>
+    <text x="38" y="172" font-size="12.5" fill="#94a3b8">  经度 × cos(lat) 修正</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="monospace">InstancedMesh: N 个物体 1 次 Draw Call</text>
+    <text x="38" y="212" font-size="12.5" fill="#94a3b8">LOD: 远处用低模，近处用高模</text>
+    <text x="38" y="226" font-size="12.5" fill="#94a3b8">geometry/material dispose 防内存泄漏</text>
+    <rect x="24" y="260" width="524" height="76" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="260" width="4" height="76" rx="2" fill="#f472b6"/>
+    <text x="40" y="285" font-size="13.5" fill="#e2e8f0">核心口诀：点击靠射线，</text>
+    <text x="40" y="305" font-size="13.5" fill="#94a3b8">实时靠数据绑定，性能靠实例化。</text>
+    <text x="40" y="325" font-size="13.5" fill="#94a3b8">GIS 坐标要做经纬度→米的转换。</text>
+  </g>
+</svg>

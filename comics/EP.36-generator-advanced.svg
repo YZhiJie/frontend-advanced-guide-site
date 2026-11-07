@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#101a33"/>
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#22d3ee" opacity="0.04"/>
+  <polygon points="150,0 220,0 1040,840 970,840" fill="#a78bfa" opacity="0.03"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#7C3AED"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#ffffff">EP.36</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad)">生成器高阶模式</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad)" opacity="0.6"/>
+
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#22d3ee" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：return 值去哪了</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#1d4ed8"/>
+      <path d="M-5,18 L5,18 L3.5,27 L0,29 L-3.5,27 Z" fill="#f97316"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 L-11,-13 L-6,-4 L0,-14 L6,-4 L11,-13 L16,-2 Q0,-11 -16,-2 Z" fill="#f97316"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">内层 return 的值去哪了？</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">for...of 和展开都拿不到它！</text>
+    <rect x="24" y="152" width="524" height="118" rx="8" fill="#0a0f1c" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 吐完 1、2 后 return '结算'</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">function* inner(){ yield 1; return '结算' }</text>
+    <text x="38" y="210" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">[...inner()]             // 只有 1</text>
+    <text x="38" y="228" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">const r = yield* inner() // r='结算'</text>
+    <text x="38" y="246" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// return 值只随 yield*/next 浮出</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#22d3ee"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">return 值只会成为 yield* 的求值结果，</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">想拿到它，必须用 yield* 显式接住。</text>
+  </g>
+
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#a78bfa" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：一条双向通道</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">next(x) 是数据回流，throw 是</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">错误注入，yield* 是控制权下沉。</text>
+    <rect x="24" y="152" width="250" height="30" rx="8" fill="#111a30" stroke="#22d3ee" stroke-opacity="0.5"/>
+    <text x="149" y="172" text-anchor="middle" font-size="13" fill="#22d3ee">① next()：启动到首个 yield</text>
+    <rect x="298" y="152" width="250" height="30" rx="8" fill="#111a30" stroke="#a78bfa" stroke-opacity="0.5"/>
+    <text x="423" y="172" text-anchor="middle" font-size="13" fill="#a78bfa">② next(x)：回给上条 yield</text>
+    <rect x="24" y="190" width="250" height="30" rx="8" fill="#111a30" stroke="#f472b6" stroke-opacity="0.5"/>
+    <text x="149" y="210" text-anchor="middle" font-size="13" fill="#f472b6">③ it.throw(e)：暂停点抛错</text>
+    <rect x="298" y="190" width="250" height="30" rx="8" fill="#111a30" stroke="#f97316" stroke-opacity="0.5"/>
+    <text x="423" y="210" text-anchor="middle" font-size="13" fill="#f97316">④ yield*：委托+回传 return</text>
+    <rect x="24" y="228" width="250" height="30" rx="8" fill="#111a30" stroke="#34d399" stroke-opacity="0.5"/>
+    <text x="149" y="248" text-anchor="middle" font-size="13" fill="#34d399">⑤ break→return()：沿链收尾</text>
+    <rect x="298" y="228" width="250" height="30" rx="8" fill="#111a30" stroke="#fbbf24" stroke-opacity="0.5"/>
+    <text x="423" y="248" text-anchor="middle" font-size="13" fill="#fbbf24">⑥ finally：暂停点照常跑</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#a78bfa"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">首条 next 只负责启动，传参无效——</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">通道从第二个 next 才真正打开。</text>
+  </g>
+
+  <g transform="translate(20,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#f472b6" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：状态机与洋葱</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#7C3AED"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-2,-11 -16,-11 q-14,0 -16,11 z" fill="#22d3ee"/>
+      <circle cx="15" cy="-11" r="6.5" fill="#22d3ee"/>
+      <rect x="12" y="-9" width="6" height="4" rx="2" fill="#7C3AED"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">状态即产出，历史即序列；</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">洋葱模型先进后出，层层包裹。</text>
+    <rect x="24" y="152" width="524" height="118" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 红绿灯:状态序列即产出</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">function* light(n){</text>
+    <text x="38" y="210" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">  for(let c=0;c&lt;n;c++) yield* ['红','绿','黄']</text>
+    <text x="38" y="228" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">// 洋葱:先下沉,后回流</text>
+    <text x="38" y="246" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">push('A-前'); yield* next(); push('A-后')</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#f472b6"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">logs: A-前 → B-前 → B-后 → A-后；</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">一次性迭代器，重放需重新调用生成新实例。</text>
+  </g>
+
+  <g transform="translate(608,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#f97316" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f97316"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：驱动器思维</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="100" font-size="15" fill="#0b1220">把生成器当可暂停的函数，</text>
+    <text x="102" y="122" font-size="15" fill="#0b1220">驱动权始终在消费者手里。</text>
+    <rect x="24" y="148" width="96" height="26" rx="13" fill="#f97316"/>
+    <text x="72" y="166" text-anchor="middle" font-size="13" font-weight="bold" fill="#0b1220">⚠ 坑点</text>
+    <rect x="32" y="183" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="192" font-size="13.5" fill="#e2e8f0">for...of/展开永远拿不到 return 值</text>
+    <rect x="32" y="207" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="216" font-size="13.5" fill="#e2e8f0">首条 next() 传参无效，无 yield 接</text>
+    <rect x="32" y="231" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="240" font-size="13.5" fill="#e2e8f0">一次性迭代器：重放要新建实例</text>
+    <rect x="32" y="255" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="264" font-size="13.5" fill="#e2e8f0">break 触发 return()，finally 沿链执行</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#f97316"/>
+    <text x="40" y="300" font-size="13" font-weight="bold" fill="#f97316">码叔总结</text>
+    <text x="118" y="300" font-size="13" fill="#e2e8f0">yield* 管控制权进出，next(x) 管数据回流，</text>
+    <text x="118" y="320" font-size="13" fill="#e2e8f0">双向通道即拉模式，break 沿链收尾。</text>
+  </g>
+
+  <text x="1180" y="832" text-anchor="end" font-size="11" fill="#475569">NEON INK · frontend-advanced-guide · EP.36</text>
+</svg>

@@ -1,0 +1,3 @@
+# Cloudflare Pages 的 _redirects：SPA history 回退
+# 200 表示「rewrite」而非重定向，浏览器地址栏不变
+/*    /index.html   200

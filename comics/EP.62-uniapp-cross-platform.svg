@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#101a33"/>
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#22d3ee" opacity="0.04"/>
+  <polygon points="150,0 220,0 1040,840 970,840" fill="#a78bfa" opacity="0.03"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#7C3AED"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#fff">EP.62</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad)">一套代码跑多端</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad)" opacity="0.6"/>
+
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：五端五套代码</text>
+    <text x="28" y="130" font-size="14" fill="#94a3b8">H5、小程序、App、iOS、Android……</text>
+    <text x="28" y="152" font-size="14" fill="#94a3b8">每个端写一套，发版要同步 5 次。</text>
+    <rect x="24" y="175" width="524" height="100" rx="8" fill="#0a0f1c" stroke="#f97316" stroke-opacity="0.4"/>
+    <text x="38" y="198" font-size="13" fill="#fdba74" font-family="monospace">wx.navigateTo()   // 小程序</text>
+    <text x="38" y="218" font-size="13" fill="#fdba74" font-family="monospace">router.push()      // H5</text>
+    <text x="38" y="238" font-size="13" fill="#fdba74" font-family="monospace">uni.navigateTo()   // ← 统一</text>
+    <text x="38" y="258" font-size="13" fill="#7dd3fc" font-family="monospace">// 一套 API 编译到各端</text>
+    <rect x="24" y="295" width="524" height="44" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <text x="40" y="322" font-size="13.5" fill="#e2e8f0">UniApp 的本质：同一套代码，编译期剥离平台差异。</text>
+  </g>
+
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：条件编译</text>
+    <rect x="24" y="50" width="524" height="160" rx="8" fill="#0a0f1c" stroke="#a78bfa" stroke-opacity="0.3"/>
+    <text x="38" y="72" font-size="12.5" fill="#7dd3fc" font-family="monospace">// #ifdef MP-WEIXIN</text>
+    <text x="38" y="92" font-size="12.5" fill="#f472b6" font-family="monospace">wx.showToast({ title: 'ok' })</text>
+    <text x="38" y="112" font-size="12.5" fill="#7dd3fc" font-family="monospace">// #elifdef H5</text>
+    <text x="38" y="132" font-size="12.5" fill="#f472b6" font-family="monospace">alert('ok')</text>
+    <text x="38" y="152" font-size="12.5" fill="#7dd3fc" font-family="monospace">// #endif</text>
+    <text x="38" y="180" font-size="12.5" fill="#94a3b8">编译时按目标平台保留对应代码块</text>
+    <text x="38" y="200" font-size="12.5" fill="#94a3b8">其他平台的代码直接被剥离</text>
+    <rect x="24" y="230" width="524" height="100" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="230" width="4" height="100" rx="2" fill="#a78bfa"/>
+    <text x="40" y="254" font-size="13.5" fill="#e2e8f0">条件编译是编译期行为，</text>
+    <text x="40" y="274" font-size="13.5" fill="#94a3b8">不是运行时 if 判断。</text>
+    <text x="40" y="294" font-size="13.5" fill="#94a3b8">产物里不存在其他平台的代码，</text>
+    <text x="40" y="314" font-size="13.5" fill="#94a3b8">体积小、无死代码。</text>
+  </g>
+
+  <g transform="translate(20,465)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#34d399"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：API 抽象层</text>
+    <text x="28" y="70" font-size="14" fill="#94a3b8">各端 storage / 路由 / 支付 API 不同，</text>
+    <text x="28" y="90" font-size="14" fill="#94a3b8">封装一层统一接口，业务代码不感知平台。</text>
+    <rect x="24" y="110" width="524" height="150" rx="8" fill="#0a0f1c" stroke="#34d399" stroke-opacity="0.3"/>
+    <text x="38" y="132" font-size="12.5" fill="#7dd3fc" font-family="monospace">// 统一存储抽象</text>
+    <text x="38" y="152" font-size="12.5" fill="#f472b6" font-family="monospace">storage.set(key, val)</text>
+    <text x="38" y="172" font-size="12.5" fill="#7dd3fc" font-family="monospace">// 小程序 → wx.setStorageSync</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="monospace">// H5 → localStorage</text>
+    <text x="38" y="212" font-size="12.5" fill="#7dd3fc" font-family="monospace">// App → plus.storage</text>
+    <text x="38" y="240" font-size="12.5" fill="#94a3b8">业务只调 storage.set，不关心底层</text>
+    <rect x="24" y="280" width="524" height="56" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <text x="40" y="305" font-size="13.5" fill="#e2e8f0">抽象层 = 平台差异的隔离带，</text>
+    <text x="40" y="325" font-size="13.5" fill="#94a3b8">新增平台只需实现适配器。</text>
+  </g>
+
+  <g transform="translate(608,465)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：分包与发布</text>
+    <text x="28" y="70" font-size="14" fill="#94a3b8">小程序主包 ≤ 2MB，总包 ≤ 20MB。</text>
+    <text x="28" y="90" font-size="14" fill="#94a3b8">非首屏页面拆分包，按需加载。</text>
+    <rect x="24" y="110" width="524" height="130" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.3"/>
+    <text x="38" y="132" font-size="12.5" fill="#7dd3fc" font-family="monospace">主包(2MB): tabBar + 首屏页面</text>
+    <text x="38" y="152" font-size="12.5" fill="#f472b6" font-family="monospace">分包A: 商品详情、购物车</text>
+    <text x="38" y="172" font-size="12.5" fill="#f472b6" font-family="monospace">分包B: 订单、我的</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="monospace">// preloadRule: WiFi 预下载分包</text>
+    <text x="38" y="220" font-size="12.5" fill="#94a3b8">独立分包(independent)不依赖主包</text>
+    <rect x="24" y="260" width="524" height="76" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="260" width="4" height="76" rx="2" fill="#f472b6"/>
+    <text x="40" y="285" font-size="13.5" fill="#e2e8f0">核心口诀：条件编译剥离差异，</text>
+    <text x="40" y="305" font-size="13.5" fill="#94a3b8">API 抽象隔离平台，分包控制体积。</text>
+    <text x="40" y="325" font-size="13.5" fill="#94a3b8">一套代码，多端运行。</text>
+  </g>
+</svg>

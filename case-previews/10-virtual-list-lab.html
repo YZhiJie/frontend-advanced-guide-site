@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>手写虚拟列表与帧调度 · 在线预览</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#2a2f3a;--tx:#dde1e8;--dim:#8b93a3;--brand:#5eead4;--err:#f87171;--ok:#86efac;--info:#93c5fd}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--bg);color:var(--tx);font:14px/1.6 ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;padding:16px 18px 28px}
+h1{font-size:16px;margin-bottom:2px}
+header p{color:var(--dim);font-size:12px;margin-bottom:12px}
+.sec{margin-top:16px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.sec h2{font-size:13px;margin-bottom:8px;color:var(--brand)}
+.hint{font-size:12px;color:var(--dim);margin:-4px 0 8px}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+button{font:12px/1 inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:#1f2430;color:var(--tx);cursor:pointer}
+button:hover{border-color:var(--brand);color:var(--brand)}
+button.primary{background:var(--brand);border-color:var(--brand);color:#06281f;font-weight:600}
+button.danger{border-color:#7f1d1d;color:var(--err)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.in,.ta{width:100%;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0c0e13;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.ta{resize:vertical;white-space:pre}
+.out{background:#0c0e13;border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-height:300px;overflow:auto;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
+.ln{white-space:pre-wrap;word-break:break-all}
+.ln.ok{color:var(--ok)}.ln.err{color:var(--err)}.ln.dim{color:var(--dim)}.ln.info{color:var(--info)}
+.blk{white-space:pre-wrap;word-break:break-all;color:var(--tx)}
+.blk.ok{color:var(--ok)}.blk.err{color:var(--err)}.blk.dim{color:var(--dim)}
+.tbl .tr{display:flex;gap:10px;padding:1px 0}
+.tbl code{color:var(--info);min-width:140px;flex-shrink:0}
+footer{margin-top:14px;color:var(--dim);font-size:11px}
+footer a{color:var(--brand)}
+</style>
+</head>
+<body>
+<div id="app">
+<header><h1>🎯 手写虚拟列表与帧调度</h1><p>实战案例在线预览 · cases/10-virtual-list-lab · 完整源码见仓库 cases/10-virtual-list-lab 目录（cases.md 有直达锚点）</p></header>
+</div>
+<script>(()=>{var P=new TextEncoder,z=new TextDecoder("utf-8");function I(e){return{createConnection(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)},request(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)}}}var U=I("node:http"),q=I("node:https"),G={...U,...q};function g(e){let t=Math.max(0,Math.floor(e.overscan??2)),n=Math.max(0,Math.floor(e.itemCount)),s=Math.max(0,e.itemHeight),i=Math.max(0,e.viewportHeight),f=0,u=new Array(n),a=[],p=r=>u[r]??s,M=()=>{let r=new Array(n+1);r[0]=0;for(let o=0;o<n;o++)r[o+1]=r[o]+p(o);a=r},y=()=>a[n],N=()=>Math.max(0,y()-i),v=()=>Math.max(0,Math.min(f,N())),B=r=>{let o=0,c=n;for(;o<c;){let l=o+c+1>>1;a[l]<=r?o=l:c=l-1}return o},D=r=>{let o=0,c=n;for(;o<c;){let l=o+c>>1;a[l]<r?o=l+1:c=l}return o};M();let L=()=>{if(n===0)return{startIndex:0,endIndex:-1,offsetY:0};let r=v(),o=r+i,c=B(r),l=D(o),C=Math.max(0,c-t),O=Math.min(n,l+t)-1;return{startIndex:C,endIndex:O,offsetY:a[C]}};return{setScrollTop:r=>{f=Math.max(0,r)},setViewportHeight:r=>{i=Math.max(0,r)},measure:(r,o)=>{!Number.isInteger(r)||r<0||r>=n||!Number.isFinite(o)||o<0||u[r]!==o&&(u[r]=o,M())},getRange:L,getVisibleItems:()=>{let{startIndex:r,endIndex:o}=L(),c=[];for(let l=r;l<=o;l++)c.push({index:l,offset:a[l]});return c},getTotalHeight:y,getScrollTop:v,getItemHeight:p,getItemOffset:r=>a[r]??0}}function d(e){if(typeof e=="string")return e;if(e==null||typeof e=="number"||typeof e=="boolean")return String(e);if(e instanceof Error)return`${e.name}: ${e.message}`;if(e instanceof Date)return e.toISOString();if(e instanceof Map)return`Map(${e.size}) { ${[...e.entries()].map(([t,n])=>`${d(t)} => ${d(n)}`).join(", ")} }`;if(e instanceof Set)return`Set(${e.size}) { ${[...e].map(t=>d(t)).join(", ")} }`;try{return JSON.stringify(e,(t,n)=>typeof n=="bigint"?String(n):n,2)??String(e)}catch{return String(e)}}function S(e,t=""){let n=document.createElement("section");n.className="sec";let s=document.createElement("h2");if(s.textContent=e,n.appendChild(s),t){let i=document.createElement("p");i.className="hint",i.textContent=t,n.appendChild(i)}return document.body.querySelector("#app").appendChild(n),n}function $(e){let t=document.createElement("div");return t.className="btn-row",e.appendChild(t),t}function x(e,t,n,s=""){let i=document.createElement("button");return i.textContent=t,s&&(i.className=s),i.addEventListener("click",()=>{try{n()}catch(f){h(e,`\u2717 ${d(f)}`,"err")}}),e.appendChild(i),i}function k(e){let t=document.createElement("div");return t.className="out",e.appendChild(t),t}function V(e){if(e?.classList.contains("out"))return e;let t=e?.querySelectorAll(":scope > .out");if(t&&t.length)return t[t.length-1];let n=document.querySelectorAll("#app .out");return n[n.length-1]}function h(e,t,n=""){let s=V(e),i=document.createElement("div");i.className=`ln ${n}`,i.textContent=d(t),s.appendChild(i),s.scrollTop=s.scrollHeight}function A(e,t){let n=V(e),s=document.createElement("div");s.className="tbl";for(let[i,f]of t){let u=document.createElement("div");u.className="tr";let a=document.createElement("code");a.textContent=i;let p=document.createElement("span");p.textContent=d(f),u.append(a,p),s.appendChild(u)}return n.appendChild(s),n.scrollTop=n.scrollHeight,s}var R=S("\u865A\u62DF\u5217\u8868\u5B9A\u4F4D","\u603B 10 \u4E07\u884C\uFF0C\u89C6\u53E3 600px\u3002\u62D6\u52A8\u6ED1\u5757\u6A21\u62DF scrollTop\uFF0C\u770B\u53EF\u89C6\u7A97\u53E3\u53EA\u5207\u51FA\u51E0\u5341\u884C"),m=k(R),T=1e5,H=600;function w(e,t){let n=t.getRange(),s=t.getVisibleItems();A(m,[[e,""],["\u7A97\u53E3 [startIndex .. endIndex]\uFF08\u542B overscan\uFF09",`${n.startIndex} .. ${n.endIndex}`],["\u6E32\u67D3\u884C\u6570\uFF08\u8FDC\u5C0F\u4E8E 100000\uFF09",s.length],["\u9996\u9879\u4F4D\u79FB offsetY",`${n.offsetY.toFixed(1)}px`],["\u5217\u8868\u603B\u9AD8\u5EA6",`${t.getTotalHeight().toLocaleString()}px`]])}var E=$(R);x(E,"\u25B6 \u5B9A\u9AD8\u6A21\u5F0F\uFF0840px/\u884C\uFF09",()=>{m.replaceChildren();let e=g({itemCount:T,viewportHeight:H,itemHeight:40,overscan:2});e.setScrollTop(123456),w("scrollTop=123456",e),e.setScrollTop(3999960),w("\u6EDA\u5230\u63A5\u8FD1\u5E95\u90E8 scrollTop=3999960",e)});x(E,"\u25B6 \u53D8\u9AD8\u6A21\u5F0F\uFF08\u9884\u4F30 40px\uFF0C\u9010\u9879\u5B9E\u6D4B\u6821\u6B63\uFF09",()=>{m.replaceChildren();let e=g({itemCount:T,viewportHeight:H,itemHeight:40,overscan:2});e.setScrollTop(12e4),w("\u672A\u5B9E\u6D4B\uFF1A\u6309\u9884\u4F30 40px \u5B9A\u4F4D",e);for(let t=0;t<2e3;t++)e.measure(t,80);e.setScrollTop(12e4),w("\u5B9E\u6D4B\u524D 2000 \u9879(80px)\u540E\uFF1A\u540C scrollTop \u5B9A\u4F4D\u53D8\u5316",e)});x(E,"\u25B6 overscan \u7F13\u51B2\u5BF9\u6BD4\uFF080 vs 6\uFF09",()=>{m.replaceChildren();let e=g({itemCount:T,viewportHeight:H,itemHeight:40,overscan:0});e.setScrollTop(5e4);let t=g({itemCount:T,viewportHeight:H,itemHeight:40,overscan:6});t.setScrollTop(5e4),h(m,`overscan=0\uFF1A\u6E32\u67D3 ${e.getVisibleItems().length} \u884C\uFF08${e.getRange().startIndex}..${e.getRange().endIndex}\uFF09`,"dim"),h(m,`overscan=6\uFF1A\u6E32\u67D3 ${t.getVisibleItems().length} \u884C\uFF08${t.getRange().startIndex}..${t.getRange().endIndex}\uFF09`,"dim"),h(m,"\u7F13\u51B2\u8D8A\u591A\u6EDA\u52A8\u8D8A\u4E0D\u5BB9\u6613\u9732\u767D\uFF0C\u4EE3\u4EF7\u662F\u591A\u6E32\u67D3\u51E0\u884C","info")});})();
+</script>
+</body>
+</html>

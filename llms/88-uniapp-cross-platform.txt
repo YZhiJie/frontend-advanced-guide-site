@@ -1,0 +1,231 @@
+# 第八十八部分 · UniApp 跨端开发（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/88-uniapp-cross-platform
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第八十八部分 · UniApp 跨端开发
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第八十七部分 · Design System 设计系统](./87-design-system.md)｜关联章节：[第八部分 · 跨平台开发全景](./08-cross-platform.md) · [第十三部分 · SSR 与元框架](./13-ssr-meta-frameworks.md) · [第七十部分 · 桌面应用开发 Tauri](./70-desktop-app-tauri.md)
+
+> 💡 **本章特色**：多份 JD（数字人直播控台、UniApp 跨端、UniApp 电商）硬要求"熟练掌握 UniApp 框架、原生插件、跨平台（小程序/App/H5）"。[第 8 册](./08-cross-platform.md) 只对 UniApp 做了横向对比，本章体系化讲清四件事：**条件编译**（#ifdef/#ifndef 按平台剥离代码）、**平台 API 抽象层**（storage/router/支付在各端的统一封装）、**三层生命周期**（应用/页面/组件）、**分包与发布上架**（主包/分包/独立分包、小程序 2MB 限制）。配套示例 [88-01-uniapp-cross-platform.ts](./examples/88-01-uniapp-cross-platform.ts) 跑通条件编译、API 抽象、生命周期、分包校验。
+
+## 本部分内容
+
+- [88.1 UniApp 架构：一套代码多端运行](#_88-1-uniapp-架构-一套代码多端运行)
+- [88.2 条件编译：按平台剥离代码](#_88-2-条件编译-按平台剥离代码)
+- [88.3 平台 API 抽象层](#_88-3-平台-api-抽象层)
+- [88.4 生命周期：应用 / 页面 / 组件](#_88-4-生命周期-应用-页面-组件)
+- [88.5 分包策略与发布上架](#_88-5-分包策略与发布上架)
+- [88.6 自测题](#_88-6-自测题)
+- [88.7 本章避坑清单](#_88-7-本章避坑清单)
+
+---
+
+## 88.1 UniApp 架构：一套代码多端运行
+
+### 概念解析
+
+UniApp 是基于 Vue 的跨端框架，用同一套代码编译到 **H5、微信/支付宝/抖音小程序、App（iOS/Android）** 等多个平台。核心机制：
+
+1. **编译时**：通过条件编译（`#ifdef`）把各端专属代码剥离；
+2. **运行时**：各端有自己的 runtime（H5 是 Vue + DOM，小程序是 Vue + 小程序渲染层，App 是 Vue + WebView/原生渲染）；
+3. **API 层**：`uni.xxx` 是跨端统一 API，底层映射到各端原生 API（如 `uni.setStorage` → H5 localStorage / 小程序 storage / App 原生 storage）。
+
+### 应用实践
+
+- **页面用 Vue SFC，但有平台限制**：小程序没有 DOM，不能用 `window`、`document`；App 的 WebView 模式有 DOM 但性能差，nvue 模式用原生渲染无 DOM；
+- **样式用 rpx 适配**：rpx 是 UniApp 的响应式单位，750rpx = 屏幕宽度，类似小程序的 rpx；
+- **条件编译是跨端差异的主要手段**，能在编译时解决的就不要在运行时用 `if` 判断。
+
+---
+
+## 88.2 条件编译：按平台剥离代码
+
+### 概念解析
+
+条件编译是 UniApp 跨端的核心——用注释语法在编译时决定某段代码是否进入目标平台的产物：
+
+```js
+// #ifdef MP-WEIXIN
+// 这段代码只在微信小程序编译
+wx.login({...});
+// #endif
+
+// #ifndef H5
+// 这段代码除了 H5 都编译（小程序 + App）
+uni.getSystemInfoSync();
+// #endif
+
+// #ifdef MP
+// 所有小程序端（微信/支付宝/抖音...）
+// #endif
+```
+
+支持的平台标识：`H5`、`MP-WEIXIN`、`MP-ALIPAY`、`MP-TOUTIAO`、`APP-PLUS`、`MP`（所有小程序）等。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/88-01-uniapp-cross-platform.ts（节选：条件编译逻辑）
+export function shouldCompile(blockPlatform: Platform, currentPlatform: Platform): boolean {
+  return blockPlatform === currentPlatform;
+}
+export function shouldCompileExcept(blockPlatform: Platform, currentPlatform: Platform): boolean {
+  return blockPlatform !== currentPlatform;
+}
+```
+
+> 运行方式：`npx tsx examples/88-01-uniapp-cross-platform.ts`
+
+### 应用实践
+
+- **条件编译可用于 JS、CSS、模板**：`<!-- #ifdef MP-WEIXIN -->` 在 template 里用，`/* #ifdef H5 */` 在 style 里用；
+- **优先用条件编译而非运行时判断**：`if (uni.getSystemInfoSync().platform === 'h5')` 是运行时判断，代码还在产物里；条件编译直接剥离，产物体积更小；
+- **公共逻辑放抽象层，平台差异用条件编译注入**：不要把 `#ifdef` 散落在业务代码里，收敛到 API 适配层。
+
+---
+
+## 88.3 平台 API 抽象层
+
+### 概念解析
+
+虽然 `uni.xxx` 是统一 API，但各端行为有差异：
+
+- **存储**：H5 是 localStorage（5MB 限制、同步阻塞），小程序是 storage（10MB、同步），App 是原生 storage；
+- **路由**：H5 用 history API，小程序用 `uni.navigateTo`（不能跳 tabBar），App 可能有原生路由；
+- **支付**：微信小程序 `wx.requestPayment`，支付宝 `my.tradePay`，H5 用第三方 JS SDK；
+- **登录**：各端登录方式完全不同（微信 `wx.login`、Apple Sign in、手机号验证码）。
+
+正确做法：**封装一层平台无关的 API，内部用条件编译分发到各端实现**。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/88-01-uniapp-cross-platform.ts（节选：API 抽象层）
+export function createStorage(platform: Platform): StorageAPI {
+  const store = new Map<string, unknown>();
+  return {
+    set(key, value) {
+      // H5: localStorage.setItem(key, JSON.stringify(value))
+      // 小程序: uni.setStorageSync(key, value)
+      // App: plus.storage.setItem
+      store.set(key, value);
+    },
+    get<T>(key): T | null { return (store.get(key) as T) ?? null; },
+    remove(key) { store.delete(key); },
+  };
+}
+```
+
+### 应用实践
+
+- **登录抽象层最重要**：各端登录完全不同，业务层只调 `login()`，内部按平台走不同流程；
+- **支付要做服务端统一下单**：前端只调 `pay(orderId)`，服务端返回各端支付参数，前端按平台调起支付；
+- **文件上传**：H5 用 FormData，小程序用 `uni.uploadFile`，App 可能用原生上传，统一封装成 `uploadFile(file)`。
+
+---
+
+## 88.4 生命周期：应用 / 页面 / 组件
+
+### 概念解析
+
+UniApp 有三层生命周期：
+
+| 层级 | 钩子 | 触发时机 |
+| --- | --- | --- |
+| **应用级** | `onLaunch` / `onShow` / `onHide` | App 初始化/前台/后台 |
+| **页面级** | `onLoad` / `onReady` / `onShow` / `onHide` / `onUnload` | 页面加载/渲染/显示/隐藏/卸载 |
+| **页面级（特有）** | `onPullDownRefresh` / `onReachBottom` / `onShareAppMessage` | 下拉刷新/触底/分享 |
+| **组件级** | Vue 生命周期 `created` / `mounted` / `unmounted` | 组件创建/挂载/销毁 |
+
+页面级的 `onLoad` 接收页面参数（query），`onReady` 是页面初次渲染完成（可获取 DOM 节点），`onShow` 每次页面显示都触发（包括从其他页面返回）。
+
+### 应用实践
+
+- **`onShow` 用于刷新数据**：从详情页返回列表页时，`onShow` 触发，可以重新拉取列表；
+- **`onPullDownRefresh` 要配合 `enablePullDownRefresh` 配置**，在 `pages.json` 里开启；
+- **`onReachBottom` 做列表分页加载**，配合 `onReachBottomDistance` 控制触发距离；
+- **小程序组件没有页面级钩子**，要用 `uni.$emit` 或 props 监听页面事件。
+
+---
+
+## 88.5 分包策略与发布上架
+
+### 概念解析
+
+小程序有严格的包大小限制：
+
+| 平台 | 主包 | 单分包 | 总包 |
+| --- | --- | --- | --- |
+| 微信小程序 | 2MB | 2MB | 20MB |
+| 支付宝小程序 | 2MB | 2MB | 20MB |
+
+超过限制无法上传，所以**必须分包**：
+
+- **主包**：tabBar 页面 + 高频页面 + 公共资源；
+- **分包**：低频页面按业务模块拆分（如商城分包、用户中心分包）；
+- **独立分包**：可独立于主包运行的分包，用于营销活动页（从分享链接直接进入，不下载主包）。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/88-01-uniapp-cross-platform.ts（节选：分包）
+export function resolvePagePackage(manifest: AppManifest, pagePath: string) {
+  if (manifest.tabBarPages.includes(pagePath)) return { type: "tab" };
+  if (manifest.mainPages.includes(pagePath)) return { type: "main" };
+  for (const sp of manifest.subPackages) {
+    if (pagePath.startsWith(sp.root)) return { type: "sub", subPackage: sp };
+  }
+  throw new Error(`页面 ${pagePath} 未注册`);
+}
+```
+
+### 应用实践
+
+- **tabBar 页面必须在主包**：小程序限制 tabBar 页面不能在分包；
+- **公共组件和资源放主包**：分包不能引用其他分包的资源，公共的放主包；
+- **图片资源压缩**：小程序对图片敏感，能用网络图片就不用本地，本地图片要压缩（建议 < 100KB）；
+- **发布上架各端流程不同**：H5 部署 CDN，小程序用开发者工具上传后在后台提交审核，App 用云端打包后发应用市场。
+
+---
+
+## 88.6 自测题
+
+<details>
+<summary><b>1. 【基础】UniApp 条件编译和运行时平台判断有什么区别？</b></summary>
+
+条件编译（#ifdef）在编译时把不需要的代码从产物中剥离，产物体积更小、执行更快；运行时判断（if platform === 'h5'）代码还在产物里，每次执行都要判断。优先用条件编译，能在编译时解决的就不要留到运行时。
+</details>
+
+<details>
+<summary><b>2. 【进阶】为什么要封装平台 API 抽象层？直接用 uni.xxx 不行吗？</b></summary>
+
+uni.xxx 虽然是统一 API，但各端行为有差异（存储大小限制、路由限制、登录方式）。直接在业务代码里写 uni.login 会导致各端逻辑散落。封装抽象层后，业务代码只调 login()，内部按平台分发，便于维护和测试。
+</details>
+
+<details>
+<summary><b>3. 【进阶】页面级 onShow 和组件级 mounted 有什么区别？什么时候用哪个？</b></summary>
+
+onShow 是页面级钩子，每次页面显示都触发（包括从其他页面返回），适合做数据刷新；mounted 是 Vue 组件级钩子，只在组件挂载时触发一次。列表页从详情返回需要刷新时用 onShow，组件初始化时用 mounted。
+</details>
+
+<details>
+<summary><b>4. 【挑战】小程序主包超过 2MB 无法上传，怎么拆分？</b></summary>
+
+拆分策略：① tabBar 页面和高频页面留主包；② 按业务模块拆分包（商城、用户中心、营销活动）；③ 图片资源转网络 CDN，减少本地包体积；④ 低频页面用独立分包；⑤ 公共组件和资源放主包（分包不能互引）。拆分后每个分包不超过 2MB，总包不超过 20MB。
+</details>
+
+---
+
+## 88.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 条件编译散落 | `#ifdef` 散落在业务代码各处 | 收敛到 API 适配层，业务层不出现平台判断 |
+| 运行时判断代替编译 | 用 `if (platform === 'h5')` 代替 `#ifdef` | 优先条件编译，产物更小更快 |
+| 直接用平台 API | 业务代码里写 `wx.login` | 封装抽象层 `login()`，内部按平台分发 |
+| 用 DOM API | 小程序里用 window/document | 小程序无 DOM，用 uni API 或条件编译隔离 |
+| tabBar 在分包 | tabBar 页面放进分包 | tabBar 页面必须在主包 |
+| 分包互引资源 | 分包引用其他分包的组件 | 公共资源放主包，分包不能互引 |
+| 图片不压缩 | 本地图片过大导致包超限 | 图片转 CDN，本地图片压缩 < 100KB |
+| onShow 重复请求 | 每次 onShow 都拉数据，返回时重复 | 加脏标记，只有数据可能变化时才刷新 |
+| 跨端样式差异 | H5 样式在小程序错乱 | 用 rpx 适配，避免百分比布局，用条件编译隔离平台样式 |

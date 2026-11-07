@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>手写 XSS 清洗与转义工具箱 · 在线预览</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#2a2f3a;--tx:#dde1e8;--dim:#8b93a3;--brand:#5eead4;--err:#f87171;--ok:#86efac;--info:#93c5fd}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--bg);color:var(--tx);font:14px/1.6 ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;padding:16px 18px 28px}
+h1{font-size:16px;margin-bottom:2px}
+header p{color:var(--dim);font-size:12px;margin-bottom:12px}
+.sec{margin-top:16px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.sec h2{font-size:13px;margin-bottom:8px;color:var(--brand)}
+.hint{font-size:12px;color:var(--dim);margin:-4px 0 8px}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+button{font:12px/1 inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:#1f2430;color:var(--tx);cursor:pointer}
+button:hover{border-color:var(--brand);color:var(--brand)}
+button.primary{background:var(--brand);border-color:var(--brand);color:#06281f;font-weight:600}
+button.danger{border-color:#7f1d1d;color:var(--err)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.in,.ta{width:100%;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0c0e13;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.ta{resize:vertical;white-space:pre}
+.out{background:#0c0e13;border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-height:300px;overflow:auto;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
+.ln{white-space:pre-wrap;word-break:break-all}
+.ln.ok{color:var(--ok)}.ln.err{color:var(--err)}.ln.dim{color:var(--dim)}.ln.info{color:var(--info)}
+.blk{white-space:pre-wrap;word-break:break-all;color:var(--tx)}
+.blk.ok{color:var(--ok)}.blk.err{color:var(--err)}.blk.dim{color:var(--dim)}
+.tbl .tr{display:flex;gap:10px;padding:1px 0}
+.tbl code{color:var(--info);min-width:140px;flex-shrink:0}
+footer{margin-top:14px;color:var(--dim);font-size:11px}
+footer a{color:var(--brand)}
+</style>
+</head>
+<body>
+<div id="app">
+<header><h1>🎯 手写 XSS 清洗与转义工具箱</h1><p>实战案例在线预览 · cases/07-xss-sanitizer-lab · 完整源码见仓库 cases/07-xss-sanitizer-lab 目录（cases.md 有直达锚点）</p></header>
+</div>
+<script>(()=>{var W=new TextEncoder,X=new TextDecoder("utf-8");function S(t){return{createConnection(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${t} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)},request(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${t} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)}}}var D=S("node:http"),O=S("node:https"),V={...D,...O};var v={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","/":"&#47;"};function a(t,e={}){let n=e.escapeSlash?/[&<>"'\/]/g:/[&<>"']/g;return t.replace(n,r=>v[r]??r)}var B={"&":"&amp;",'"':"&quot;","'":"&#39;","<":"&lt;",">":"&gt;"};function H(t){return t.replace(/[&"'<>]/g,e=>B[e]??e)}var _={amp:"&",lt:"<",gt:">",quot:'"',apos:"'",nbsp:"\xA0"},I=/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]*);/g;function x(t){return t.replace(I,(e,n)=>{if(n[0]==="#"){let r=n[1]==="x"||n[1]==="X",o=Number.parseInt(r?n.slice(2):n.slice(1),r?16:10);return!Number.isFinite(o)||o<0||o>1114111||o>=55296&&o<=57343?e:String.fromCodePoint(o)}return _[n.toLowerCase()]??e})}var P=["http:","https:","mailto:","tel:"];function q(t){return t.replace(/[\u0000-\u001F\u007F]/g,"").trim()}function w(t,e={}){let n=e.allowedProtocols??P,r=e.fallback??"#";if(typeof t!="string"||t==="")return r;let o=q(t);if(o==="")return r;let i=x(o),s=i.split(/[/?#]/,1)[0]??"",f=s.indexOf(":");if(f>=0){let p=s.slice(0,f).replace(/\s+/g,"").toLowerCase()+":";return n.includes(p)?i:r}return e.allowRelative===!1?r:i}var j=["p","br","strong","em","a","ul","ol","li","code","pre"],F={a:["href","title"]},C=/<[^>]*>/g,Z=/^<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9:-]*)([\s\S]*?)\s*\/?>$/,M=/([a-zA-Z_:][a-zA-Z0-9_:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g,G=new Set(["href","src"]);function J(t,e,n){let r=Z.exec(t);if(r===null)return a(t);let o=r[2].toLowerCase();if(!e.has(o))return a(t);if(r[1]==="/")return`</${o}>`;let i=r[3],s=n[o]??n["*"]??[],f=new Set(s.map(l=>l.toLowerCase())),p=[];M.lastIndex=0;let d;for(;(d=M.exec(i))!==null;){let l=d[1].toLowerCase();if(l.startsWith("on")||l==="style"||!f.has(l))continue;let A=d[2]??d[3]??d[4]??"";if(G.has(l)){let L=w(A,{fallback:""});if(L==="")continue;p.push(`${l}="${H(L)}"`)}else p.push(`${l}="${H(A)}"`)}return p.length>0?`<${o} ${p.join(" ")}>`:`<${o}>`}function k(t,e={}){let n=new Set((e.allowedTags??j).map(f=>f.toLowerCase())),r=e.allowedAttributes??F,o="",i=0;C.lastIndex=0;let s;for(;(s=C.exec(t))!==null;)o+=a(t.slice(i,s.index)),o+=J(s[0],n,r),i=s.index+s[0].length;return o+=a(t.slice(i)),o}function m(t){if(typeof t=="string")return t;if(t==null||typeof t=="number"||typeof t=="boolean")return String(t);if(t instanceof Error)return`${t.name}: ${t.message}`;if(t instanceof Date)return t.toISOString();if(t instanceof Map)return`Map(${t.size}) { ${[...t.entries()].map(([e,n])=>`${m(e)} => ${m(n)}`).join(", ")} }`;if(t instanceof Set)return`Set(${t.size}) { ${[...t].map(e=>m(e)).join(", ")} }`;try{return JSON.stringify(t,(e,n)=>typeof n=="bigint"?String(n):n,2)??String(t)}catch{return String(t)}}function R(t,e=""){let n=document.createElement("section");n.className="sec";let r=document.createElement("h2");if(r.textContent=t,n.appendChild(r),e){let o=document.createElement("p");o.className="hint",o.textContent=e,n.appendChild(o)}return document.body.querySelector("#app").appendChild(n),n}function $(t){let e=document.createElement("div");return e.className="btn-row",t.appendChild(e),e}function g(t,e,n,r=""){let o=document.createElement("button");return o.textContent=e,r&&(o.className=r),o.addEventListener("click",()=>{try{n()}catch(i){c(t,`\u2717 ${m(i)}`,"err")}}),t.appendChild(o),o}function U(t,e,n=6){let r=document.createElement("textarea");return r.className="ta",r.rows=n,r.spellcheck=!1,r.value=e,t.appendChild(r),r}function N(t){let e=document.createElement("div");return e.className="out",t.appendChild(e),e}function z(t){if(t?.classList.contains("out"))return t;let e=t?.querySelectorAll(":scope > .out");if(e&&e.length)return e[e.length-1];let n=document.querySelectorAll("#app .out");return n[n.length-1]}function c(t,e,n=""){let r=z(t),o=document.createElement("div");o.className=`ln ${n}`,o.textContent=m(e),r.appendChild(o),r.scrollTop=r.scrollHeight}function T(t,e,n=""){let r=z(t),o=document.createElement("pre");o.className=`blk ${n}`,o.textContent=m(e),r.appendChild(o),r.scrollTop=r.scrollHeight}var y=R("XSS \u9632\u5FA1\u5DE5\u5177\u7BB1","\u9884\u586B\u5E38\u89C1\u653B\u51FB\u5411\u91CF\uFF0C\u53EF\u968F\u610F\u6539\u5199\u8F93\u5165\uFF1B\u8F93\u51FA\u662F\u6E05\u6D17\u540E\u7684**\u6587\u672C\u539F\u6837**\uFF08\u4E0D\u4F1A\u88AB\u6267\u884C\uFF09"),u=N(y),b=U(y,['<img src=x onerror="alert(1)">','<a href="javascript:alert(1)">\u70B9\u6211</a>','<a href=" &#106;avascript:alert(1)">\u5B9E\u4F53\u7F16\u7801\u7ED5\u8FC7</a>',"<p>\u6B63\u5E38<b>\u52A0\u7C97</b><script>alert(1)<\/script></p>"].join(`
+`),7),E=$(y);g(E,"\u25B6 escapeHtml\uFF08\u5168\u6587\u8F6C\u4E49\uFF09",()=>{T(u,a(b.value),"ok")});g(E,"\u25B6 sanitizeUrl\uFF08\u9010\u884C\u534F\u8BAE\u767D\u540D\u5355\uFF09",()=>{for(let t of b.value.split(`
+`)){let e=t.match(/href="([^"]*)"/);if(!e)continue;let n=w(e[1]);c(u,`${JSON.stringify(e[1])} \u2192 ${JSON.stringify(n)}`,n==="#"?"err":"ok")}c(u,"\u63D0\u793A\uFF1Ajavascript: \u4E0E\u5B9E\u4F53\u7F16\u7801\u53D8\u4F53\u90FD\u4F1A\u88AB\u62E6\u6210 #\uFF08\u63A7\u5236\u5B57\u7B26\u4E0E\u5B9E\u4F53\u5148\u89E3\u7801\u518D\u5224\u5B9A\uFF09","info")});g(E,"\u25B6 sanitizeHtml\uFF08allowlist \u6E05\u6D17\uFF09",()=>{for(let t of b.value.split(`
+`))T(u,k(t),"ok");c(u,"\u89C2\u5BDF\uFF1A\u672A\u77E5\u6807\u7B7E\uFF08img/script\uFF09\u6574\u4F53\u8F6C\u4E49\u4E3A\u6587\u672C\uFF0Con* \u4E0E style \u5C5E\u6027\u88AB\u5265\u79BB\uFF0C\u767D\u540D\u5355\u6807\u7B7E\u539F\u6837\u4FDD\u7559","info")});g(E,"\u25B6 decodeEntities\uFF08\u89E3\u7801\u56DE\u73AF\uFF09",()=>{let t=a('<a href="x">&amp;</a>');c(u,`\u8F6C\u4E49\uFF1A${t}`,"dim"),c(u,`\u89E3\u7801\uFF1A${x(t)}\uFF08\u5355\u6B21\u66FF\u6362\u4E0D\u4F1A\u4E8C\u6B21\u89E3\u7801\uFF09`,"ok")});})();
+</script>
+</body>
+</html>

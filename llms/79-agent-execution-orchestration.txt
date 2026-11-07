@@ -1,0 +1,347 @@
+# 第七十九部分 · AI Agent 执行编排与任务状态可视化（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/79-agent-execution-orchestration
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第七十九部分 · AI Agent 执行编排与任务状态可视化
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第七十八部分 · 技术选型与开源许可](./78-tech-selection-licensing.md)｜关联章节：[第十四部分 · 前端 AI 开发](./14-frontend-ai.md) · [第三十九部分 · IM 实时通信系统](./39-im-messaging.md) · [第四十二部分 · 工作流与审批引擎](./42-workflow-approval.md) · [第六十二部分 · 消息通知中心](./62-notification-center.md)
+
+> 💡 **本章特色**：第 14 册讲了「流式对话 + 工具调用卡片」，但 JD 要的不是聊天框——是**让用户清楚知道「AI 在做什么 → 做到哪一步 → 得到什么结果 → 下一步可以做什么」**的完整产品界面。本章把这条链路拆成五件事：**任务状态机**（Thinking/Running/等待确认/失败/完成）、**多步骤进度**（步骤级 + 整体进度条）、**执行日志时间线**（每一步可追溯）、**失败重试恢复**（指数退避 + 幂等键）、**长任务异步推送**（SSE/WebSocket 进度回传）。配套示例 [79-01-agent-task-state-machine.ts](./examples/79-01-agent-task-state-machine.ts) 把状态机、进度、重试、确认链路跑通，硬断言直跑。
+
+## 本部分内容
+
+- [79.1 Agent 任务状态机：Thinking → Running → 等待确认 → 完成/失败](#_79-1-agent-任务状态机-thinking-→-running-→-等待确认-→-完成-失败)
+- [79.2 多步骤任务编排与实时进度条](#_79-2-多步骤任务编排与实时进度条)
+- [79.3 Agent 执行日志与时间线渲染](#_79-3-agent-执行日志与时间线渲染)
+- [79.4 失败、重试与恢复：退避 + 幂等键](#_79-4-失败、重试与恢复-退避-幂等键)
+- [79.5 长任务异步执行：SSE / WebSocket 进度推送](#_79-5-长任务异步执行-sse-websocket-进度推送)
+- [79.6 自测题](#_79-6-自测题)
+- [79.7 本章避坑清单](#_79-7-本章避坑清单)
+
+---
+
+## 79.1 Agent 任务状态机：Thinking → Running → 等待确认 → 完成/失败
+
+### 概念解析
+
+AI Agent 任务和普通 CRUD 的本质区别：**它是一段有方向、有阶段、可能被人打断的异步过程**。用户付费购买的不是"一次回答"，而是"AI 替我跑完了一系列动作"。所以前端必须把这个过程**状态化、可视化、可干预**。
+
+七个状态，覆盖一条完整链路：
+
+| 状态 | 含义 | 用户可见的 UI | 可干预动作 |
+| --- | --- | --- | --- |
+| `draft` | 任务已创建未启动 | 草稿卡片 | 启动 / 删除 |
+| `thinking` | 模型正在拆解任务、规划步骤 | 💭 思考中…（可展示规划中的子步骤骨架） | 取消 |
+| `running` | 正在执行工具调用 / 子步骤 | 🔨 执行中 + 进度条 + 当前步骤名 | 取消 |
+| `awaiting_confirm` | 有副作用的工具等待用户确认 | ⚠️ 待确认卡片 + 工具参数预览 | 允许 / 拒绝 |
+| `failed` | 执行失败（可重试或放弃） | ❌ 失败原因 + 重试按钮 | 重试 / 放弃 |
+| `cancelled` | 用户主动取消 | 已取消 | — |
+| `done` | 任务完成，结果待编辑确认（见第 80 册） | ✅ 完成 + 结果预览 | 查看 / 编辑 |
+
+三条设计纪律：
+
+1. **状态迁移必须过守卫**：`TRANSITIONS[from]` 是唯一事实来源，`done`/`cancelled` 用空数组封死终态。直接改 `status` 字段的代码都是 bug 温床（与 [42.1 审批状态机](./42-workflow-approval.md#_42-1-审批单状态机-迁移守卫与审计轨迹) 同一原则）。
+2. **`awaiting_confirm` 是安全闸门**：有副作用的工具（发邮件、下单、删数据、外呼）必须从 `running` 挂起到 `awaiting_confirm`，等用户点"允许"才能继续。这是 JD 明确要求的"用户能够清楚知道"的核心环节。
+3. **`thinking` 和 `running` 要分开**：`thinking` 是模型在规划（还没产生外部副作用），`running` 是已经在调用工具/写数据。用户对两者的耐心阈值不同——`thinking` 超过 10 秒要给"规划中"的反馈，`running` 要给实时进度。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/79-01-agent-task-state-machine.ts（节选：状态机定义）
+export type AgentStatus =
+  | "draft" | "thinking" | "running"
+  | "awaiting_confirm" | "failed" | "cancelled" | "done";
+
+export const TRANSITIONS: Readonly<Record<AgentStatus, readonly AgentStatus[]>> = {
+  draft: ["thinking"],
+  thinking: ["running", "failed", "cancelled"],
+  running: ["awaiting_confirm", "failed", "cancelled", "done"],
+  awaiting_confirm: ["running", "cancelled", "failed"],
+  failed: ["running", "cancelled"],
+  cancelled: [],
+  done: [],
+};
+
+export function canTransition(from: AgentStatus, to: AgentStatus): boolean {
+  return TRANSITIONS[from].includes(to);
+}
+```
+
+> 运行方式：`npx tsx examples/79-01-agent-task-state-machine.ts`，可看到终态守卫、等待确认链路、重试判定全部断言通过。
+
+### 应用实践
+
+- **按钮显隐由状态机驱动**，不要在组件里写 `if (status === 'running' || status === 'thinking')` 的散落判断——把"当前状态可执行的动作"收敛成 `availableActions(status)` 纯函数；
+- **`thinking` 态可展示规划骨架**：模型规划阶段往往已经输出了步骤列表（哪怕还没执行），先把步骤名渲染成骨架，比一个转圈更能建立信任；
+- **状态与审计双写**：每次 `transition` 同步落一条 `{from, to, at, by, reason}` 审计日志，时间线组件就是渲染这条数组（见 79.3）。
+
+---
+
+## 79.2 多步骤任务编排与实时进度条
+
+### 概念解析
+
+Agent 任务通常不是"一个请求等结果"，而是**一串有依赖的步骤**：解析需求 → 检索资料 → 调用工具 A → 调用工具 B → 生成结果 → 写入数据库。前端要回答两个问题：
+
+1. **现在做到哪一步了？**——步骤列表 + 当前步骤高亮
+2. **整体完成了多少？**——整体进度条
+
+整体进度不是"当前步骤数 / 总步骤数"那么粗糙。运行中的步骤应该按其内部进度折算，已跳过的步骤按完成算（不占权重），失败的步骤不计入完成度。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/79-01-agent-task-state-machine.ts（节选：多步骤进度）
+export interface Step {
+  id: string;
+  title: string;
+  status: "pending" | "running" | "done" | "failed" | "skipped";
+  progress: number; // 0~100
+  tool?: string;
+  error?: string;
+}
+
+/** 整体进度 = Σ(步骤权重 × 完成比例)，运行中步骤按其 progress 折算 */
+export function overallProgress(task: { steps: Step[] }): number {
+  if (task.steps.length === 0) return 0;
+  const weight = 100 / task.steps.length;
+  let total = 0;
+  for (const s of task.steps) {
+    if (s.status === "done" || s.status === "skipped") total += weight;
+    else if (s.status === "running") total += (s.progress / 100) * weight;
+  }
+  return Math.round(total);
+}
+```
+
+### 应用实践
+
+- **进度条不要假装满**：如果后端不返回步骤级进度，宁可显示"步骤 2/5 · 检索中"也不要编造百分比。虚假进度比无进度更伤信任；
+- **长步骤分段上报**：一个"生成方案"步骤如果耗时 30 秒，应该拆成"生成大纲 → 填充细节 → 校验格式"几个子里程碑，每个里程碑推进 progress，而不是 0% 卡 30 秒然后跳 100%；
+- **进度与 ETA 分离**：进度条表示"已完成比例"，ETA 表示"预计剩余时间"。两者计算逻辑不同，不要混在一个组件里。ETA 可以用历史同类任务的平均耗时估算。
+
+---
+
+## 79.3 Agent 执行日志与时间线渲染
+
+### 概念解析
+
+执行日志是 Agent 产品的"黑匣子"。它要回答：**AI 每一步做了什么、用了什么工具、传入了什么参数、得到了什么结果、耗时多久**。这既是用户理解 AI 行为的依据，也是出问题时排查的线索。
+
+一条日志条目包含：
+
+```ts
+interface AgentLogEntry {
+  seq: number;            // 自增序号，排序用
+  ts: number;             // 时间戳
+  type: "plan" | "tool_call" | "tool_result" | "think" | "error" | "user_confirm";
+  stepId?: string;        // 关联步骤
+  tool?: string;          // 工具名
+  args?: unknown;         // 工具入参（脱敏后）
+  result?: unknown;       // 工具返回（截断后）
+  durationMs?: number;    // 耗时
+  message?: string;       // 人类可读描述
+}
+```
+
+前端把这条数组渲染成**垂直时间线**：左侧是时间 + 步骤名，右侧是工具卡片（参数 + 结果 + 耗时）。`tool_call` 和 `tool_result` 配对显示，`error` 用红色高亮，`user_confirm` 标记用户的干预点。
+
+### 应用实践
+
+- **日志要可折叠**：完整的工具参数和结果可能很长，默认折叠，点击展开。否则时间线会被巨型 JSON 淹没；
+- **敏感字段脱敏**：工具入参里的手机号、身份证、API Key 必须在展示前脱敏（用 [47 册的日志脱敏器](./47-secrets-management.md)）。日志是给用户看的，也是给客服看的，不能泄露隐私；
+- **大结果截断 + 查看完整链接**：工具返回几千行数据时，时间线里只展示前 3 行 + "查看完整结果"跳转到详情页，避免时间线卡顿。
+
+---
+
+## 79.4 失败、重试与恢复：退避 + 幂等键
+
+### 概念解析
+
+Agent 任务跨越多步、多个工具、多次模型调用，**失败是常态不是异常**。网络抖动、模型限流、工具超时都会让某一步失败。前端的职责是：**区分可重试错误和不可重试错误，对可重试错误做指数退避重试，所有重试带幂等键防止重复副作用**。
+
+| 错误类型 | 例子 | 策略 |
+| --- | --- | --- |
+| 可重试 | 网络超时、503、429 限流、连接重置 | 指数退避重试（带上限） |
+| 不可重试 | 业务校验失败、参数错误、权限不足 | 直接失败，提示用户修改 |
+| 用户取消 | AbortError | 标记 cancelled，不重试 |
+
+指数退避：`delay = min(maxDelay, baseDelay × 2^attempt)`，加上随机 jitter 防止"惊群"。幂等键：`taskId:stepId:attempt`，服务端据此去重——同一个步骤的第 N 次重试，服务端只执行一次副作用。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/79-01-agent-task-state-machine.ts（节选：重试策略）
+export interface RetryPolicy {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  retryable: (err: unknown) => boolean;
+}
+
+export function nextBackoff(policy: RetryPolicy, attempt: number): number {
+  return Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** attempt);
+}
+
+/** 幂等键随 attempt 变化，服务端按此去重 */
+export function idempotencyKey(taskId: string, stepId: string, attempt: number): string {
+  return `${taskId}:${stepId}:${attempt}`;
+}
+```
+
+### 应用实践
+
+- **重试次数对用户透明**：显示"第 2/3 次重试…"比无限转圈更能安抚焦虑。超过最大重试次数后，给出"重试"和"联系客服"两个明确出口；
+- **重试必须幂等**：有副作用的工具（发邮件、扣余额）必须带幂等键，且服务端按幂等键去重。否则重试 = 重复发邮件 = 客诉；
+- **失败可恢复到指定步骤**：用户修复问题后（比如补充了缺失的输入），应该能从失败的步骤继续，而不是从头跑。这要求步骤是**可重入**的——每一步执行前先检查是否已经完成过。
+
+---
+
+## 79.5 长任务异步执行：SSE / WebSocket 进度推送
+
+### 概念解析
+
+Agent 任务动辄几十秒到几分钟，**不能用普通 HTTP 请求等响应**。正确模式是：**异步提交 + 实时推送进度**。
+
+两种推送方式：
+
+| 方式 | 适用 | 特点 |
+| --- | --- | --- |
+| **SSE**（推荐） | 服务端→客户端单向推送进度 | 基于 HTTP，自动重连，实现简单；进度推送的天然选择 |
+| **WebSocket** | 需要双向通信（用户实时干预） | 全双工，但需要心跳保活、断线重连（见 [39 册 IM 系统](./39-im-messaging.md)） |
+
+标准链路：
+
+```
+前端 POST /api/agent/tasks {prompt}
+    → 服务端返回 {taskId}（202 Accepted）
+    → 前端建立 SSE 连接 /api/agent/tasks/{taskId}/events
+    → 服务端逐条推送: {type:'step_start', stepId, title}
+                       {type:'step_progress', stepId, progress}
+                       {type:'tool_call', stepId, tool, args}
+                       {type:'step_done', stepId, result}
+                       {type:'done', result} / {type:'failed', error}
+```
+
+前端用一个统一的事件 reducer 把推送事件合并到任务状态里（步骤进度、日志、整体状态），UI 自动响应。
+
+### 应用实践
+
+- **事件必须带序号**：`seq` 字段让前端能检测丢包（序号不连续时请求补发），也保证乱序到达时能正确排序；
+- **断线重连从上次序号继续**：SSE 的 `Last-Event-ID` 头就是干这个的——重连时带上最后收到的 `seq`，服务端从断点续推，而不是从头推；
+- **页面刷新后能恢复任务**：任务状态存在服务端，刷新页面后用 `taskId` 重新拉取当前状态 + 重新订阅 SSE，用户无感续看。这要求 `taskId` 持久化在 URL 或 localStorage 里。
+
+---
+
+## 79.6 自测题
+
+> 先自己作答，再展开参考答案。
+
+<details>
+<summary><b>1. 【基础】为什么 Agent 任务需要 `awaiting_confirm` 状态？哪些工具必须走这个状态？</b></summary>
+
+有真实世界副作用的工具（发邮件、下单、支付、删除数据、外呼）必须先挂起到 `awaiting_confirm`，等用户确认后才能继续执行。因为模型可能误解用户意图，或被 Prompt 注入诱导执行危险操作，一旦执行不可逆。只读类工具（查询、检索）可以直接自动执行。
+</details>
+
+<details>
+<summary><b>2. 【进阶】整体进度条为什么不能简单用"当前步骤数 / 总步骤数"？</b></summary>
+
+因为运行中的步骤内部也有进度，应该按其 `progress` 折算进整体进度。比如 4 步任务中 2 步完成 + 1 步完成 50%，整体应该是 62.5% 而不是 50%。否则用户会看到进度条卡住不动，体验很差。已跳过的步骤按完成算权重。
+</details>
+
+<details>
+<summary><b>3. 【进阶】重试为什么必须带幂等键？幂等键怎么设计？</b></summary>
+
+有副作用的工具如果重试时不带幂等键，服务端无法区分"新请求"和"重试请求"，会导致重复执行（发两封邮件、扣两次款）。幂等键设计为 `taskId:stepId:attempt`，服务端按此键去重——同一个步骤的第 N 次重试只执行一次副作用，后续重试直接返回上次结果。
+</details>
+
+<details>
+<summary><b>4. 【挑战】长任务的 SSE 推送断线了怎么办？如何保证进度不丢？</b></summary>
+
+两个机制：① 推送事件带自增序号 `seq`，前端记录最后收到的序号；② SSE 重连时通过 `Last-Event-ID` 头带上最后序号，服务端从断点续推。如果 SSE 不可用，降级为前端轮询 `/api/agent/tasks/{taskId}` 拉取全量状态。任务状态存服务端，刷新页面后用 `taskId` 恢复。
+</details>
+
+<details>
+<summary><b>5. 【基础】哪些错误应该重试，哪些不应该？</b></summary>
+
+可重试：网络超时、5xx 服务端错误、429 限流、连接重置——这些是临时性故障，退避后可能成功。不可重试：业务校验失败、参数错误、权限不足、4xx 客户端错误——重试也不会成功，应该直接失败提示用户。用户主动取消（AbortError）不重试。
+</details>
+
+---
+
+## 79.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 状态迁移 | 直接改 `status` 字段，出现 `done → running` 之类的非法迁移 | 所有状态变更走 `transition(to)` + `canTransition` 守卫，终态用空迁移表封死 |
+| 副作用工具 | 发邮件/下单等工具自动执行，模型误解后不可逆 | 有副作用工具必须走 `awaiting_confirm`，等用户确认后才继续 |
+| 进度条 | 用"当前步骤/总步骤"算整体进度，运行中步骤卡住不动 | 运行中步骤按其 `progress` 折算进整体进度，长步骤拆子里程碑上报 |
+| 重试副作用 | 重试时不带幂等键，导致重复发邮件/重复扣款 | 重试请求带 `taskId:stepId:attempt` 幂等键，服务端按此去重 |
+| 错误分类 | 所有错误都重试，业务校验错误无限重试浪费资源 | 区分可重试（网络/限流/5xx）与不可重试（校验/权限/4xx），不可重试直接失败 |
+| 退避风暴 | 固定间隔重试，大量任务同时重试压垮服务端 | 指数退避 + 随机 jitter + 最大延迟封顶 |
+| 日志泄露 | 工具入参/结果原样展示，泄露手机号/API Key | 展示前脱敏（呼应 [47 册](./47-secrets-management.md)），大结果截断 + 详情页查看 |
+| 长任务阻塞 | 用普通 HTTP 请求等长任务响应，超时或占满连接池 | 异步提交返回 `taskId`，用 SSE/WebSocket 推送进度，前端订阅事件更新状态 |
+| 断线丢进度 | SSE 断线重连后从头推，或进度丢失 | 事件带序号 `seq`，重连带 `Last-Event-ID` 续推，任务状态存服务端可恢复 |
+
+---
+
+## 79.8 面试问答
+
+> 分级：L1 基础概念 / L2 原理理解 / L3 综合应用。每题给出回答框架、评分要点、加分项。
+
+<details>
+<summary><b>【L2】请设计一个 AI Agent 任务执行的前端状态机，说清楚有哪些状态、迁移规则、为什么这样设计？</b></summary>
+
+**回答框架**：先列状态（draft/thinking/running/awaiting_confirm/failed/cancelled/done），再给迁移规则表，最后解释三个关键设计决策：① 为什么 `thinking` 和 `running` 要分开（前者无副作用可取消，后者有副作用需确认）；② 为什么要有 `awaiting_confirm`（有副作用工具的安全闸门）；③ 为什么终态用空迁移表封死（防止非法迁移）。
+
+**评分要点**：状态覆盖完整（7 个）；迁移规则正确（done/cancelled 不可迁出）；能说出 awaiting_confirm 的存在意义；提到状态机守卫（canTransition）。
+
+**加分项**：提到状态与审计双写（每次迁移留痕）；提到乐观更新 + 失败回滚；能结合实际产品（如发邮件工具必须 awaiting_confirm）举例。
+</details>
+
+<details>
+<summary><b>【L3】用户反馈"Agent 任务进度条卡住不动"，你怎么排查和优化？</b></summary>
+
+**回答框架**：分三步——① 定位：是进度条计算逻辑的问题（运行中步骤没上报 progress）还是后端没推事件？② 计算层：检查整体进度公式是否把运行中步骤的 progress 折算进去了，长步骤是否拆了子里程碑；③ 推送层：检查 SSE 连接是否活着、事件是否带 seq、是否有丢包。
+
+**评分要点**：能区分"前端计算问题"和"后端推送问题"；知道运行中步骤要按 progress 折算而非按步骤数；能说出长步骤拆子里程碑的方案；提到 SSE 心跳和断线重连。
+
+**加分项**：提到进度与 ETA 分离；提到降级方案（SSE 不可用时轮询全量状态）；能给出具体的监控指标（推送延迟、丢包率）。
+</details>
+
+<details>
+<summary><b>【L2】Agent 任务失败后重试，怎么避免"重试 = 重复副作用"？</b></summary>
+
+**回答框架**：核心是幂等。① 错误分类：网络/5xx/限流可重试，业务校验/4xx 不可重试；② 幂等键：`taskId:stepId:attempt`，服务端按此去重；③ 指数退避 + jitter 防止惊群；④ 超过 maxRetries 后放弃并提示用户。
+
+**评分要点**：提到幂等键及其设计；区分可重试与不可重试错误；提到退避策略。
+
+**加分项**：提到失败可恢复到指定步骤（步骤可重入）；提到用户取消（AbortError）不重试；能举出发邮件/扣款的实际例子。
+</details>
+
+<details>
+<summary><b>【L3】一个 Agent 任务要跑 3 分钟，涉及 5 个步骤、调用 3 个外部工具，前端怎么设计交互让用户不焦虑？</b></summary>
+
+**回答框架**：① 异步提交拿 taskId，不等响应；② SSE 推送：步骤启动/进度/工具调用/完成事件实时更新；③ 界面三层信息：当前步骤名 + 进度条（步骤级 + 整体）+ 执行日志时间线；④ thinking 态展示规划骨架，running 态展示工具调用参数和结果；⑤ 长步骤拆子里程碑，ETA 估算剩余时间；⑥ 支持取消、失败重试、结果确认。
+
+**评分要点**：异步 + SSE 架构正确；界面信息分层（当前步骤/进度/日志）；提到 thinking 规划骨架；提到取消和重试。
+
+**加分项**：提到 ETA 用历史同类任务估算；提到刷新页面后用 taskId 恢复；提到执行日志可折叠、敏感字段脱敏。
+</details>
+
+---
+
+## 79.9 代码审查清单
+
+| 审查项 | 关注点 | 常见问题 | 建议 |
+| --- | --- | --- | --- |
+| 状态迁移 | 是否所有状态变更都走守卫函数 | 代码里直接 `task.status = 'done'` 绕过守卫 | 统一走 `transition(to)` + `canTransition` 检查 |
+| 终态保护 | done/cancelled 是否被封死 | 终态后还能迁出导致数据不一致 | 终态迁移表设为空数组 |
+| 副作用确认 | 有副作用工具是否走 awaiting_confirm | 发邮件/下单工具自动执行 | 副作用工具必须挂起等待用户确认 |
+| 进度计算 | 运行中步骤是否折算进整体进度 | 整体进度 = 完成步骤数/总步骤数，运行中步骤不动 | 运行中步骤按 progress 折算 |
+| 重试幂等 | 重试请求是否带幂等键 | 重试导致重复发邮件/扣款 | 带 `taskId:stepId:attempt` 幂等键 |
+| 错误分类 | 是否区分可重试/不可重试 | 所有错误都重试，业务错误无限循环 | 可重试（网络/5xx）重试，不可重试（校验/4xx）直接失败 |
+| 退避策略 | 是否指数退避 + jitter | 固定间隔重试导致惊群 | 指数退避 + 随机 jitter + 上限封顶 |
+| 日志脱敏 | 工具入参/结果是否脱敏展示 | 手机号/API Key 原样展示 | 展示前脱敏，大结果截断 |
+| 长任务推送 | 是否用 SSE/WebSocket 而非同步等待 | 普通 HTTP 等 3 分钟超时 | 异步提交 taskId + SSE 推送进度 |
+| 断线恢复 | 是否支持断线续推和刷新恢复 | SSE 断线后进度丢失 | 事件带 seq，重连带 Last-Event-ID，状态存服务端 |

@@ -1,0 +1,221 @@
+# 第九十七部分 · IoT 时序数据可视化（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/97-iot-time-series
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九十七部分 · IoT 时序数据可视化
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第九十六部分 · Docker 与 Linux 基础](./96-docker-linux.md)｜关联章节：[第五十八部分 · 可视化实战](./58-visualization-practice.md) · [第九十二部分 · 3D 与数字孪生可视化](./92-3d-digital-twin.md) · [第八十六部分 · Recharts 轻量化可视化](./86-recharts-visualization.md)
+
+> 💡 **本章特色**：智慧能源/数字孪生 JD 要求"IoT 传感器数据实时接入、时序数据可视化、告警阈值、设备监控大屏"。IoT 数据有三个特点：**高频**（秒级甚至毫秒级上报）、**海量**（百万级数据点）、**实时**（需要毫秒级刷新）。直接把所有点画到图表上会卡死。本章讲清五件事：**时序数据模型**（timestamp + metric + tags）、**降采样算法**（平均聚合 + LTTB 形状保持）、**滚动窗口告警**（防抖）、**实时缓冲与渲染**、**多设备时间对齐**。配套示例 [97-01-iot-time-series.ts](./examples/97-01-iot-time-series.ts) 跑通写入、降采样、告警、缓冲、对齐。
+
+## 本部分内容
+
+- [97.1 时序数据模型与存储选型](#_97-1-时序数据模型与存储选型)
+- [97.2 降采样：平均聚合与 LTTB](#_97-2-降采样-平均聚合与-lttb)
+- [97.3 滚动窗口告警与防抖](#_97-3-滚动窗口告警与防抖)
+- [97.4 实时数据缓冲与渲染优化](#_97-4-实时数据缓冲与渲染优化)
+- [97.5 多设备数据对齐与监控大屏](#_97-5-多设备数据对齐与监控大屏)
+- [97.6 自测题](#_97-6-自测题)
+- [97.7 本章避坑清单](#_97-7-本章避坑清单)
+
+---
+
+## 97.1 时序数据模型与存储选型
+
+### 概念解析
+
+时序数据（Time Series）= **时间戳 + 度量值 + 标签维度**。
+
+```
+temperature,device=sensor-001,location=机房A value=22.5 1699000000000
+└─ metric ─┘ └──────── tags ────────┘ └─ value ─┘ └ timestamp ─┘
+```
+
+**存储选型**：
+
+| 数据库 | 特点 | 适用场景 |
+|---|---|---|
+| InfluxDB | 专用时序，Flux/InfluxQL，压缩率高 | 中小规模 IoT |
+| TDengine | 国产，超级表，写入性能极强 | 大规模设备监控 |
+| TimescaleDB | PostgreSQL 扩展，SQL 友好 | 已有 PG 技术栈 |
+| ClickHouse | 列存，分析查询极快 | 海量数据分析 |
+
+### 完整代码示例
+
+```ts
+// 文件: examples/97-01-iot-time-series.ts（节选：时序模型）
+interface TimeSeries {
+  metric: string;                              // 指标名
+  tags: Record<string, string>;               // 维度：设备/位置
+  points: { timestamp: number; value: number }[];
+}
+```
+
+> 运行方式：`npx tsx examples/97-01-iot-time-series.ts`
+
+### 应用实践
+
+- **数据接入**：设备 → MQTT Broker → 时序数据库；前端通过 WebSocket / SSE 接收实时推送
+- **查询模式**：按时间范围 + tags 过滤 + 聚合（`GROUP BY time(1m)`）
+- **保留策略**：高频原始数据只存 7 天，降采样后的分钟级数据存 1 年，小时级存永久
+- **前端查询**：不要一次拉全量，按可视时间范围 + 像素宽度请求对应精度的数据
+
+## 97.2 降采样：平均聚合与 LTTB
+
+### 概念解析
+
+屏幕最多显示约 2000 个像素宽的折线，画 100 万个点毫无意义且卡死。降采样把海量点压缩到可视范围。
+
+两种策略：
+- **平均聚合**：按时间窗口取平均值，适合看趋势，但会丢失峰值
+- **LTTB**（Largest Triangle Three Buckets）：按面积最大选点，**保留折线形状**（峰值/谷值不丢）
+
+### 完整代码示例
+
+```ts
+// 文件: examples/97-01-iot-time-series.ts（节选：两种降采样）
+// 平均聚合：1s → 1min
+function avgAggregate(points, windowMs) { /* 按 bucket 求平均 */ }
+
+// LTTB：保留形状的下采样
+function lttbDownsample(points, threshold) {
+  // 把数据分成 threshold-2 个桶，每桶选与前后点构成三角形面积最大的点
+}
+```
+
+### 应用实践
+
+- **选哪种**：看趋势用平均聚合，看异常峰值用 LTTB
+- **服务端降采样**：数据库层用 `GROUP BY time()` 聚合，减少网络传输
+- **客户端降采样**：服务端返回的数据仍超过可视点数时，用 LTTB 再降一次
+- **实时滚动**：新数据追加到末尾，超过窗口时丢弃最旧点（环形缓冲区）
+
+## 97.3 滚动窗口告警与防抖
+
+### 概念解析
+
+单点超阈值往往是毛刺（传感器瞬时波动），直接告警会误报。**连续 N 个点超阈值才告警**是工业界标准做法。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/97-01-iot-time-series.ts（节选：滚动窗口告警）
+function checkAlert(points: DataPoint[], rule: AlertRule): boolean {
+  let count = 0;
+  for (const p of points) {
+    const breached = rule.direction === "above"
+      ? p.value > rule.threshold
+      : p.value < rule.threshold;
+    count = breached ? count + 1 : 0;  // 不满足则重置计数
+    if (count >= rule.consecutivePoints) return true;
+  }
+  return false;
+}
+```
+
+### 应用实践
+
+- **告警规则**：阈值 + 方向（above/below）+ 连续点数 + 持续时间
+- **分级告警**：warning（>80）/ critical（>95）/ fatal（>100），不同级别不同通知
+- **抑制与去重**：同一告警在恢复前不重复发送，避免告警风暴
+- **告警恢复**：连续 N 点回到阈值以下才清除告警状态
+
+## 97.4 实时数据缓冲与渲染优化
+
+### 概念解析
+
+设备每秒上报多个点，但浏览器 60fps 也只需每 16ms 刷新一次。**高频数据先缓冲，定时合并 flush**，大幅减少渲染次数。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/97-01-iot-time-series.ts（节选：实时缓冲）
+class RealtimeBuffer {
+  private buffer: DataPoint[] = [];
+  push(ts, value) {
+    this.buffer.push({ timestamp: ts, value });
+    if (ts - this.lastFlush >= this.intervalMs) this.flush(ts);
+  }
+}
+```
+
+### 应用实践
+
+- **flush 间隔**：500ms~1s，平衡实时性与性能
+- **画布渲染**：用 Canvas 而非 SVG，百万级点 SVG 会爆炸
+- **分片绘制**：先画背景网格，再画数据线，最后画高亮标记
+- **虚拟视口**：只渲染可视范围内的数据点，缩放时按比例降采样
+- **WebWorker**：降采样计算放 Worker，不阻塞主线程
+
+## 97.5 多设备数据对齐与监控大屏
+
+### 概念解析
+
+多个设备上报时间不一致（有的 1s 一次、有的 5s 一次），画在同一张图上需要**对齐到统一时间网格**。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/97-01-iot-time-series.ts（节选：时间对齐）
+function alignToGrid(series, gridMs, start, end): DataPoint[] {
+  for (let t = start; t <= end; t += gridMs) {
+    // 找距离网格点最近的实际数据点（最近邻或线性插值）
+    result.push({ timestamp: t, value: nearest.value });
+  }
+}
+```
+
+### 应用实践
+
+- **对齐方法**：最近邻（简单）、线性插值（平滑）、前向填充（适合状态量）
+- **大屏布局**：顶部 KPI 卡片（设备总数/在线数/告警数）、中部趋势图、底部设备列表/地图
+- **数据刷新策略**：
+  - 实时指标（电流/温度）：WebSocket 推送，1s 刷新
+  - 统计指标（今日发电量）：定时拉取，1min 刷新
+  - 拓扑/设备状态：事件驱动，状态变化时推送
+- **颜色语义**：正常（绿）、预警（黄）、告警（红）、离线（灰），全局统一
+
+## 97.6 自测题
+
+<details>
+<summary>1. 时序数据由哪几部分组成？为什么 IoT 数据需要专门的时序数据库？</summary>
+
+由 **时间戳 + 度量值 + 标签维度**组成。时序数据库针对时间范围查询、高并发写入、数据压缩、自动降采样做了优化，关系型数据库在百万级时序点的写入和查询上性能不足。
+</details>
+
+<details>
+<summary>2. 平均聚合和 LTTB 两种降采样的区别是什么？分别适合什么场景？</summary>
+
+平均聚合按时间窗口取均值，计算简单、适合看整体趋势，但会丢失峰值。LTTB 选与前后点构成三角形面积最大的点，能保留折线的峰值/谷值形状，适合需要看异常波动的场景。
+</details>
+
+<details>
+<summary>3. 为什么告警要用"连续 N 点超阈值"而不是"单点超阈值"？</summary>
+
+传感器数据常有瞬时毛刺（单点波动），单点告警会大量误报。连续 N 点（或持续 N 秒）超阈值才告警，能过滤毛刺、提高告警准确性，这是工业监控的标准做法。
+</details>
+
+<details>
+<summary>4. 实时数据为什么要做缓冲 flush？flush 间隔怎么选？</summary>
+
+设备上报频率（秒级甚至毫秒级）远高于浏览器渲染帧率（60fps=16ms），每个点都触发渲染会卡死。缓冲后按固定间隔（500ms~1s）合并 flush，既保证实时性又控制渲染次数。间隔根据业务对延迟的容忍度选。
+</details>
+
+<details>
+<summary>5. 多设备数据时间不一致时如何对齐？对齐方法有哪些？</summary>
+
+把所有设备的数据对齐到统一时间网格（如每 10s 一个点）。方法：最近邻（取网格点最近的实际点）、线性插值（两点间插值）、前向填充（用上一个值，适合状态量）。对齐后多设备才能在同一图表上对比。
+</details>
+
+## 97.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+|---|---|---|
+| 渲染性能 | 百万点直接画卡死 | 必须降采样（服务端聚合 + 客户端 LTTB），用 Canvas 不用 SVG |
+| 峰值丢失 | 平均聚合后看不到异常 | 需要看波动的图用 LTTB，趋势图才用平均聚合 |
+| 告警误报 | 单点毛刺触发告警 | 连续 N 点超阈值才告警，加持续时间条件 |
+| 告警风暴 | 故障时刷屏 | 告警抑制（恢复前不重复发）+ 分级（warning/critical） |
+| 实时卡顿 | 每个点都 setState 重渲染 | 缓冲定时 flush，用 Canvas 直接绘制，不走 React diff |
+| 时间不对齐 | 多设备曲线错位 | 对齐到统一时间网格，用最近邻或线性插值 |
+| 内存泄漏 | 实时数据无限增长 | 环形缓冲区，超过时间窗口丢弃旧数据 |
+| 时区问题 | 时间显示差 8 小时 | 统一用 UTC 时间戳存储，前端按用户时区格式化显示 |

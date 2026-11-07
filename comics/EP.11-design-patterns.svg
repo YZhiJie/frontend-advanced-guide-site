@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#101a33"/>
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#22d3ee" opacity="0.04"/>
+  <polygon points="150,0 220,0 1040,840 970,840" fill="#a78bfa" opacity="0.03"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#7C3AED"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#ffffff">EP.11</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad)">设计模式实战</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad)" opacity="0.6"/>
+
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#22d3ee" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：模块互相炸</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#1d4ed8"/>
+      <path d="M-5,18 L5,18 L3.5,27 L0,29 L-3.5,27 Z" fill="#f97316"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 L-11,-13 L-6,-4 L0,-14 L6,-4 L11,-13 L16,-2 Q0,-11 -16,-2 Z" fill="#f97316"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="82" width="330" height="52" rx="10" fill="#f8fafc"/>
+    <text x="102" y="104" font-size="15" fill="#0b1220">购物车改一行，订单页</text>
+    <text x="102" y="126" font-size="15" fill="#0b1220">和库存页跟着一起炸。</text>
+    <rect x="24" y="152" width="524" height="94" rx="8" fill="#0a0f1c" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// 模块 A 直接调模块 B</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">cartModule.refresh(orderPage)</text>
+    <text x="38" y="210" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// 依赖像蜘蛛网，牵一发动全身</text>
+    <text x="38" y="228" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// 新人不敢改，改了必炸</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#22d3ee"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">模块强耦合，调用链绕一圈，</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">谁也离不开谁。</text>
+  </g>
+
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#a78bfa" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：发布订阅</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="82" width="340" height="52" rx="10" fill="#f8fafc"/>
+    <text x="102" y="104" font-size="15" fill="#0b1220">发布订阅把"谁在听"</text>
+    <text x="102" y="126" font-size="15" fill="#0b1220">和"谁在说"彻底拆开。</text>
+    <rect x="24" y="152" width="524" height="94" rx="8" fill="#0a0f1c" stroke="#a78bfa" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">bus.on('cart:changed', e =&gt; ...)</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">bus.emit('cart:changed', cart)</text>
+    <text x="38" y="210" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">// 发布者不认识订阅者</text>
+    <text x="38" y="228" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 观察者 vs 发布订阅：有无中介</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#a78bfa"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">EventBus 就是那个中介，</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">通信双方只认识事件名。</text>
+  </g>
+
+  <g transform="translate(20,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#f472b6" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：状态机</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#7C3AED"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-13 -16,-13 q-13,0 -16,13 z" fill="#22d3ee"/>
+      <circle cx="15" cy="4" r="6.5" fill="#22d3ee"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="82" width="330" height="52" rx="10" fill="#f8fafc"/>
+    <text x="102" y="104" font-size="15" fill="#0b1220">布尔标志位会组合爆炸，</text>
+    <text x="102" y="126" font-size="15" fill="#0b1220">状态机只留合法迁移。</text>
+    <rect x="24" y="152" width="524" height="110" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="174" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// if (loading &amp;&amp; !error &amp;&amp; hasMore)</text>
+    <text x="38" y="192" font-size="12.5" fill="#34d399" font-family="'SF Mono',Consolas,monospace">// idle | loading | success | error</text>
+    <text x="38" y="210" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">machine.transition(state, event)</text>
+    <text x="38" y="228" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">// 三个布尔 = 8 种组合</text>
+    <text x="38" y="246" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 非法迁移直接报错</text>
+    <rect x="24" y="278" width="524" height="52" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="278" width="4" height="52" rx="2" fill="#f472b6"/>
+    <text x="40" y="300" font-size="13.5" fill="#e2e8f0">状态机把所有非法组合</text>
+    <text x="40" y="320" font-size="13.5" fill="#94a3b8">拒之门外，不可能的状态不存在。</text>
+  </g>
+
+  <g transform="translate(608,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#f97316" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f97316"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：命令模式撤销</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="82" width="320" height="52" rx="10" fill="#f8fafc"/>
+    <text x="102" y="104" font-size="15" fill="#0b1220">命令模式让每一步操作</text>
+    <text x="102" y="126" font-size="15" fill="#0b1220">都变成可撤销的对象。</text>
+    <rect x="24" y="154" width="96" height="26" rx="13" fill="#f97316"/>
+    <text x="72" y="172" text-anchor="middle" font-size="13" font-weight="bold" fill="#0b1220">⚠ 坑点</text>
+    <rect x="32" y="200" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="209" font-size="14" fill="#e2e8f0">布尔标志位组合爆炸 → 状态机</text>
+    <rect x="32" y="228" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="237" font-size="14" fill="#e2e8f0">EventBus 事件多了难追踪</text>
+    <rect x="32" y="256" width="9" height="9" rx="2" fill="#f97316"/>
+    <text x="52" y="265" font-size="14" fill="#e2e8f0">别为模式而模式</text>
+    <rect x="24" y="290" width="524" height="50" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="290" width="4" height="50" rx="2" fill="#22d3ee"/>
+    <text x="40" y="311" font-size="13.5" font-weight="bold" fill="#22d3ee">码叔总结</text>
+    <text x="40" y="331" font-size="13.5" fill="#e2e8f0">模式是解决重复问题的套路，不是炫技。</text>
+  </g>
+
+  <text x="1180" y="832" text-anchor="end" font-size="11" fill="#475569">NEON INK · frontend-advanced-guide · EP.11</text>
+</svg>

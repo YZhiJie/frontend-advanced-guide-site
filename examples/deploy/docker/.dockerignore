@@ -1,0 +1,18 @@
+# 构建上下文白名单式排除：既减小上下文体积，也防止本地密钥进镜像
+.git
+.gitignore
+.github
+node_modules
+**/node_modules
+dist
+coverage
+.vitepress/dist
+*.log
+npm-debug.log*
+.DS_Store
+.env
+.env.*
+!.env.example
+docker-compose*.yml
+Dockerfile*
+.dockerignore

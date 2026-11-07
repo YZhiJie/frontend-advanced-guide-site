@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+# 多阶段构建：构建阶段装全量依赖并产出 dist/ 与 server/，运行阶段只带生产依赖
+# 适用于「一个镜像同时提供 BFF 接口与前端静态资源」的小型部署；
+# 前后端分离部署时用 Dockerfile.frontend + Dockerfile.bff 两个镜像分别交付
+
+ARG NODE_VERSION=22.12.0
+
+FROM node:${NODE_VERSION}-alpine AS build
+WORKDIR /app
+ENV CI=true
+
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate \
+    && pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm build
+
+FROM node:${NODE_VERSION}-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3000
+
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+# 运行阶段重新安装，只保留生产依赖；不要在阶段间拷 node_modules——
+# 那会把 devDependencies 和构建机平台的二进制一起带进镜像
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod && pnpm store prune
+
+COPY --from=build /app/server ./server
+COPY --from=build /app/dist ./dist
+
+# node 镜像内置 uid 1000 的 node 用户；非 root 运行是安全底线
+USER node
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# exec form：node 直接作为 PID 1，才能收到 SIGTERM 做优雅退出
+CMD ["node", "server/index.js"]

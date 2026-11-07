@@ -1,0 +1,232 @@
+# 第八十九部分 · RAG 知识库前端（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/89-rag-knowledge-base
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第八十九部分 · RAG 知识库前端
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第八十八部分 · UniApp 跨端开发](./88-uniapp-cross-platform.md)｜关联章节：[第十四部分 · 前端 AI 开发](./14-frontend-ai.md) · [第七十九部分 · AI Agent 执行编排](./79-agent-execution-orchestration.md) · [第三十三部分 · Zod 运行时校验](./33-zod.md)
+
+> 💡 **本章特色**：公募基金等 JD 明确要求"RAG 知识库前端：文档结构化、检索问答、智能推理、流式对话展示、文档溯源、权限页面"。RAG（Retrieval-Augmented Generation）的前端不是普通聊天框——它要展示**检索到了哪些文档、答案引用了哪些片段、用户能否溯源验证**。本章讲清四件事：**文档结构化与分块**、**检索结果排序与展示**、**流式对话与 Markdown 渲染**、**文档溯源与引用跳转**。配套示例 [89-01-rag-knowledge-base.ts](./examples/89-01-rag-knowledge-base.ts) 跑通分块、检索、流式输出、溯源。
+
+## 本部分内容
+
+- [89.1 RAG 前端的核心交互模型](#_89-1-rag-前端的核心交互模型)
+- [89.2 文档结构化与分块](#_89-2-文档结构化与分块)
+- [89.3 检索结果展示与排序](#_89-3-检索结果展示与排序)
+- [89.4 流式对话与 Markdown 增量渲染](#_89-4-流式对话与-markdown-增量渲染)
+- [89.5 文档溯源与引用跳转](#_89-5-文档溯源与引用跳转)
+- [89.6 自测题](#_89-6-自测题)
+- [89.7 本章避坑清单](#_89-7-本章避坑清单)
+
+---
+
+## 89.1 RAG 前端的核心交互模型
+
+### 概念解析
+
+RAG = 检索增强生成。用户提问 → 系统从知识库检索相关文档片段 → 把片段作为上下文喂给大模型 → 模型基于检索结果生成回答。
+
+前端的核心交互和普通聊天框的区别：
+
+| 维度 | 普通聊天 | RAG 问答 |
+| --- | --- | --- |
+| 输入 | 纯文本 | 纯文本 + 可选文档范围过滤 |
+| 输出 | 模型回答 | 回答 + **引用来源** + **可溯源文档** |
+| 信任 | 靠模型能力 | 靠检索到的文档支撑 |
+| 反馈 | 点赞/点踩 | 引用是否有用、文档是否准确 |
+
+前端要回答用户三个问题：① **答案从哪来？**（溯源）② **检索到了什么？**（检索结果面板）③ **我能验证吗？**（点击引用跳转到原文片段）。
+
+---
+
+## 89.2 文档结构化与分块
+
+### 概念解析
+
+文档入库前要做结构化处理：
+
+1. **解析**：PDF/Word/Markdown/HTML 提取纯文本和结构（标题层级、表格、列表）；
+2. **分块**：按固定 token 数（如 500）切分，带 **overlap 重叠窗口**（如 100），避免块边界语义被截断；
+3. **向量化**：每个 chunk 生成 embedding 存入向量数据库；
+4. **元数据**：记录 docId、标题、块序号、页码、创建时间。
+
+前端在上传文档时要展示**结构化进度**（解析→分块→向量化→入库），让用户知道文档何时可用。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/89-01-rag-knowledge-base.ts（节选：分块）
+export function chunkDocument(
+  docId: string, title: string, content: string,
+  chunkSize = 200, overlap = 50,
+): DocChunk[] {
+  const chunks: DocChunk[] = [];
+  let start = 0, index = 0;
+  while (start < content.length) {
+    const end = Math.min(start + chunkSize, content.length);
+    chunks.push({
+      id: `${docId}-${index}`, docId, docTitle: title,
+      chunkIndex: index, content: content.slice(start, end),
+      embedding: simpleEmbedding(content.slice(start, end)),
+    });
+    start += chunkSize - overlap;
+    index++;
+  }
+  return chunks;
+}
+```
+
+> 运行方式：`npx tsx examples/89-01-rag-knowledge-base.ts`
+
+### 应用实践
+
+- **分块要保留结构信息**：按标题层级分块比按固定字符分块效果好，一个 chunk 应该包含完整的语义单元；
+- **overlap 大小 = chunkSize 的 10%~20%**：太小会丢上下文，太大会浪费存储；
+- **前端展示分块进度**：大文档（几百页 PDF）分块+向量化要几十秒，要显示"正在解析第 X 页 / 正在生成向量"，不能让用户傻等。
+
+---
+
+## 89.3 检索结果展示与排序
+
+### 概念解析
+
+用户提问后，系统检索出 Top-K 个相关文档块。前端要展示这些检索结果，通常有两种模式：
+
+1. **自动模式**：检索结果直接作为上下文给模型，用户只看最终回答 + 引用；
+2. **可干预模式**：先展示检索结果，用户可以勾选/排除某些文档，再生成回答。
+
+排序按**相似度得分**降序，得分高的排在前面。得分通常是向量余弦相似度。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/89-01-rag-knowledge-base.ts（节选：检索排序）
+export function searchChunks(query: string, chunks: DocChunk[], topK = 3): SearchResult[] {
+  const queryVec = simpleEmbedding(query);
+  return chunks
+    .map((c) => ({ chunk: c, score: cosineSimilarity(queryVec, c.embedding) }))
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
+}
+```
+
+### 应用实践
+
+- **展示文档标题 + 匹配片段**：不要只显示标题，要显示匹配的内容片段（高亮匹配关键词），让用户判断是否相关；
+- **得分可视化**：用进度条或百分比展示相似度，让用户知道检索的可信度；
+- **支持用户调整检索范围**：提供"只搜某文档/某目录"的过滤，用户可能知道答案在某个文档里。
+
+---
+
+## 89.4 流式对话与 Markdown 增量渲染
+
+### 概念解析
+
+RAG 回答通常是流式输出（SSE 推送 token）。前端要做到：
+
+1. **逐字追加**：收到一个 token 就追加到回答末尾，不要等全部返回才显示；
+2. **Markdown 增量渲染**：回答是 Markdown 格式（标题、列表、代码块、表格），要边收边渲染，但要处理**不完整的 Markdown**（比如代码块还没收尾）；
+3. **引用标记**：回答中的 `[1]`、`[2]` 是引用标记，要渲染成可点击的上标，点击跳转到对应的溯源文档。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/89-01-rag-knowledge-base.ts（节选：流式生成器）
+export function* streamAnswer(query: string, results: SearchResult[]): Generator<StreamChunk> {
+  const cites = results.map((r) => r.chunk.id);
+  const answer = `根据检索到的 ${results.length} 篇文档...`;
+  for (let i = 0; i < answer.length; i += 3) {
+    yield { delta: answer.slice(i, i + 3), citations: cites };
+  }
+}
+```
+
+### 应用实践
+
+- **Markdown 渲染要防抖**：每个 token 都重新渲染 Markdown 会卡顿，用 requestAnimationFrame 合并渲染，或累积一定字符再渲染；
+- **处理不完整 Markdown**：流式过程中代码块可能没闭合（只有 ` ``` ` 没有结尾），渲染前检查并补全闭合标记；
+- **引用标记与溯源联动**：点击 `[1]` 时，右侧溯源面板滚动到对应文档块并高亮。
+
+---
+
+## 89.5 文档溯源与引用跳转
+
+### 概念解析
+
+溯源是 RAG 产品的**信任基石**。用户需要知道"这个答案来自哪篇文档的哪个片段"。
+
+溯源面板展示：
+
+- **引用列表**：答案引用了哪些文档块，按相似度排序；
+- **文档标题 + 片段**：每篇文档的标题和匹配片段（高亮匹配词）；
+- **跳转原文**：点击跳转到文档详情页，定位到该 chunk 并高亮；
+- **反馈**：用户可以标记"引用有用/无用"，用于优化检索。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/89-01-rag-knowledge-base.ts（节选：溯源节点）
+export function buildCitations(results: SearchResult[]): CitationNode[] {
+  const map = new Map<string, CitationNode>();
+  for (const r of results) {
+    if (!map.has(r.chunk.docId) || map.get(r.chunk.docId)!.score < r.score) {
+      map.set(r.chunk.docId, {
+        chunkId: r.chunk.id, docTitle: r.chunk.docTitle,
+        snippet: r.chunk.content.slice(0, 50) + "...", score: r.score,
+      });
+    }
+  }
+  return [...map.values()].sort((a, b) => b.score - a.score);
+}
+```
+
+### 应用实践
+
+- **溯源面板和对话并排**：左对话右溯源，用户看回答时能同时看到来源；
+- **引用编号要稳定**：答案中的 `[1]` 对应溯源列表第 1 条，不能因为排序变化导致编号错乱；
+- **溯源要支持反馈**：用户点"引用无用"时，记录该 query-chunk 对的负反馈，用于后续优化检索排序。
+
+---
+
+## 89.6 自测题
+
+<details>
+<summary><b>1. 【基础】RAG 问答和普通聊天的前端交互有什么区别？</b></summary>
+
+普通聊天只展示模型回答；RAG 问答还要展示检索到的文档、答案的引用来源、支持溯源跳转。RAG 的核心是建立用户对答案的信任——让用户知道答案从哪来、能否验证。
+</details>
+
+<details>
+<summary><b>2. 【进阶】文档分块为什么要有 overlap 重叠窗口？</b></summary>
+
+固定大小分块会在块边界截断语义——一句话可能被切成两半，前半块和后半块都不完整。overlap 让相邻块有重叠区域，保证边界处的语义在至少一个块里完整出现。overlap 通常取 chunkSize 的 10%~20%。
+</details>
+
+<details>
+<summary><b>3. 【进阶】流式 Markdown 渲染有什么坑？</b></summary>
+
+两个坑：① 每个 token 重新渲染 Markdown 会卡顿，要用 rAF 合并渲染；② 流式过程中 Markdown 可能不完整（代码块没闭合、表格没画完），渲染前要检查并补全闭合标记，否则页面会崩。
+</details>
+
+<details>
+<summary><b>4. 【挑战】用户质疑"答案不对"，前端怎么让用户验证？</b></summary>
+
+通过溯源机制：① 答案中的每个引用 `[n]` 可点击；② 点击跳转到溯源面板对应的文档块，高亮匹配片段；③ 溯源面板展示文档标题、片段、相似度得分；④ 支持跳转到原文定位到该 chunk。用户可以直接比对答案和原文，判断是否准确。
+</details>
+
+---
+
+## 89.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 分块无 overlap | 块边界语义截断，检索不到 | 分块带 10%~20% overlap |
+| 大文档无进度 | 分块向量化几十秒用户傻等 | 显示解析/分块/向量化进度 |
+| 检索只给答案 | 用户不知道答案从哪来 | 展示检索结果 + 溯源面板 |
+| 流式渲染卡顿 | 每个 token 重渲染 Markdown | rAF 合并渲染，累积字符再渲染 |
+| Markdown 不完整 | 代码块没闭合导致页面崩 | 渲染前检查并补全闭合标记 |
+| 引用编号错乱 | 排序变化导致 `[1]` 对应错文档 | 引用编号按出现顺序固定，不随重排序变化 |
+| 溯源无法跳转 | 只能看片段不能看全文 | 支持跳转到原文定位到 chunk |
+| 无反馈机制 | 检索质量无法优化 | 引用支持"有用/无用"反馈，用于排序优化 |
+| 权限缺失 | 用户能搜无权访问的文档 | 检索前过滤用户权限范围内的文档 |

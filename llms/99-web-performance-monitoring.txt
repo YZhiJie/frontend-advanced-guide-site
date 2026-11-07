@@ -1,0 +1,231 @@
+# 第九十九部分 · Web 性能监控体系（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/99-web-performance-monitoring
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九十九部分 · Web 性能监控体系
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第九十八部分 · 微前端架构](./98-micro-frontend.md)｜关联章节：[第五十九部分 · 前端监控与可观测性](./59-monitoring-observability.md) · [第九十五部分 · Next.js Google SEO](./95-nextjs-google-seo.md)
+
+> 💡 **本章特色**：B 端 JD 要求"前端性能监控、Sentry 接入、错误上报、APM、Web Vitals"。监控体系是体验优化的数据基础——没有度量就没有优化。本章讲清五件事：**Web Vitals 采集**（LCP/CLS/INP）、**错误捕获**（onerror + unhandledrejection）、**APM 上报器**（采样 + 批量 + 节流）、**错误指纹聚合**、**页面健康评分**。配套示例 [99-01-web-performance-monitoring.ts](./examples/99-01-web-performance-monitoring.ts) 跑通 Vitals 评分、错误分类、指纹聚合、APM 上报、健康评分。
+
+## 本部分内容
+
+- [99.1 Web Vitals 指标与采集](#_99-1-web-vitals-指标与采集)
+- [99.2 错误捕获：onerror 与 unhandledrejection](#_99-2-错误捕获-onerror-与-unhandledrejection)
+- [99.3 APM 上报器：采样、批量、节流](#_99-3-apm-上报器-采样、批量、节流)
+- [99.4 错误指纹与聚合去重](#_99-4-错误指纹与聚合去重)
+- [99.5 看板、告警与健康评分](#_99-5-看板、告警与健康评分)
+- [99.6 自测题](#_99-6-自测题)
+- [99.7 本章避坑清单](#_99-7-本章避坑清单)
+
+---
+
+## 99.1 Web Vitals 指标与采集
+
+### 概念解析
+
+Core Web Vitals 是 Google 定义的用户体验核心指标，直接影响搜索排名：
+
+| 指标 | 含义 | Good | 测量方式 |
+|---|---|---|---|
+| **LCP** | 最大内容绘制 | < 2.5s | `PerformanceObserver` 监听 `largest-contentful-paint` |
+| **CLS** | 累计布局偏移 | < 0.1 | 监听 `layout-shift` 累加 |
+| **INP** | 交互到下一帧 | < 200ms | 监听 `event` 取延迟最大值 |
+
+```js
+// 真实采集代码
+const observer = new PerformanceObserver((list) => {
+  for (const entry of list.getEntries()) {
+    if (entry.entryType === "largest-contentful-paint") {
+      console.log("LCP:", entry.startTime);
+    }
+  }
+});
+observer.observe({ type: "largest-contentful-paint", buffered: true });
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/99-01-web-performance-monitoring.ts（节选：三级评分）
+function vitalsRating(v: keyof Vitals, value: number) {
+  const thresholds = { lcp: [2500, 4000], cls: [0.1, 0.25], inp: [200, 500] };
+  const [good, poor] = thresholds[v];
+  return value < good ? "good" : value < poor ? "needs-improvement" : "poor";
+}
+```
+
+> 运行方式：`npx tsx examples/99-01-web-performance-monitoring.ts`
+
+### 应用实践
+
+- **采集库**：直接用 `web-vitals` npm 包，封装好 LCP/CLS/INP/FCP/TTFB 的采集
+- **上报时机**：页面 `visibilitychange` 为 `hidden` 时上报（用户离开页面前），保证数据完整
+- **采样**：高流量站点对 Vitals 采样（如 1%），错误全量上报
+- **维度**：上报时带 `url`、`userAgent`、`networkType`（4G/3G）、`deviceMemory`，便于切片分析
+
+## 99.2 错误捕获：onerror 与 unhandledrejection
+
+### 概念解析
+
+前端错误分三类，采集方式不同：
+
+1. **JS 运行时错误**：`window.onerror`（同步错误）+ `try/catch`（手动捕获）
+2. **Promise 未处理拒绝**：`window.addEventListener("unhandledrejection", ...)`
+3. **资源加载错误**：`img/script` 的 `onerror` 事件（捕获阶段，冒泡不到 window）
+
+```js
+window.onerror = (msg, src, lineno, colno, err) => {
+  report({ message: msg, source: `${src}:${lineno}:${colno}`, stack: err?.stack });
+  return true; // 阻止控制台输出
+};
+window.addEventListener("unhandledrejection", (e) => {
+  report({ message: `Promise: ${e.reason}`, stack: e.reason?.stack });
+});
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/99-01-web-performance-monitoring.ts（节选：错误分类）
+function captureScriptError(message, source, lineno) {
+  return { message, source: `${source}:${lineno}`, level: "error" };
+}
+function capturePromiseError(reason) {
+  return { message: `Unhandled Promise: ${reason.message}`, stack: reason.stack };
+}
+```
+
+### 应用实践
+
+- **资源错误**：在 `<img>`/`<script>` 上加 `onerror` 单独监听，或用捕获阶段 `window.addEventListener("error", handler, true)`
+- **React 错误**：用 Error Boundary 捕获组件渲染错误，否则白屏
+- **sourcemap**：生产环境上传 sourcemap 到监控平台，把压缩后的 stack 还原成源码行列
+- **脱敏**：上报前过滤用户隐私（手机号、身份证、token），避免合规风险
+
+## 99.3 APM 上报器：采样、批量、节流
+
+### 概念解析
+
+直接每个错误都发请求会造成**上报风暴**（高并发场景下把自己的服务器打挂）。APM 上报器要做三件事：
+- **采样**（sampleRate）：按概率上报，降低数据量
+- **批量**（batchSize）：攒够 N 条合并上报，减少请求数
+- **节流**（intervalMs）：定时 flush，保证数据不丢
+
+### 完整代码示例
+
+```ts
+// 文件: examples/99-01-web-performance-monitoring.ts（节选：上报器）
+class APMReporter {
+  report(err) {
+    if (Math.random() > this.config.sampleRate) return; // 采样
+    this.queue.push(err);
+    if (this.queue.length >= this.config.batchSize ||  // 批量
+        now - this.lastFlush >= this.config.intervalMs) { // 节流
+      this.flush();
+    }
+  }
+}
+```
+
+### 应用实践
+
+- **上报方式**：优先 `navigator.sendBeacon`（页面卸载时也能发），其次 `fetch` with `keepalive`
+- **重试**：网络失败时入 IndexedDB 队列，下次页面加载时重发
+- **采样策略**：错误全量上报（错误率低），Vitals/性能数据采样（量大）
+- **限流保护**：单页面最多上报 N 条，防止死循环错误刷屏
+
+## 99.4 错误指纹与聚合去重
+
+### 概念解析
+
+同一个错误可能触发成千上万次上报，直接存会爆炸。用**错误指纹**（fingerprint）把相同错误归并：取 `message + stack 首行` 做哈希，相同指纹的错误只更新计数，不重复存储。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/99-01-web-performance-monitoring.ts（节选：指纹）
+function errorFingerprint(err) {
+  const text = err.stack
+    ? err.stack.split("\n").slice(0, 2).join("\n")
+    : err.message;
+  return createHash("md5").update(text).digest("hex").slice(0, 8);
+}
+```
+
+### 应用实践
+
+- **聚合维度**：指纹 + 版本号 + 浏览器，同一指纹在不同版本可能是不同 bug
+- **趋势分析**：按指纹统计每日 occurrences，发现突增的错误
+- **自动关联**：相同指纹的错误自动关联到同一个 issue，减少人工去重
+- **release 跟踪**：每个版本标记已知错误，新版本是否引入新错误一目了然
+
+## 99.5 看板、告警与健康评分
+
+### 概念解析
+
+采集的数据要变成可操作的洞察：**看板**看趋势，**告警**抓异常，**评分**定优先级。
+
+健康评分把多个指标合成一个 0-100 的分数，便于跨页面/跨版本对比。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/99-01-web-performance-monitoring.ts（节选：健康分）
+function pageHealthScore(vitals, errorRate) {
+  const lcpScore = rating(vitals.lcp) === "good" ? 100 : ...;
+  const errScore = errorRate === 0 ? 100 : errorRate < 0.01 ? 70 : ...;
+  return (lcpScore + clsScore + inpScore + errScore) / 4;
+}
+```
+
+### 应用实践
+
+- **看板**：Grafana / Sentry Dashboard，看错误率趋势、Top 错误、慢页面 Top N
+- **告警规则**：错误率突增（环比 +50%）、LCP 超过 4s、JS error 数量超阈值 → 飞书/钉钉通知
+- **版本对比**：每次发版后对比新旧版本的错误率和 Vitals，发现回归立即回滚
+- **优先级**：按健康评分排页面优化顺序，低分页面优先处理
+
+## 99.6 自测题
+
+<details>
+<summary>1. Core Web Vitals 三个指标是什么？Good 阈值分别是多少？</summary>
+
+LCP（最大内容绘制）< 2.5s、CLS（累计布局偏移）< 0.1、INP（交互到下一帧）< 200ms。三项都 Good 才算整体 Good。
+</details>
+
+<details>
+<summary>2. 前端错误有哪三类？分别怎么捕获？</summary>
+
+JS 运行时错误（`window.onerror` 或 try/catch）、Promise 未处理拒绝（`unhandledrejection` 事件）、资源加载错误（`img/script` 的 `onerror`，需捕获阶段监听）。
+</details>
+
+<details>
+<summary>3. APM 上报为什么要做采样、批量、节流？</summary>
+
+防止上报风暴：采样降低数据量（高流量站 Vitals 采 1%），批量减少请求数（攒 N 条合并发），节流保证数据不丢（定时 flush）。三者平衡实时性和服务器压力。
+</details>
+
+<details>
+<summary>4. 错误指纹有什么用？怎么生成？</summary>
+
+把相同错误归并去重，避免同一错误存成千上万条。生成方式：取 `message + stack 首行` 做哈希（MD5/SHA），相同指纹的错误只更新计数。
+</details>
+
+<details>
+<summary>5. 上报数据时为什么要带维度信息（url/UA/网络）？页面健康评分怎么用？</summary>
+
+带维度是为了切片分析：发现某个浏览器版本 LCP 特别差、某个页面错误率高，才能定位问题。健康评分把 Vitals + 错误率合成 0-100 分，用于跨页面/跨版本对比，低分页面优先优化。
+</details>
+
+## 99.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+|---|---|---|
+| 上报风暴 | 高并发下把自己服务器打挂 | 采样 + 批量 + 限流，单页最大上报 N 条 |
+| 数据丢失 | 页面关闭时上报失败 | 用 `navigator.sendBeacon` 或 `fetch keepalive` |
+| stack 看不懂 | 压缩后堆栈是混淆的 | 生产上传 sourcemap，还原源码行列 |
+| 隐私泄露 | 上报里带用户手机号/token | 上报前正则脱敏，过滤敏感字段 |
+| 资源错误漏报 | img 加载失败没捕获 | 用捕获阶段 `window.addEventListener("error", handler, true)` |
+| 告警噪音 | 告警天天发没人看 | 错误率环比突增才告警，加抑制期和分级 |
+| 采样偏差 | 采样后数据不具代表性 | 按用户 ID 哈希采样（同一用户始终采或不采），不要纯随机 |

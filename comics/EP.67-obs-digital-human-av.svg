@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#101a33"/></linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#22d3ee" opacity="0.04"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#7C3AED"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#fff">EP.67</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad)">数字人直播的嘴型密码</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad)" opacity="0.6"/>
+
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：声音和嘴型对不上</text>
+    <text x="28" y="130" font-size="14" fill="#94a3b8">数字人说话了，但嘴巴张合慢半拍，</text>
+    <text x="28" y="152" font-size="14" fill="#f97316">观众看着出戏，直播效果大打折扣。</text>
+    <rect x="24" y="175" width="524" height="94" rx="8" fill="#0a0f1c" stroke="#f97316" stroke-opacity="0.4"/>
+    <text x="38" y="198" font-size="13" fill="#fdba74" font-family="monospace">音频已播 "你好"，嘴还没动</text>
+    <text x="38" y="220" font-size="13" fill="#fdba74" font-family="monospace">嘴型和音频没对齐</text>
+    <text x="38" y="242" font-size="13" fill="#fdba74" font-family="monospace">→ 口型同步失败</text>
+    <rect x="24" y="295" width="524" height="44" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <text x="40" y="322" font-size="13.5" fill="#e2e8f0">核心问题：口型需要与音频精确时间对齐。</text>
+  </g>
+
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：TTS 音素时间轴</text>
+    <rect x="24" y="50" width="524" height="180" rx="8" fill="#0a0f1c" stroke="#a78bfa" stroke-opacity="0.3"/>
+    <text x="38" y="72" font-size="12.5" fill="#7dd3fc" font-family="monospace">文本 → TTS 音频 + 音素时间戳</text>
+    <text x="38" y="92" font-size="12.5" fill="#94a3b8">  TTS 返回每个音素的 start/end 时间</text>
+    <text x="38" y="112" font-size="12.5" fill="#7dd3fc" font-family="monospace">音素(Phoneme) → 口型(Viseme)</text>
+    <text x="38" y="132" font-size="12.5" fill="#94a3b8">  基础口型: A E I O U F M SIL</text>
+    <text x="38" y="152" font-size="12.5" fill="#94a3b8">  每个音素映射到一个口型</text>
+    <text x="38" y="172" font-size="12.5" fill="#f472b6" font-family="monospace">按时间轴切换口型 blendshape</text>
+    <text x="38" y="192" font-size="12.5" fill="#94a3b8">  mesh.morphTargetInfluences[i] = 0.8</text>
+    <text x="38" y="214" font-size="12.5" fill="#94a3b8">关键：TTS 必须返回带时间戳的音素</text>
+    <rect x="24" y="250" width="524" height="80" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <text x="40" y="274" font-size="13.5" fill="#e2e8f0">文本→音频→音素→口型→驱动，</text>
+    <text x="40" y="294" font-size="13.5" fill="#94a3b8">每一步都要带时间戳才能对齐。</text>
+    <text x="40" y="314" font-size="13.5" fill="#94a3b8">用 audio.currentTime 驱动口型。</text>
+  </g>
+
+  <g transform="translate(20,465)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#34d399"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：直播协议选型</text>
+    <text x="28" y="70" font-size="14" fill="#94a3b8">不同直播场景用不同协议，</text>
+    <text x="28" y="90" font-size="14" fill="#94a3b8">延迟是选型的核心指标。</text>
+    <rect x="24" y="110" width="524" height="150" rx="8" fill="#0a0f1c" stroke="#34d399" stroke-opacity="0.3"/>
+    <text x="38" y="132" font-size="12.5" fill="#7dd3fc" font-family="monospace">WebRTC  &lt;500ms  互动/数字人驱动</text>
+    <text x="38" y="152" font-size="12.5" fill="#94a3b8">RTMP     1-3s    推流</text>
+    <text x="38" y="172" font-size="12.5" fill="#94a3b8">HTTP-FLV 1-3s    PC 海量播放</text>
+    <text x="38" y="192" font-size="12.5" fill="#94a3b8">HLS      5-30s   移动端海量</text>
+    <text x="38" y="212" font-size="12.5" fill="#f472b6" font-family="monospace">数字人实时互动 → WebRTC(TRTC)</text>
+    <text x="38" y="240" font-size="12.5" fill="#94a3b8">obs-websocket 控制 OBS 场景/推流</text>
+    <rect x="24" y="280" width="524" height="56" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <text x="40" y="305" font-size="13.5" fill="#e2e8f0">超低延迟选 WebRTC，</text>
+    <text x="40" y="325" font-size="13.5" fill="#94a3b8">海量播放选 FLV/HLS。</text>
+  </g>
+
+  <g transform="translate(608,465)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：OBS 控制与 QoS</text>
+    <text x="28" y="70" font-size="14" fill="#94a3b8">obs-websocket 程序化控制 OBS，</text>
+    <text x="28" y="90" font-size="14" fill="#94a3b8">QoS 监控码率/帧率/丢包。</text>
+    <rect x="24" y="110" width="524" height="130" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.3"/>
+    <text x="38" y="132" font-size="12.5" fill="#7dd3fc" font-family="monospace">obs-websocket 请求-响应协议</text>
+    <text x="38" y="152" font-size="12.5" fill="#94a3b8">  SetCurrentProgramScene 切场景</text>
+    <text x="38" y="172" font-size="12.5" fill="#94a3b8">  StartStopStreaming 开关推流</text>
+    <text x="38" y="192" font-size="12.5" fill="#7dd3fc" font-family="monospace">QoS: bitrate/fps/packetLoss/rtt</text>
+    <text x="38" y="212" font-size="12.5" fill="#94a3b8">  弱网降级: 降分辨率→降帧率→关摄像头</text>
+    <text x="38" y="226" font-size="12.5" fill="#94a3b8">  getStats() 获取 WebRTC 统计</text>
+    <rect x="24" y="260" width="524" height="76" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="260" width="4" height="76" rx="2" fill="#f472b6"/>
+    <text x="40" y="285" font-size="13.5" fill="#e2e8f0">核心口诀：口型靠音素时间戳，</text>
+    <text x="40" y="305" font-size="13.5" fill="#94a3b8">低延迟靠 WebRTC，控制靠 obs-ws。</text>
+    <text x="40" y="325" font-size="13.5" fill="#94a3b8">QoS 监控保障直播质量。</text>
+  </g>
+</svg>

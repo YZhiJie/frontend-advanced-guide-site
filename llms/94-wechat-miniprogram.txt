@@ -1,0 +1,240 @@
+# 第九十四部分 · 微信小程序原生开发（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/94-wechat-miniprogram
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九十四部分 · 微信小程序原生开发
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第九十三部分 · obs-websocket 与数字人音视频](./93-obs-digital-human-av.md)｜关联章节：[第八十八部分 · UniApp 跨端开发](./88-uniapp-cross-platform.md) · [第七十三部分 · 多端共用架构](./73-multi-end-architecture.md)
+
+> 💡 **本章特色**：2 个 JD 优先要求微信小程序原生开发。小程序有独特的双线程模型、组件体系、分包机制和登录体系，不能直接套用 Web 思维。本章讲清五件事：**双线程模型与 setData**、**Page/Component 生命周期**、**自定义组件通信**、**分包加载与性能**、**登录体系与云开发**。配套示例 [94-01-wechat-miniprogram.ts](./examples/94-01-wechat-miniprogram.ts) 跑通 setData diff、生命周期顺序、组件通信、分包校验、登录流程。
+
+## 本部分内容
+
+- [94.1 小程序架构：双线程模型](#_94-1-小程序架构-双线程模型)
+- [94.2 生命周期：App / Page / Component](#_94-2-生命周期-app-page-component)
+- [94.3 自定义组件与通信](#_94-3-自定义组件与通信)
+- [94.4 分包加载与性能优化](#_94-4-分包加载与性能优化)
+- [94.5 登录体系与云开发](#_94-5-登录体系与云开发)
+- [94.6 自测题](#_94-6-自测题)
+- [94.7 本章避坑清单](#_94-7-本章避坑清单)
+
+---
+
+## 94.1 小程序架构：双线程模型
+
+### 概念解析
+
+小程序的核心架构是**双线程**：
+- **逻辑层（AppService）**：运行在 JSCore，处理 JS 逻辑、数据、生命周期
+- **渲染层（WebView）**：运行 WXML/WXSS，负责 UI 渲染
+
+两层隔离，**不能直接通信**，唯一通道是 `setData`。逻辑层把数据 patch 通过原生桥序列化后发到渲染层，渲染层 diff 后更新视图。
+
+```js
+// 逻辑层
+Page({
+  data: { count: 0 },
+  onTap() {
+    this.setData({ count: this.data.count + 1 });
+  },
+});
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/94-01-wechat-miniprogram.ts（节选：setData diff）
+apply(patch) {
+  const changed = [];
+  for (const [k, v] of Object.entries(patch)) {
+    const parts = k.split("."); // 支持 "user.name" 路径
+    if (JSON.stringify(obj[last]) !== JSON.stringify(v)) {
+      obj[last] = v; changed.push(k); // 只有值真的变了才标记
+    }
+  }
+  return changed;
+}
+```
+
+> 运行方式：`npx tsx examples/94-01-wechat-miniprogram.ts`
+
+### 应用实践
+
+- **setData 原则**：只传变化的字段，不要 `setData(this.data)` 全量传
+- **路径更新**：`setData({ "user.name": "xx", "list[0].title": "yy" })`，避免深拷贝整个对象
+- **数据量控制**：单次 setData 数据 < 256KB，过大会阻塞渲染
+- **频繁更新**：高频数据（如动画）放渲染层用 WXS 或 CSS 动画，不走 setData
+
+## 94.2 生命周期：App / Page / Component
+
+### 概念解析
+
+**App 生命周期**：`onLaunch`（启动）→ `onShow`（前台）→ `onHide`（后台）
+
+**Page 生命周期**：`onLoad`（加载一次）→ `onShow`（每次显示）→ `onReady`（首次渲染完成）→ `onHide`（切后台）→ `onUnload`（销毁）
+
+**Component 生命周期**：`created` → `attached` → `ready` → `moved` → `detached`
+
+### 应用实践
+
+- `onLoad` 拿页面参数（`options.id`），发请求放这里
+- `onShow` 每次页面显示都执行，用于刷新数据（如从详情页返回列表）
+- `onReady` 后才能操作 `wx.createSelectorQuery()` 获取节点
+- 页面卸载（`onUnload`）要清定时器和解订阅，否则内存泄漏
+
+## 94.3 自定义组件与通信
+
+### 概念解析
+
+小程序组件 = `.js` + `.json` + `.wxml` + `.wxss` 四件套。通信方式：
+- **父→子**：`properties`
+- **子→父**：`triggerEvent`
+- **兄弟**：通过父组件中转，或用全局事件总线
+
+```js
+// 子组件
+Component({
+  properties: { title: String, count: Number },
+  methods: {
+    onChange() {
+      this.triggerEvent("change", { value: this.data.count });
+    },
+  },
+});
+```
+
+```html
+<!-- 父组件 WXML -->
+<my-comp title="{{title}}" count="{{count}}" bind:change="onChildChange" />
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/94-01-wechat-miniprogram.ts（节选：组件通信）
+const comp = createComponent({
+  properties: { title: { type: String, value: "" } },
+  events: ["change"],
+});
+comp.setProps({ title: "标题" });      // 父→子 properties
+comp.trigger("change", { value: 10 }); // 子→父 triggerEvent
+```
+
+### 应用实践
+
+- **properties 类型**：String / Number / Boolean / Array / Object / null（任意）
+- **observers**：监听 properties 或 data 变化，类似 Vue watch
+- **relations**：组件间关系（如父子列表），`type: "parent"` / `"child"`
+- **behaviors**：组件复用逻辑（mixins），内置 `wx://form-field` 接入表单
+
+## 94.4 分包加载与性能优化
+
+### 概念解析
+
+小程序包大小限制：**主包 ≤ 2MB，单个分包 ≤ 2MB，总包 ≤ 20MB**。分包把非首屏页面拆出去，按需加载。
+
+```json
+// app.json
+{
+  "pages": ["pages/index/index"],
+  "subpackages": [
+    { "root": "packageA", "pages": ["pages/a/a"] },
+    { "root": "packageB", "pages": ["pages/b/b"], "independent": true }
+  ],
+  "preloadRule": {
+    "pages/index/index": { "network": "wifi", "packages": ["packageA"] }
+  }
+}
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/94-01-wechat-miniprogram.ts（节选：分包校验）
+function validateSubpackages(config: AppConfig): string[] {
+  if (config.mainPackageSizeKB > 2048) errors.push("主包超限");
+  // 检测页面路径冲突
+  // ...
+}
+```
+
+### 应用实践
+
+- **主包只放首屏 + tabBar 页面**，其余全部分包
+- **独立分包**（`independent: true`）：不依赖主包，可单独打开，常用于活动页
+- **预下载**（`preloadRule`）：在 WiFi 下提前下载分包，减少跳转白屏
+- **性能优化**：
+  - 首屏数据用 `wx.request` 并发，关键接口放 `onLoad`
+  - 图片用 `lazy-load`、`webp`、CDN 压缩
+  - 长列表用 `recycle-view` 或虚拟列表（`wx:key` 必加）
+
+## 94.5 登录体系与云开发
+
+### 概念解析
+
+小程序登录流程：
+1. `wx.login()` 获取临时 `code`（5 分钟有效）
+2. 后端用 `code` 调 `auth.code2Session` 换 `openid` + `session_key`
+3. 后端签发自定义 `token` 返回，前端存 `wx.setStorageSync("token", token)`
+4. 后续请求带 token
+
+### 完整代码示例
+
+```ts
+// 文件: examples/94-01-wechat-miniprogram.ts（节选：登录流程）
+async function loginFlow(wxLogin, code2session) {
+  const code = await wxLogin();
+  const { openid, session_key } = await code2session(code);
+  return { openid, token: `token_${openid}` };
+}
+```
+
+### 应用实践
+
+- **openid vs unionid**：openid 是用户在单个小程序的唯一标识，unionid 是同主体下多应用统一标识
+- **session_key 用途**：解密用户敏感数据（手机号、encryptedData），前端不要存
+- **云开发**：微信提供的 Serverless（云函数 + 云数据库 + 云存储），免鉴权直接用 `cloud.callFunction`
+- **手机号登录**：`button open-type="getPhoneNumber"`，配合 `getPhoneNumber` 事件拿加密手机号，后端用 session_key 解密
+
+## 94.6 自测题
+
+<details>
+<summary>1. 小程序为什么用双线程模型？逻辑层和渲染层如何通信？</summary>
+
+双线程是为了**安全和管控**：逻辑层跑在 JSCore（无 DOM/BOM），渲染层跑在 WebView，隔离防止开发者直接操作 DOM 和获取敏感 API。两层通过 `setData` 通信——逻辑层把数据 patch 通过原生桥序列化发给渲染层，渲染层 diff 后更新 WXML。
+</details>
+
+<details>
+<summary>2. Page 生命周期 onLoad / onShow / onReady 的触发顺序和时机是什么？</summary>
+
+`onLoad`（页面加载，只一次，拿 options 参数）→ `onShow`（页面显示，每次切回都触发）→ `onReady`（首次渲染完成，可操作节点）。从详情页返回列表页时 `onShow` 会再次触发，`onLoad` 不会。
+</details>
+
+<details>
+<summary>3. 自定义组件父子通信有哪些方式？triggerEvent 怎么用？</summary>
+
+父→子：`properties`；子→父：`triggerEvent('eventName', detail)`，父组件用 `bind:eventName` 监听；兄弟：父组件中转或全局事件总线。triggerEvent 第一个参数是事件名，第二个是 detail 数据对象。
+</details>
+
+<details>
+<summary>4. 小程序分包的目的是什么？主包和分包的大小限制是多少？</summary>
+
+分包是为了**减小首屏包体积、加快启动**。主包 ≤ 2MB，单分包 ≤ 2MB，总包 ≤ 20MB。主包只放 tabBar 和首屏页面，非首屏页面拆到分包按需加载，可用 `preloadRule` 预下载。
+</details>
+
+<details>
+<summary>5. 小程序登录的完整流程是什么？openid 和 unionid 的区别？</summary>
+
+`wx.login()` → code → 后端 `code2session` → openid + session_key → 后端签发 token → 前端存 token。openid 是用户在单个小程序内的唯一标识；unionid 是同一微信开放平台主体下多个小程序/公众号的统一标识。
+</details>
+
+## 94.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+|---|---|---|
+| setData 性能 | 列表更新卡顿 | 只传变化字段，用路径更新，单次 < 256KB，不要 setData(this.data) |
+| 路径写法 | `setData({ "list[0].name": x })` 不生效 | 小程序不支持数组下标路径，用 `setData({ "list.0.name": x })` 或整段替换 |
+| 生命周期 | 离开页面定时器还在跑 | `onUnload` 里 `clearInterval` / `off` 订阅，组件里 `detached` 清理 |
+| wx:key | 列表渲染警告 | 加 `wx:key="id"`（唯一属性）或 `wx:key="*this"`（字符串数组） |
+| 分包 | 主包超 2MB 无法上传 | tabBar 页面留主包，其余全拆分包，图片/大文件移分包或 CDN |
+| 登录 | session_key 存前端 | session_key 只在后端用，前端只存 token，解密手机号也在后端 |

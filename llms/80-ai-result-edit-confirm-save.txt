@@ -1,0 +1,290 @@
+# 第八十部分 · AI 生成结果的编辑、确认与保存（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/80-ai-result-edit-confirm-save
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第八十部分 · AI 生成结果的编辑、确认与保存
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第七十九部分 · AI Agent 执行编排与任务状态可视化](./79-agent-execution-orchestration.md)｜关联章节：[第十四部分 · 前端 AI 开发](./14-frontend-ai.md) · [第三十八部分 · 低代码表单引擎](./38-lowcode-form-engine.md) · [第六十三部分 · 前端审计日志](./63-audit-log.md) · [第六十四部分 · 复杂可编辑表格](./64-editable-table.md)
+
+> 💡 **本章特色**：JD 明确要求"AI 生成结果编辑、确认、保存，让用户清楚知道"。AI 产出的东西不能直接入库——用户要能**改**、能**确认**、能**拒绝重来**、改完能**留痕**。本章把这条链路拆成四件事：**结果状态机**（草稿→编辑→确认→保存）、**字段级编辑与 diff**（高亮 AI 原文 vs 用户修改）、**确认流程**（敏感字段二次确认 + 批量确认）、**版本与回滚**（每次保存留快照，可回退）。配套示例 [80-01-ai-result-edit-confirm.ts](./examples/80-01-ai-result-edit-confirm.ts) 跑通全链路。
+
+## 本部分内容
+
+- [80.1 结果状态机：草稿 → 编辑中 → 确认 → 已保存](#_80-1-结果状态机-草稿-→-编辑中-→-确认-→-已保存)
+- [80.2 字段级编辑与差异高亮](#_80-2-字段级编辑与差异高亮)
+- [80.3 确认流程：敏感字段二次确认与批量确认](#_80-3-确认流程-敏感字段二次确认与批量确认)
+- [80.4 保存、版本快照与回滚](#_80-4-保存、版本快照与回滚)
+- [80.5 自测题](#_80-5-自测题)
+- [80.6 本章避坑清单](#_80-6-本章避坑清单)
+
+---
+
+## 80.1 结果状态机：草稿 → 编辑中 → 确认 → 已保存
+
+### 概念解析
+
+AI 生成的结果不能直接写入业务库。它需要经过**人工审核**这一关，因为：
+
+- AI 可能"幻觉"——编造不存在的客户、错误的金额；
+- 业务规则有 AI 不知道的上下文（比如这个客户是 VIP，金额要特批）；
+- 合规要求——涉及资金、隐私的操作必须有人负责。
+
+五个状态：
+
+| 状态 | 含义 | 用户动作 |
+| --- | --- | --- |
+| `draft` | AI 刚生成，未审核 | 进入编辑 / 拒绝重来 |
+| `reviewing` | 用户正在编辑核对 | 保存编辑 / 确认 / 拒绝 |
+| `confirmed` | 用户确认无误 | 保存入库 / 撤回继续编辑 |
+| `rejected` | 用户拒绝，需 AI 重新生成 | 重新生成（回到 reviewing） |
+| `saved` | 已写入业务库 | — |
+
+关键约束：**只有 `confirmed` 状态才能 `save`**；`rejected` 不能直接 `confirmed`，必须重新生成或编辑后再确认；`saved` 是终态，修改要走新版本。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/80-01-ai-result-edit-confirm.ts（节选：状态机）
+export type ResultStatus = "draft" | "reviewing" | "confirmed" | "rejected" | "saved";
+
+export const RESULT_TRANSITIONS: Readonly<Record<ResultStatus, readonly ResultStatus[]>> = {
+  draft: ["reviewing", "rejected"],
+  reviewing: ["confirmed", "rejected"],
+  confirmed: ["saved", "reviewing"],
+  rejected: ["reviewing"],
+  saved: [],
+};
+```
+
+> 运行方式：`npx tsx examples/80-01-ai-result-edit-confirm.ts`
+
+### 应用实践
+
+- **保存按钮只在 `confirmed` 态亮起**，其他态灰显并提示"请先确认结果"；
+- **拒绝要填理由**：`rejected` 必须附带拒绝原因，回传给 AI 重新生成时作为修正提示；
+- **已保存的结果修改走新版本**：不要覆盖 `saved` 的记录，新建一条 `draft` 走完整流程，旧版本可追溯（见 80.4）。
+
+---
+
+## 80.2 字段级编辑与差异高亮
+
+### 概念解析
+
+用户编辑 AI 结果时，最需要知道的是：**我改了什么？AI 原来写的是什么？** 所以编辑界面必须：
+
+1. **保留 AI 原始值** (`originalFields`)，不随用户编辑覆盖；
+2. **实时计算 diff**：哪些字段被改过，高亮显示；
+3. **支持单字段还原**：用户改后悔了，一键还原到 AI 原值。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/80-01-ai-result-edit-confirm.ts（节选：diff 与还原）
+export function diffFields(result: AiResult): string[] {
+  const changed: string[] = [];
+  const keys = new Set([...Object.keys(result.fields), ...Object.keys(result.originalFields)]);
+  for (const k of keys) {
+    if (result.fields[k] !== result.originalFields[k]) changed.push(k);
+  }
+  return changed;
+}
+
+/** 还原单个字段到 AI 原始值 */
+export function revertField(result: AiResult, key: string): void {
+  if (result.status !== "reviewing") throw new Error("只允许在 reviewing 态还原");
+  if (key in result.originalFields) {
+    result.fields[key] = result.originalFields[key];
+  } else {
+    delete result.fields[key];
+  }
+}
+```
+
+### 应用实践
+
+- **diff 高亮用颜色区分**：被修改的字段左边框标黄，hover 时显示"原值：xxx"；
+- **富文本字段用行内 diff**：如果 AI 生成的是段落文本，用 `diff` 库（如 `diff-match-patch`）计算行级/字符级差异，增删用绿/红标记，而不是整个文本框让用户改；
+- **编辑只允许在 `reviewing` 态**：其他态下输入框灰显，防止状态错乱。
+
+---
+
+## 80.3 确认流程：敏感字段二次确认与批量确认
+
+### 概念解析
+
+不是所有字段被改了都一样严重。**金额、收件人、账号、隐私数据**这类字段被改，可能造成资金损失或合规风险，必须**二次确认**——弹出确认框，明确告诉用户"你把金额从 1000 改成了 1500，确认吗？"。
+
+批量场景（AI 一次生成 50 条客户线索）下，逐条确认效率太低，需要：
+
+- **批量确认**：全选 + 一键确认所有无修改的结果；
+- **筛选确认**：只确认没被改过的，改过的留给人工逐条核对；
+- **确认计数**：显示"共 50 条，其中 47 条无修改可批量确认，3 条已修改需逐条核对"。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/80-01-ai-result-edit-confirm.ts（节选：敏感字段二次确认）
+export interface ConfirmOptions {
+  /** 敏感字段，被编辑后必须二次确认 */
+  sensitiveFields: string[];
+}
+
+/** 返回需要二次确认的敏感字段列表 */
+export function needsReconfirm(result: AiResult, opts: ConfirmOptions): string[] {
+  const changed = new Set(diffFields(result));
+  return opts.sensitiveFields.filter((f) => changed.has(f));
+}
+```
+
+### 应用实践
+
+- **二次确认弹窗要展示"原值 → 新值"对比**，而不是只说"你确定吗"。用户需要看到具体改了什么才能做判断；
+- **批量确认前先校验**：如果选中的结果里有被修改过的敏感字段，批量确认按钮应该禁用或拆成"确认无修改的"和"逐条核对已修改的"；
+- **确认操作写审计**：谁在什么时间确认了哪条结果、改了哪些字段，全部落审计日志（见 [63 册审计日志](./63-audit-log.md)）。出问题时这是定责依据。
+
+---
+
+## 80.4 保存、版本快照与回滚
+
+### 概念解析
+
+保存不是"覆盖"，而是"提交一个新版本"。因为：
+
+- 已入库的结果可能已经被下游系统使用（比如客户线索已分配给销售），不能直接改；
+- 改错了需要能回退；
+- 合规要求保留变更历史。
+
+版本模型：每次 `save` 时把当前 `fields` 存一份快照（带版本号和时间戳），形成版本链。回滚时取出指定版本的 `fields`，作为新的 `reviewing` 内容重新走确认流程。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/80-01-ai-result-edit-confirm.ts（节选：版本库）
+export class ResultVersionStore {
+  private snapshots: VersionSnapshot[] = [];
+
+  commit(result: AiResult): void {
+    this.snapshots.push({
+      version: result.version,
+      fields: { ...result.fields },
+      savedAt: result.updatedAt,
+    });
+  }
+
+  /** 回滚到指定版本，返回的 fields 需重新走 reviewing→confirmed→saved */
+  rollback(version: number): Record<string, FieldValue> | null {
+    const snap = this.snapshots.find((s) => s.version === version);
+    return snap ? { ...snap.fields } : null;
+  }
+}
+```
+
+### 应用实践
+
+- **版本快照存服务端**，前端只负责展示版本列表和发起回滚；
+- **回滚不直接覆盖当前数据**：回滚产生的是一条新的 `draft`/`reviewing` 记录，需要重新确认保存。这样回滚操作本身也留痕；
+- **版本数量有上限**：保留最近 N 个版本（如 20 个），更早的归档或清理，避免存储膨胀。
+
+---
+
+## 80.5 自测题
+
+<details>
+<summary><b>1. 【基础】为什么 AI 生成结果不能直接入库，必须经过确认？</b></summary>
+
+三个原因：① AI 可能幻觉——编造不存在的客户、错误的金额；② 业务规则有 AI 不知道的上下文（如 VIP 特批）；③ 合规要求——涉及资金、隐私的操作必须有人负责。所以 AI 结果走 draft → reviewing → confirmed → saved 流程，人工确认后才入库。
+</details>
+
+<details>
+<summary><b>2. 【进阶】为什么编辑时要保留 AI 原始值？直接覆盖不行吗？</b></summary>
+
+保留原始值是为了：① 计算 diff，告诉用户"你改了哪些字段"；② 支持单字段还原——用户改后悔了可以一键回到 AI 原值；③ 审计追溯——出问题时能查 AI 原本写了什么、用户改了什么。如果直接覆盖，这些能力全丢。
+</details>
+
+<details>
+<summary><b>3. 【进阶】哪些字段需要二次确认？为什么？</b></summary>
+
+涉及资金（金额、价格）、隐私（手机号、身份证）、不可逆操作（收件人、发货地址）的字段被修改时需要二次确认。因为这些字段改错会造成真实损失——金额改错导致亏盈，收件人改错导致货物丢失。二次确认弹窗要展示"原值 → 新值"对比，让用户明确知情。
+</details>
+
+<details>
+<summary><b>4. 【挑战】为什么保存要走版本快照而不是覆盖？</b></summary>
+
+三个原因：① 已入库结果可能已被下游使用（如线索已分配销售），直接覆盖会导致数据不一致；② 改错了需要能回退到历史版本；③ 合规要求保留变更历史。版本模型下每次 save 产生新版本，回滚时取出历史版本作为新 draft 重走流程，回滚操作本身也留痕。
+</details>
+
+---
+
+## 80.6 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 直接入库 | AI 结果不经过确认直接写入业务库 | 强制走 draft → reviewing → confirmed → saved，只有 confirmed 才能 save |
+| 原始值丢失 | 用户编辑时直接覆盖 AI 原值，无法 diff 和还原 | 保留 `originalFields` 不随编辑覆盖，编辑只改 `fields` |
+| 敏感字段无确认 | 金额/账号被改直接保存，造成资金损失 | 敏感字段改动时弹出二次确认，展示原值→新值对比 |
+| 批量确认不校验 | 批量确认时把已修改的敏感字段也确认了 | 批量确认前筛出有敏感字段修改的结果，要求逐条核对 |
+| 保存覆盖历史 | 直接覆盖已保存的结果，无法回退 | 每次 save 产生新版本快照，回滚时取历史版本作为新 draft |
+| 编辑状态错乱 | 在 confirmed/saved 态还能编辑字段 | 编辑操作只允许在 reviewing 态，其他态输入框灰显 |
+| 审计缺失 | 确认/保存操作不留痕，出问题无法定责 | 确认和保存都写审计日志：谁、何时、改了哪些字段、原值新值 |
+| 拒绝无理由 | 用户拒绝 AI 结果但不填原因，重新生成还是错的 | rejected 必须附带拒绝原因，作为 AI 重新生成的修正提示 |
+
+---
+
+## 80.7 面试问答
+
+<details>
+<summary><b>【L2】AI 生成一条客户线索后，前端怎么设计"编辑-确认-保存"流程？为什么不能直接入库？</b></summary>
+
+**回答框架**：① 流程：draft（AI 生成）→ reviewing（用户编辑）→ confirmed（确认无误）→ saved（入库）；② 不能直接入库的原因：AI 可能幻觉、业务有 AI 不知道的上下文、合规要求有人负责；③ 关键设计：保留 originalFields 做 diff、敏感字段二次确认、保存产生版本快照。
+
+**评分要点**：流程状态正确；能说出不能直接入库的三个原因；提到 originalFields 保留和 diff。
+
+**加分项**：提到版本快照和回滚；提到审计日志；能举金额字段被 AI 改错的实际例子。
+</details>
+
+<details>
+<summary><b>【L3】用户批量确认 100 条 AI 生成的线索，其中 5 条改了金额字段，前端怎么处理？</b></summary>
+
+**回答框架**：① 批量确认前校验：扫描所有待确认结果，找出敏感字段被修改的；② 分流：无修改的 95 条可一键批量确认，改了金额的 5 条必须逐条核对（弹出原值→新值对比）；③ 确认计数提示："共 100 条，95 条无修改可批量确认，5 条已修改需逐条核对"；④ 确认后走版本快照保存。
+
+**评分要点**：能区分"无修改批量确认"和"敏感字段修改逐条核对"；提到二次确认弹窗展示原值新值；提到确认后写审计。
+
+**加分项**：提到批量确认的服务端要保证原子性（要么全成功要么全失败）；提到确认失败的部分回滚并提示。
+</details>
+
+<details>
+<summary><b>【L2】用户改错了一个字段想还原，怎么实现？为什么要保留 AI 原始值？</b></summary>
+
+**回答框架**：保留 `originalFields`（AI 原始产出），编辑只改 `fields`。还原时把 `fields[key]` 设回 `originalFields[key]`。保留原始值的三个用途：diff 高亮、单字段还原、审计追溯。
+
+**评分要点**：提到 originalFields 与 fields 分离；能说出还原实现；提到保留原始值的三个用途。
+
+**加分项**：提到富文本字段用行内 diff（diff-match-patch）；提到还原操作也写审计。
+</details>
+
+<details>
+<summary><b>【L3】保存一条已确认的 AI 结果时，发现下游系统已经在用旧数据了，怎么处理？</b></summary>
+
+**回答框架**：不能直接覆盖——用版本模型。① 每次 save 产生新版本快照，旧版本保留；② 新版本作为一条新记录入库，旧版本标记为"已被新版本替代"但不删除；③ 下游系统通过版本号感知变更，决定是否同步；④ 如果需要回退，取历史版本作为新 draft 重走确认流程。
+
+**评分要点**：知道不能直接覆盖已被下游使用的数据；提到版本快照；提到回滚产生新记录而非覆盖。
+
+**加分项**：提到版本数量有上限（保留最近 N 个）；提到下游同步的一致性策略（最终一致/强一致）；提到废弃版本的归档清理。
+</details>
+
+---
+
+## 80.8 代码审查清单
+
+| 审查项 | 关注点 | 常见问题 | 建议 |
+| --- | --- | --- | --- |
+| 入库门禁 | 是否只有 confirmed 态才能 save | draft/reviewing 直接 save 入库 | 状态机守卫，confirmed 才能 save |
+| 原始值保留 | 是否保留 originalFields 不被覆盖 | 编辑时直接覆盖 AI 原值 | originalFields 只读，编辑只改 fields |
+| diff 展示 | 是否展示用户改了哪些字段 | 用户不知道自己改了什么 | 实时计算 diff，被改字段高亮 |
+| 敏感字段确认 | 敏感字段修改是否二次确认 | 金额被改直接保存 | 敏感字段改动弹原值→新值对比确认 |
+| 批量确认校验 | 批量确认前是否筛出敏感字段修改 | 把改过金额的也批量确认了 | 批量前校验，敏感修改逐条核对 |
+| 版本快照 | save 是否产生新版本而非覆盖 | 直接覆盖旧数据无法回退 | 每次 save 产生新版本，旧版本保留 |
+| 回滚安全 | 回滚是否产生新记录而非覆盖 | 回滚直接覆盖当前数据 | 回滚取历史版本作为新 draft 重走流程 |
+| 编辑态限制 | 编辑是否只允许在 reviewing 态 | confirmed/saved 态还能改 | 非 reviewing 态输入框灰显 |
+| 审计留痕 | 确认/保存/回滚是否写审计 | 操作无记录无法定责 | 所有写操作记录：谁、何时、改了什么、原值新值 |
+| 拒绝原因 | rejected 是否强制填原因 | 拒绝不填原因，重生成还是错 | rejected 必须附带拒绝原因 |

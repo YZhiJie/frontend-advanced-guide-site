@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>12-11 盒模型与外边距合并可观测实验</title>
+  <style>
+    body {
+      font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+      margin: 0;
+      padding: 32px 20px;
+      background: #f5f7fa;
+      color: #1f2937;
+      line-height: 1.7;
+    }
+
+    h1 {
+      font-size: 22px;
+    }
+
+    h2 {
+      font-size: 16px;
+      margin: 28px 0 10px;
+      padding-left: 10px;
+      border-left: 4px solid #7c3aed;
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-bottom: 14px;
+    }
+
+    .log {
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 13px;
+      background: #0b1220;
+      color: #a5f3fc;
+      border-radius: 8px;
+      padding: 12px 14px;
+      white-space: pre-wrap;
+      margin-top: 10px;
+    }
+
+    .log .ok {
+      color: #34d399;
+    }
+
+    .log .warn {
+      color: #fbbf24;
+    }
+
+    .note {
+      color: #6b7280;
+      font-size: 13.5px;
+    }
+
+    button {
+      font-family: inherit;
+      padding: 7px 16px;
+      margin: 6px 8px 0 0;
+      border-radius: 8px;
+      border: 1px solid #7c3aed;
+      background: #f5f3ff;
+      color: #5b21b6;
+      cursor: pointer;
+      font-size: 13.5px;
+    }
+
+    button:hover {
+      background: #ede9fe;
+    }
+
+    code {
+      background: #eef2ff;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    /* ---------- 实验 1：两种盒模型 ---------- */
+    .box {
+      width: 200px;
+      padding: 20px;
+      border: 10px solid #7c3aed;
+      margin: 8px 0;
+      background: #ddd6fe;
+    }
+
+    #box-content {
+      box-sizing: content-box;
+    }
+
+    /* width 只含内容区：实际占位 200+40+20 = 260 */
+    #box-border {
+      box-sizing: border-box;
+    }
+
+    /* width 含 padding+border：实际占位恒为 200 */
+
+    /* ---------- 实验 2：父子 margin-top 穿透 ---------- */
+    #pen-parent {
+      background: #bfdbfe;
+    }
+
+    /* 故意不设 border/padding/BFC */
+    #pen-child {
+      margin-top: 40px;
+      background: #60a5fa;
+      color: #fff;
+      padding: 8px;
+    }
+
+    #pen-parent.fixed-overflow {
+      overflow: hidden;
+    }
+
+    /* 修复方案 A：overflow 非 visible 建立 BFC */
+    #pen-parent.fixed-padding {
+      padding-top: 1px;
+    }
+
+    /* 修复方案 B：1px padding 隔断合并 */
+    #pen-parent.fixed-flow {
+      display: flow-root;
+    }
+
+    /* 修复方案 C（推荐）：现代 BFC 建立方式 */
+
+    /* ---------- 实验 3：相邻兄弟合并 ---------- */
+    #sib-a {
+      margin-bottom: 30px;
+      background: #fecaca;
+      padding: 8px;
+    }
+
+    #sib-b {
+      margin-top: 20px;
+      background: #bbf7d0;
+      padding: 8px;
+    }
+
+    #flex-demo {
+      display: flex;
+      flex-direction: column;
+      margin-top: 14px;
+    }
+
+    #flex-demo div {
+      background: #fde68a;
+      padding: 8px;
+    }
+
+    #flex-a {
+      margin-bottom: 30px;
+    }
+
+    #flex-b {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>盒模型与外边距合并 · 可观测实验</h1>
+  <p class="note">对应 12.1 的 CSS 地基：width 到底算到哪、为什么子元素的 margin 会"穿"到父元素外面。每个实验都给出实测像素值与修复开关。</p>
+
+  <h2>实验 1：content-box vs border-box（怪异盒模型）</h2>
+  <div class="card">
+    <div id="box-content" class="box">content-box：width:200 只含内容区</div>
+    <div id="box-border" class="box">border-box：width:200 含 padding+border</div>
+    <div id="log-1" class="log">点击下方按钮测量…</div>
+    <button onclick="measureBoxes()">测量实际占位宽度</button>
+    <p class="note">结论：同样 <code>width:200px; padding:20px; border:10px</code>，标准盒实际占 <b>260px</b>（width 只算内容区），怪异盒恒为
+      <b>200px</b>（width 含 padding+border，内容区被压缩到 140px）。组件库与 reset 全局设 <code>box-sizing: border-box</code>，栅格
+      <code>width:50% + padding</code> 才不会溢出换行。
+    </p>
+  </div>
+
+  <h2>实验 2：父子 margin-top 穿透（最常见的外边距合并）</h2>
+  <p class="note" style="margin:0 0 8px">下方卡片里蓝色父元素没有 border / padding / BFC，首子元素带
+    <code>margin-top:40px</code>（说明文字放在卡片外，保证几何测量干净）：
+  </p>
+  <div class="card">
+    <div id="pen-parent">
+      <div id="pen-child">子元素 margin-top:40px —— 看，40px 穿到了父元素外面！</div>
+    </div>
+    <div id="log-2" class="log">点击按钮测量…</div>
+    <button onclick="measurePenetration()">测量穿透距离</button>
+    <button onclick="fixPenetration('fixed-flow')">修复：display:flow-root（推荐）</button>
+    <button onclick="fixPenetration('fixed-padding')">修复：padding-top:1px</button>
+    <button onclick="fixPenetration('fixed-overflow')">修复：overflow:hidden（建 BFC）</button>
+    <button onclick="resetPenetration()">重置</button>
+    <p class="note" style="margin-bottom:0">结论：父元素没有 border-top / padding-top、也没有建立 BFC 时，首子元素的 margin-top
+      会"穿透"与父元素合并。三种修法都在父元素上做文章：<code>display: flow-root</code>（无副作用，首选）、任意 1px border/padding
+      隔断、<code>overflow: hidden</code> 建立 BFC（会裁切溢出内容，慎用）。</p>
+  </div>
+
+  <h2>实验 3：相邻兄弟外边距合并（取较大值，不是相加）</h2>
+  <div class="card">
+    <div id="sib-a">上一个兄弟：margin-bottom:30px</div>
+    <div id="sib-b">下一个兄弟：margin-top:20px</div>
+    <div id="flex-demo">
+      <div id="flex-a">flex 容器内：margin-bottom:30px</div>
+      <div id="flex-b">flex 项：margin-top:20px（不合并，间距 50px）</div>
+    </div>
+    <div id="log-3" class="log">点击按钮测量…</div>
+    <button onclick="measureSiblings()">测量两处间距</button>
+    <p class="note">结论：普通块级兄弟的上下 margin 合并，间距 = <b>max(30, 20) = 30px</b> 而非 50px；flex / grid
+      容器的子项是弹性/网格项，<strong>不发生外边距合并</strong>（实测 50px）——这也是现代布局中间距行为更符合直觉的原因之一。空块自身的上下 margin 还会自我合并，规则同源。</p>
+  </div>
+
+  <script>
+    function px(el, prop) { return Math.round(el.getBoundingClientRect()[prop]); }
+
+    function measureBoxes() {
+      var c = document.getElementById('box-content');
+      var b = document.getElementById('box-border');
+      document.getElementById('log-1').innerHTML =
+        'content-box 实际占位宽度 = ' + px(c, 'width') + 'px （200 内容 + 40 padding + 20 border） <span class="warn">← 宽度不可控</span>\n' +
+        'border-box  实际占位宽度 = ' + px(b, 'width') + 'px （恒等于声明的 width，内容区 ' + (b.clientWidth - 40) + 'px） <span class="ok">← 组件想要的效果</span>';
+    }
+
+    function measurePenetration() {
+      var parent = document.getElementById('pen-parent');
+      var child = document.getElementById('pen-child');
+      var card = parent.parentElement;
+      var gap = Math.round(child.getBoundingClientRect().top - parent.getBoundingClientRect().top);
+      var parentOffset = Math.round(parent.getBoundingClientRect().top - card.getBoundingClientRect().top - 17); // 减去卡片 1px border + 16px padding
+      var fixed = parent.className.length > 0;
+      document.getElementById('log-2').innerHTML =
+        '父元素被顶离卡片内容区 = ' + parentOffset + 'px\n' +
+        '父元素顶边 → 子元素顶边 的距离 = ' + gap + 'px\n' +
+        (fixed
+          ? '<span class="ok">✓ 已隔断（' + parent.className + '）：父元素归位(0px)，子元素留在父内部 ' + gap + 'px' + (gap === 41 ? '（1px padding + 40px margin）' : '（即 margin 的 40px）') + '</span>'
+          : '<span class="warn">⚠ 子顶边紧贴父顶边(0px)，而父元素被整体顶下 40px —— margin 穿透到了父元素外侧</span>');
+    }
+
+    function fixPenetration(cls) {
+      var parent = document.getElementById('pen-parent');
+      parent.className = cls;
+      measurePenetration();
+    }
+    function resetPenetration() {
+      document.getElementById('pen-parent').className = '';
+      measurePenetration();
+    }
+
+    function measureSiblings() {
+      var a = document.getElementById('sib-a');
+      var b = document.getElementById('sib-b');
+      var fa = document.getElementById('flex-a');
+      var fb = document.getElementById('flex-b');
+      var normalGap = Math.round(b.getBoundingClientRect().top - a.getBoundingClientRect().bottom);
+      var flexGap = Math.round(fb.getBoundingClientRect().top - fa.getBoundingClientRect().bottom);
+      document.getElementById('log-3').innerHTML =
+        '普通块级兄弟间距 = ' + normalGap + 'px（max(30,20)，发生合并）\n' +
+        'flex 子项间距     = ' + flexGap + 'px（30+20，不合并） <span class="ok">✓</span>';
+    }
+
+    // 打开页面即自动测量一遍
+    window.addEventListener('DOMContentLoaded', function () {
+      measureBoxes(); measurePenetration(); measureSiblings();
+    });
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,24 @@
+<!-- 文件: examples/17-01-popover.html —— [浏览器] Popover API:一行声明的合规弹层 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <style>
+        [popover] {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+            margin: auto;              /* top-layer 中自动居中 */
+        }
+    </style>
+</head>
+<body>
+    <!-- 声明式:popovertarget 自动处理开关、点击外部关闭、Esc 关闭、top-layer 置顶 -->
+    <button popovertarget="help">帮助</button>
+
+    <div id="help" popover>
+        <p>这是弹层内容。Esc 可关闭,点击外部也会关闭 —— 全部浏览器原生行为。</p>
+        <p>不再需要:手写 z-index、全局 click 监听、焦点管理样板代码。</p>
+    </div>
+</body>
+</html>

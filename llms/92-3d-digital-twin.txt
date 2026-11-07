@@ -1,0 +1,238 @@
+# 第九十二部分 · 3D 与数字孪生可视化（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/92-3d-digital-twin
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九十二部分 · 3D 与数字孪生可视化
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第九十一部分 · Electron 桌面开发深化](./91-electron-ipc-architecture.md)｜关联章节：[第五十八部分 · 可视化实战](./58-visualization-practice.md) · [第九十部分 · 可视化画布与节点编辑器](./90-node-editor-canvas.md)
+
+> 💡 **本章特色**：智慧能源/数字孪生 JD 明确要求"Three.js / Cesium / GIS 三维可视化、模型加载、交互拾取、实时数据驱动 3D 场景"。3D 与数字孪生是工业互联网、智慧园区、能源监控的核心前端能力。本章讲清五件事：**场景图模型**（Scene/Mesh/Camera/Renderer）、**射线拾取**（Raycaster 点选）、**GIS 坐标转换**（WGS84→局部）、**数字孪生数据绑定**（传感器→Mesh 属性）、**Cesium 图层组合**。配套示例 [92-01-3d-digital-twin.ts](./examples/92-01-3d-digital-twin.ts) 跑通场景图、拾取、坐标转换、数据绑定、图层排序。
+
+## 本部分内容
+
+- [92.1 Three.js 核心：场景图与渲染管线](#_92-1-three-js-核心-场景图与渲染管线)
+- [92.2 射线拾取与交互](#_92-2-射线拾取与交互)
+- [92.3 GIS 坐标与 Cesium 地理可视化](#_92-3-gis-坐标与-cesium-地理可视化)
+- [92.4 数字孪生：实时数据驱动 3D 场景](#_92-4-数字孪生-实时数据驱动-3d-场景)
+- [92.5 性能优化：LOD、实例化、WebGL 调优](#_92-5-性能优化-lod、实例化、webgl-调优)
+- [92.6 自测题](#_92-6-自测题)
+- [92.7 本章避坑清单](#_92-7-本章避坑清单)
+
+---
+
+## 92.1 Three.js 核心：场景图与渲染管线
+
+### 概念解析
+
+Three.js 的三大件：**Scene（场景）**、**Camera（相机）**、**Renderer（渲染器）**。场景是一棵对象树，每个对象（Mesh）由 **Geometry（几何体）** + **Material（材质）** 组成。
+
+```ts
+// Three.js 真实代码结构
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(
+  60, window.innerWidth / window.innerHeight, 0.1, 1000
+);
+camera.position.set(0, 50, 100);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// 一个 Mesh = Geometry + Material
+const box = new THREE.Mesh(
+  new THREE.BoxGeometry(10, 20, 10),
+  new THREE.MeshStandardMaterial({ color: 0x888888 })
+);
+scene.add(box);
+
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+animate();
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/92-01-3d-digital-twin.ts（节选：场景图）
+interface Mesh {
+  id: string;
+  position: Vec3;
+  scale: Vec3;
+  geometry: { type: "box" | "sphere" | "cylinder"; args: number[] };
+  material: { color: string; opacity: number };
+}
+const scene = createScene();
+scene.add(tower); // scene.meshes Map 管理
+```
+
+> 运行方式：`npx tsx examples/92-01-3d-digital-twin.ts`
+
+### 应用实践
+
+- **模型加载**：GLTFLoader 加载 `.glb/.gltf`，Draco 压缩可减小 70% 体积
+- **光照**：环境光（AmbientLight）+ 平行光（DirectionalLight）+ 阴影（castShadow）
+- **动画循环**：`requestAnimationFrame` 驱动，用 `clock.getDelta()` 做帧率无关动画
+
+## 92.2 射线拾取与交互
+
+### 概念解析
+
+3D 场景的点击/悬停靠 **Raycaster**：从相机发出一条射线，与物体的包围盒或三角面求交。
+
+```ts
+// Three.js 真实代码
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+function onClick(e: MouseEvent) {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1; // NDC: -1..1
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(scene.children);
+  if (hits.length) {
+    console.log("命中：", hits[0].object.name);
+  }
+}
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/92-01-3d-digital-twin.ts（节选：射线与 AABB 求交）
+function rayIntersectsBox(origin, dir, boxMin, boxMax): boolean {
+  let tmin = -Infinity, tmax = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const t1 = (boxMin[i] - origin[i]) / dir[i];
+    const t2 = (boxMax[i] - origin[i]) / dir[i];
+    tmin = Math.max(tmin, Math.min(t1, t2));
+    tmax = Math.min(tmax, Math.max(t1, t2));
+    if (tmin > tmax) return false;
+  }
+  return tmax >= 0;
+}
+```
+
+### 应用实践
+
+- **OrbitControls**：旋转/缩放/平移，`enableDamping` 开启阻尼让交互更顺滑
+- **Hover 高亮**：命中物体时改 `material.emissive`，离开时恢复
+- **性能**：物体多时用 `intersectObjects(children, false)` 不递归，或用 BVH 加速
+
+## 92.3 GIS 坐标与 Cesium 地理可视化
+
+### 概念解析
+
+GIS 可视化涉及两套坐标系：
+- **WGS84**（经纬度，EPSG:4326）：全球定位
+- **Web Mercator**（EPSG:3857）：瓦片地图投影
+- **局部 ENU**（East-North-Up）：以某点为原点的局部米制坐标
+
+Cesium 基于 WebGL，专注地理空间 3D（地球、地形、3DTiles）。Three.js 则是通用 3D 引擎。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/92-01-3d-digital-twin.ts（节选：WGS84→局部）
+const DEG_TO_M = 111320; // 1 度纬度≈111320 米
+function wgs84ToLocal(lon, lat, centerLon, centerLat): Vec3 {
+  const x = (lon - centerLon) * DEG_TO_M * Math.cos(centerLat * Math.PI / 180);
+  const z = (lat - centerLat) * DEG_TO_M;
+  return [x, 0, z];
+}
+```
+
+### 应用实践
+
+- **Cesium 图层**：ImageryLayer（影像）、TerrainProvider（地形）、Cesium3DTileset（倾斜摄影/城市模型）、GeoJsonDataSource（矢量）
+- **坐标转换**：`Cesium.Cartesian3.fromDegrees(lon, lat, height)` 经纬度→笛卡尔
+- **Three.js + Cesium 混用**：用 `threedtiles` 或在 Cesium 上叠加 Three.js 场景（同步相机矩阵）
+
+## 92.4 数字孪生：实时数据驱动 3D 场景
+
+### 概念解析
+
+数字孪生 = **3D 模型 + 实时业务数据**。核心是建立"传感器→Mesh 属性"的绑定关系，让 3D 场景"活"起来。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/92-01-3d-digital-twin.ts（节选：数据绑定）
+function bindSensorToMesh(mesh: Mesh, data: SensorData): void {
+  const t = Math.min(1, Math.max(0, (data.temperature - 20) / 80));
+  mesh.material.color = `rgb(${50 + t * 205},80,${255 - t * 205})`;
+  mesh.scale[1] = 0.5 + (data.power / 1000) * 3;
+  mesh.material.opacity = data.status === "offline" ? 0.3 : 1;
+}
+```
+
+### 应用实践
+
+- **数据通道**：WebSocket / MQTT 推送实时数据，按设备 ID 匹配 Mesh
+- **可视化映射**：温度→颜色、功率→高度/发光、状态→透明度/闪烁
+- **时间轴回放**：缓存历史数据，拖动时间轴重现设备状态变化
+- **告警联动**：状态变 alarm 时，Mesh 闪烁 + 弹出信息面板
+
+## 92.5 性能优化：LOD、实例化、WebGL 调优
+
+### 概念解析
+
+3D 性能瓶颈通常在 **Draw Call（绘制调用）** 和 **三角面数**。
+
+| 优化手段 | 原理 | 适用场景 |
+|---|---|---|
+| LOD（Level of Detail） | 远距用低模 | 大面积场景 |
+| InstancedMesh | 一次 Draw Call 画多个相同 Mesh | 树木/车辆/设备 |
+| 纹理压缩 | KTX2 / Basis | 大量贴图 |
+| Frustum Culling | 视锥外不渲染 | 默认开启 |
+| WebGL2 多实例 | GPU Instancing | 同构物体 |
+
+### 应用实践
+
+- **模型面数**：单个 Mesh 控制在 1 万面以内，整体场景 < 100 万面
+- **Draw Call**：< 200 为流畅，用 InstancedMesh / 合并几何体（BufferGeometryUtils.mergeGeometries）
+- **内存**：及时 `geometry.dispose()` / `material.dispose()`，避免切换场景后内存泄漏
+- **WebWorker**：把模型解析、坐标转换放 Worker，主线程只负责渲染
+
+## 92.6 自测题
+
+<details>
+<summary>1. Three.js 中点击 3D 物体的核心原理是什么？Raycaster 的输入和输出分别是什么？</summary>
+
+原理是**射线求交**：从相机位置沿屏幕像素对应的方向发射一条射线，与场景中物体的包围盒/三角面求交。输入是屏幕标准化坐标（NDC -1..1）和相机；输出是按距离排序的命中对象数组（含 object、point、distance、face）。
+</details>
+
+<details>
+<summary>2. 数字孪生场景中，实时数据如何驱动 3D 模型？请列出至少 3 种数据→视觉的映射方式。</summary>
+
+建立"设备 ID → Mesh"的映射，收到实时数据后更新 Mesh 属性：
+- 温度 → 材质颜色（冷蓝→热红）
+- 功率/负载 → 高度或发光强度（emissive）
+- 在线/离线/告警 → 透明度或闪烁动画
+- 位置 → position 坐标（如车辆轨迹）
+</details>
+
+<details>
+<summary>3. Cesium 和 Three.js 各自的定位是什么？什么场景下需要两者结合？</summary>
+
+Cesium 是地理空间 3D 引擎，擅长地球、地形、3DTiles 倾斜摄影、经纬度坐标；Three.js 是通用 3D 引擎，擅长自定义模型、粒子、后处理。结合场景：在城市级 GIS 底座（Cesium）上叠加业务自定义 3D 物体（Three.js），需同步两者的相机矩阵。
+</details>
+
+<details>
+<summary>4. 3D 场景性能优化的三大方向是什么？InstancedMesh 解决了什么问题？</summary>
+
+三大方向：**减少 Draw Call**、**减少三角面数**、**降低内存占用**。InstancedMesh 用一次 Draw Call 渲染多个相同几何体的实例（仅 matrix/color 不同），把 N 个相同物体的 N 次 Draw Call 降为 1 次。
+</details>
+
+## 92.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+|---|---|---|
+| Raycaster 拾取 | 点击不准/穿透 | 用 NDC 坐标转换，`intersectObjects` 第二个参数控制是否递归子节点 |
+| 模型加载 | glb 模型全黑 | 未加环境光/方向光，或材质是 MeshStandardMaterial 但无光照 |
+| 坐标转换 | 经纬度转场景位置偏了 | 纬度 1°≈111km，经度要乘 `cos(lat)` 修正 |
+| 内存泄漏 | 切换场景后内存暴涨 | 移除物体时 `geometry.dispose()` + `material.dispose()` + `texture.dispose()` |
+| 阴影性能 | 开阴影后帧率暴跌 | 控制 shadow.mapSize，只让关键物体 castShadow，用 PCFSoftShadowMap |
+| 移动端 | iOS 上 WebGL 崩溃 | 纹理 < 2048，开启 `powerPreference: "high-performance"`，面数减半 |

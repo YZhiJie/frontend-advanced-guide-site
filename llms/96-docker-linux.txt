@@ -1,0 +1,290 @@
+# 第九十六部分 · Docker 与 Linux 基础（面向前端）（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/96-docker-linux
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九十六部分 · Docker 与 Linux 基础（面向前端）
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第九十五部分 · Next.js Google SEO 与海外站点](./95-nextjs-google-seo.md)｜关联章节：[第五十三部分 · Nginx 部署与反向代理](./53-nginx-deploy.md) · [第五十九部分 · 前端监控与可观测性](./59-monitoring-observability.md) · [第三部分 · 前端工程化](./03-engineering.md) · [第一百二十七部分 · 前端部署与发布工程手册](./127-frontend-deployment-manual.md)
+
+> 💡 **本章特色**：通用/B 端 JD 普遍要求"熟悉 Linux 环境、Docker 容器化部署、CI/CD"。前端工程师不需要成为运维，但必须能看懂 Dockerfile、会用 docker-compose 起本地依赖、能在服务器上用 Linux 命令排查问题。本章讲清五件事：**Docker 核心与层缓存**、**多阶段构建与镜像瘦身**、**docker-compose 服务编排**、**Linux 文件权限与进程信号**、**CI/CD 中的 Docker**。配套示例 [96-01-docker-linux.ts](./examples/96-01-docker-linux.ts) 跑通 Dockerfile 解析、层缓存命中、多阶段瘦身、权限互转、信号处理、compose 环检测。
+
+## 本部分内容
+
+- [96.1 Docker 核心概念与层缓存](#_96-1-docker-核心概念与层缓存)
+- [96.2 多阶段构建与镜像瘦身](#_96-2-多阶段构建与镜像瘦身)
+- [96.3 docker-compose 服务编排](#_96-3-docker-compose-服务编排)
+- [96.4 Linux 文件权限与进程信号](#_96-4-linux-文件权限与进程信号)
+- [96.5 CI/CD 中的 Docker 与服务器排障](#_96-5-ci-cd-中的-docker-与服务器排障)
+- [96.6 自测题](#_96-6-自测题)
+- [96.7 本章避坑清单](#_96-7-本章避坑清单)
+
+---
+
+## 96.1 Docker 核心概念与层缓存
+
+### 概念解析
+
+Docker 四件套：**镜像（Image）**、**容器（Container）**、**层（Layer）**、**Dockerfile**。
+
+镜像是**只读层的堆叠**，每条 Dockerfile 指令生成一层。层缓存是 Docker 性能的关键：**如果某条指令及之前的所有指令都没变，就复用缓存层**，否则该层及之后全部失效重建。
+
+```dockerfile
+# 优化前：改任何源码都会让 npm ci 缓存失效
+COPY . .
+RUN npm ci
+
+# 优化后：package.json 单独放一层，源码改动不影响依赖安装
+COPY package*.json ./
+RUN npm ci          # 只要 package.json 不变就命中缓存
+COPY . .
+RUN npm run build
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/96-01-docker-linux.ts（节选：层缓存命中）
+function cacheHitLayers(a: Instruction[], b: Instruction[]): number {
+  let hit = 0;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i].keyword === b[i].keyword && a[i].value === b[i].value) hit++;
+    else break; // 一旦不匹配，后续层全部失效
+  }
+  return hit;
+}
+```
+
+> 运行方式：`npx tsx examples/96-01-docker-linux.ts`
+
+### 应用实践
+
+- **顺序原则**：把变化频率低的指令放前面（`FROM` → 系统依赖 → `npm ci` → 源码拷贝 → 构建）
+- **COPY 粒度**：先 `COPY package*.json` 再 `RUN npm ci`，最后 `COPY . .`，最大化缓存命中
+- **.dockerignore**：排除 `node_modules`、`.git`、`dist` 等，减小构建上下文（context）
+- **常用命令**：`docker build -t app:1.0 .`、`docker run -p 3000:3000 app:1.0`、`docker ps`、`docker logs -f <id>`、`docker exec -it <id> sh`
+
+## 96.2 多阶段构建与镜像瘦身
+
+### 概念解析
+
+多阶段构建（multi-stage build）用多个 `FROM`，每个 `FROM` 是一个阶段。最终镜像只保留最后一个阶段，可以把编译阶段的产物（如 `dist/`）拷贝到运行时镜像（如 `nginx:alpine`），丢弃编译工具链。
+
+```dockerfile
+# 阶段 1：构建
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# 阶段 2：运行时（只保留 nginx + 静态产物）
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+EXPOSE 80
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/96-01-docker-linux.ts（节选：多阶段瘦身）
+const multiStage = multiStageSize(
+  [
+    { name: "builder", base: "node:20", sizeMB: 350 },
+    { name: "runtime", base: "nginx:alpine", sizeMB: 40 },
+  ],
+  ["/app/dist"] // 只拷贝产物
+);
+// 结果：350MB → 45MB
+```
+
+### 应用实践
+
+| 镜像 | 大小 | 用途 |
+|---|---|---|
+| `node:20` | ~350MB | 构建阶段，工具链齐全 |
+| `node:20-alpine` | ~120MB | 轻量构建，体积小 |
+| `nginx:alpine` | ~40MB | 纯静态站点运行时 |
+| `node:20-slim` | ~80MB | Node 服务运行时 |
+
+- **静态站点**：`nginx:alpine` 托管 `dist/`，只需 40MB
+- **Node 服务**：`node:20-slim` 运行，拷贝 `dist` + `package.json` + `npm ci --omit=dev`
+- **Alpine 注意**：用 musl libc，某些原生模块（如 `sharp`）需 `apk add` 依赖或换 `slim`
+
+## 96.3 docker-compose 服务编排
+
+### 概念解析
+
+`docker-compose.yml` 用 YAML 定义多容器应用（前端 + 后端 + 数据库 + 缓存），一条命令 `docker compose up` 拉起全部服务。
+
+```yaml
+services:
+  web:
+    build: .
+    ports: ["3000:3000"]
+    depends_on: [api]
+  api:
+    image: node:20
+    depends_on: [db, redis]
+  db:
+    image: postgres:16
+    environment: { POSTGRES_PASSWORD: secret }
+    volumes: ["db-data:/var/lib/postgresql/data"]
+  redis:
+    image: redis:7-alpine
+volumes:
+  db-data:
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/96-01-docker-linux.ts（节选：依赖环检测）
+function hasCycle(services: ComposeService[]): boolean {
+  // DFS 三色标记法检测循环依赖
+  const stack = new Set<string>();
+  function dfs(node: string): boolean {
+    if (stack.has(node)) return true;
+    stack.add(node);
+    for (const dep of graph.get(node) ?? []) if (dfs(dep)) return true;
+    stack.delete(node);
+    return false;
+  }
+}
+```
+
+### 应用实践
+
+- **depends_on**：只保证启动顺序，不保证服务就绪；用 `healthcheck` + `condition: service_healthy`
+- **volumes**：数据持久化（数据库数据），用命名卷 `db-data` 而非 bind mount
+- **环境变量**：`.env` 文件 + `${VAR}` 占位，敏感信息不要写进镜像
+- **本地开发**：用 bind mount 把源码挂进去，配合热更新
+
+## 96.4 Linux 文件权限与进程信号
+
+### 概念解析
+
+**文件权限**：`rwxr-xr--` 分三组（owner/group/other），`r=4 w=2 x=1`，对应数字 `754`。
+
+```bash
+ls -l app.js
+# -rw-r--r--  1 alice  dev  1024 Nov  3 app.js
+# ↑↑↑↑↑↑↑↑↑↑   ↑       ↑
+# 权限位        owner   group
+```
+
+**进程信号**：
+- `SIGTERM`（15）：可捕获，进程应清理资源后退出（优雅退出）
+- `SIGKILL`（9）：不可捕获，内核强杀，可能丢数据
+- `SIGINT`（2）：Ctrl+C
+
+### 完整代码示例
+
+```ts
+// 文件: examples/96-01-docker-linux.ts（节选：权限 + 信号）
+function canAccess(fileMode, fileOwner, fileGroup, user, userGroups, action) {
+  const sym = numericToSymbolic(fileMode);
+  let idx = user === fileOwner ? 0 : userGroups.includes(fileGroup) ? 3 : 6;
+  const group = sym.slice(idx, idx + 3);
+  const bit = action === "read" ? 0 : action === "write" ? 1 : 2;
+  return group[bit] !== "-";
+}
+```
+
+### 应用实践
+
+**常用 Linux 命令**：
+
+| 命令 | 作用 |
+|---|---|
+| `chmod 755 file` / `chmod +x` | 改权限 |
+| `chown user:group file` | 改属主 |
+| `ps aux` / `top` | 查看进程 |
+| `kill -15 <pid>` / `kill -9 <pid>` | 发信号 |
+| `df -h` / `du -sh *` | 磁盘占用 |
+| `netstat -tlnp` / `ss -tlnp` | 端口监听 |
+| `tail -f app.log` | 实时日志 |
+| `grep -rn "error" /var/log` | 搜索日志 |
+
+**前端排障场景**：
+- 页面 502 → `ss -tlnp` 看端口是否监听、`docker ps` 看容器是否存活
+- 上传失败 → `df -h` 看磁盘是否满、`du -sh uploads` 看目录大小
+- 权限 denied → `ls -l` 看文件属主和权限、`id` 看当前用户组
+
+## 96.5 CI/CD 中的 Docker 与服务器排障
+
+### 概念解析
+
+CI/CD 流水线（GitHub Actions / GitLab CI）典型步骤：`lint → test → build → docker build → push → deploy`。Docker 让构建产物可移植、环境一致。
+
+```yaml
+# .github/workflows/deploy.yml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci && npm run build
+      - name: Build & Push
+        run: |
+          docker build -t ${{ secrets.REGISTRY }}/app:${{ github.sha }} .
+          docker push ${{ secrets.REGISTRY }}/app:${{ github.sha }}
+```
+
+### 应用实践
+
+- **镜像标签**：用 `git sha` 或 `版本号`，不用 `latest`（不可追溯）
+- **缓存加速**：CI 中用 `docker buildx --cache-from` 复用远程缓存层
+- **健康检查**：Dockerfile 加 `HEALTHCHECK`，compose 中 `condition: service_healthy`
+- **优雅退出**：Node 进程监听 `SIGTERM`，停止接受新请求、处理完在途请求后退出
+  ```js
+  process.on("SIGTERM", () => server.close(() => process.exit(0)));
+  ```
+- **服务器排障流程**：`docker ps` → `docker logs <id>` → `docker exec -it <id> sh` → 容器内排查
+
+## 96.6 自测题
+
+<details>
+<summary>1. Docker 层缓存的原理是什么？怎样写 Dockerfile 能最大化缓存命中？</summary>
+
+每层指令对应一个缓存层，**从前往后比对，某层不匹配则该层及之后全部重建**。最大化命中：把变化频率低的指令放前面（系统依赖 → 依赖安装 → 源码 → 构建），`COPY package*.json` 单独一层再 `npm ci`，最后 `COPY . .`。
+</details>
+
+<details>
+<summary>2. 多阶段构建解决了什么问题？静态站点和 Node 服务分别推荐什么基础镜像？</summary>
+
+解决**最终镜像过大**问题：编译阶段需要完整工具链，运行时不需要。多阶段只把产物拷贝到轻量运行时镜像。静态站点用 `nginx:alpine`（~40MB），Node 服务用 `node:20-slim`（~80MB）。
+</details>
+
+<details>
+<summary>3. Linux 权限 `rwxr-xr--` 对应的数字是多少？owner 可读写、其他只读的权限数字是多少？</summary>
+
+`rwxr-xr--` → owner rwx=7, group r-x=5, other r--=4 → **754**。owner 可读写(rw-)、其他只读(r--) → owner=6, group=4, other=4 → **644**。
+</details>
+
+<details>
+<summary>4. SIGTERM 和 SIGKILL 有什么区别？为什么容器化应用要处理 SIGTERM？</summary>
+
+`SIGTERM`（15）可被进程捕获，用于优雅退出（清理资源、处理在途请求）；`SIGKILL`（9）不可捕获，内核强杀。容器编排（k8s/docker stop）先发 SIGTERM，等超时后才 SIGKILL。应用处理 SIGTERM 才能避免请求被中断、数据丢失。
+</details>
+
+<details>
+<summary>5. docker-compose 的 depends_on 能保证服务就绪吗？怎么正确处理依赖？</summary>
+
+不能，`depends_on` 只保证**启动顺序**，不保证服务（如数据库）已就绪可连接。正确做法：给服务加 `healthcheck`，依赖方用 `depends_on: { service: { condition: service_healthy } }`，或在应用启动时做重试连接。
+</details>
+
+## 96.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+|---|---|---|
+| Dockerfile 缓存 | 每次构建都重新 npm install | 先 `COPY package*.json` 再 `npm ci`，最后 `COPY . .` |
+| 镜像过大 | 镜像 1GB+ | 多阶段构建 + alpine/slim 基础镜像，运行时只拷产物 |
+| 上下文过大 | build 很慢 | 写 `.dockerignore` 排除 node_modules/.git/dist |
+| 端口冲突 | 容器起不来 | `docker run -p` 前用 `ss -tlnp` 查端口是否被占 |
+| 容器不优雅退出 | 请求被中断 | Node 监听 SIGTERM 调 server.close()，k8s 设 terminationGracePeriodSeconds |
+| 权限 denied | 容器内写文件失败 | 镜像里 `chown` 或 `RUN adduser` 用非 root 用户运行 |
+| 数据丢失 | 删容器后数据库没了 | 数据库用命名 volume 持久化，不要写在容器层 |
+| Alpine 原生模块 | npm install 报错 | 装 `apk add --no-cache python3 make g++`，或换 `node:slim` |

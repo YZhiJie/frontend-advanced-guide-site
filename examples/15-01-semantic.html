@@ -1,0 +1,18 @@
+<!-- 文件: examples/15-01-semantic.html —— [浏览器] div 汤 vs 语义化:同一个界面的两种写法 -->
+
+<!-- ❌ div 汤:读屏软件只能逐个朗读"可点击,无标签",用户无法按标题导航 -->
+<div class="page">
+    <div class="header"><div class="logo"></div></div>
+    <div class="title" onclick="go()">商品详情</div>
+    <div class="btn" onclick="buy()">立即购买</div>
+</div>
+
+<!-- ✅ 语义化:免费获得 —— 标题层级导航(读屏 H 键跳转)、按钮回车/空格触发、
+     焦点自动可达、SEO 抓取结构化信息。一行 ARIA 都不用写 -->
+<div class="page">
+    <header><img class="logo" alt="站点 Logo" /></header>
+    <main>
+        <h1>商品详情</h1>            <!-- 标题提供文档大纲 -->
+        <button onclick="buy()">立即购买</button>  <!-- 原生 button 自带键盘与角色 -->
+    </main>
+</div>

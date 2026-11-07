@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>18-05 Worklet（PaintWorklet + AudioWorklet）</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+        .beads {
+            width: 100%;
+            height: 80px;
+            border: 1px dashed #94a3b8;
+            border-radius: 8px;
+            --bead-color: #ef4444;
+            --bead-count: 24;
+            background: paint(corner-beads);
+        }
+        .controls { margin: 16px 0; }
+        button { padding: 8px 16px; cursor: pointer; }
+        #meter { width: 100%; height: 18px; background: #e2e8f0; border-radius: 9px; overflow: hidden; margin-top: 10px; }
+        #level { height: 100%; width: 0; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); }
+        .tip { color: #64748b; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <h2>Worklet 演示</h2>
+
+    <h3>① PaintWorklet 程序化底纹</h3>
+    <div class="beads" id="beads"></div>
+    <div class="controls">
+        <label>圆点数量：<input type="range" id="count" min="4" max="60" value="24" /></label>
+        <label>颜色：<input type="color" id="color" value="#ef4444" /></label>
+    </div>
+    <p class="tip" id="paintTip">正在加载 paint-worklet.js…</p>
+
+    <h3>② AudioWorklet 麦克风音量条</h3>
+    <button id="mic">授权麦克风并开始</button>
+    <div id="meter"><div id="level"></div></div>
+    <p class="tip">需要麦克风权限；处理逻辑运行在实时音频线程，仅把音量数值通过 port 节流发到主线程。</p>
+
+    <script src="./audio-main.js"></script>
+    <script>
+        // PaintWorklet 加载与属性联动
+        if ('paintWorklet' in CSS) {
+            CSS.paintWorklet.addModule('./paint-worklet.js').then(() => {
+                document.querySelector('#paintTip').textContent = '✅ PaintWorklet 已加载，拖动滑块观察重绘';
+            });
+            const beads = document.querySelector('#beads');
+            document.querySelector('#count').addEventListener('input', (e) => {
+                beads.style.setProperty('--bead-count', e.target.value);
+            });
+            document.querySelector('#color').addEventListener('input', (e) => {
+                beads.style.setProperty('--bead-color', e.target.value);
+            });
+        } else {
+            document.querySelector('#paintTip').textContent = '当前浏览器不支持 PaintWorklet，已降级为纯色背景';
+            document.querySelector('#beads').style.background = '#f1f5f9';
+        }
+    </script>
+</body>
+</html>

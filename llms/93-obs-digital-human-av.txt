@@ -1,0 +1,209 @@
+# 第九十三部分 · obs-websocket 与数字人音视频（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/93-obs-digital-human-av
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九十三部分 · obs-websocket 与数字人音视频
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第九十二部分 · 3D 与数字孪生可视化](./92-3d-digital-twin.md)｜关联章节：[第六十八部分 · 音视频架构](./68-audio-video-architecture.md) · [第五十九部分 · 前端监控与可观测性](./59-monitoring-observability.md)
+
+> 💡 **本章特色**：数字人直播控台 JD 明确要求"obs-websocket 控制 OBS、TRTC/火山引擎实时音视频、flv.js 直播播放、数字人 TTS 口型驱动"。数字人直播是当下 AI + 直播的核心场景。本章讲清五件事：**obs-websocket 协议**（场景/源/推流控制）、**直播流协议选型**（RTMP/FLV/HLS/WebRTC）、**数字人口型同步**（文本→TTS→音素→驱动）、**多路混流与直播控台**、**音视频 QoS 监控**。配套示例 [93-01-obs-digital-human-av.ts](./examples/93-01-obs-digital-human-av.ts) 跑通 OBS 协议、协议路由、口型同步、QoS 评分。
+
+## 本部分内容
+
+- [93.1 obs-websocket：程序化控制 OBS](#_93-1-obs-websocket-程序化控制-obs)
+- [93.2 直播流协议选型与播放](#_93-2-直播流协议选型与播放)
+- [93.3 数字人口型同步与驱动](#_93-3-数字人口型同步与驱动)
+- [93.4 直播控台：多路混流与互动](#_93-4-直播控台-多路混流与互动)
+- [93.5 音视频 QoS 监控与弱网优化](#_93-5-音视频-qos-监控与弱网优化)
+- [93.6 自测题](#_93-6-自测题)
+- [93.7 本章避坑清单](#_93-7-本章避坑清单)
+
+---
+
+## 93.1 obs-websocket：程序化控制 OBS
+
+### 概念解析
+
+OBS Studio 是直播推流的事实标准，**obs-websocket** 插件（v28+ 内置）通过 WebSocket 暴露 OBS 的全部能力：切换场景、控制源可见性/静音、开始/停止推流、调整音量等。
+
+协议是 **Request-Response** 模式，v5 的请求格式：
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "SetCurrentProgramScene",
+    "requestData": { "sceneName": "直播主场景" }
+  }
+}
+```
+
+### 完整代码示例
+
+```ts
+// 文件: examples/93-01-obs-digital-human-av.ts（节选：OBS 请求处理）
+function handleObsRequest(state: ObsState, req: ObsRequest): ObsResponse {
+  switch (req.requestType) {
+    case "SetCurrentProgramScene":
+      if (!state.scenes.includes(name)) return fail(600, "场景不存在");
+      state.currentScene = name; return ok();
+    case "StartStopStreaming":
+      state.streaming = !state.streaming;
+      return ok({ streaming: state.streaming });
+  }
+}
+```
+
+> 运行方式：`npx tsx examples/93-01-obs-digital-human-av.ts`
+
+### 应用实践
+
+**常用请求**：
+
+| 请求类型 | 作用 |
+|---|---|
+| `SetCurrentProgramScene` | 切换主场景 |
+| `StartStopStreaming` | 开关推流 |
+| `SetInputMute` | 源静音 |
+| `SetSceneItemEnabled` | 源显示/隐藏 |
+| `SetInputVolume` | 调整音量 |
+| `TriggerHotkeyByName` | 触发快捷键 |
+
+**事件订阅**：`StreamStateChanged`、`SceneItemCreated`、`InputMuteStateChanged`，用 `op: 1` SubscribeEvents 订阅。
+
+## 93.2 直播流协议选型与播放
+
+### 概念解析
+
+直播链路：**采集 → 编码 → 推流 → 媒体服务器 → 分发 → 播放**。不同协议的延迟和兼容性差异巨大：
+
+| 协议 | 延迟 | 播放器 | 适用场景 |
+|---|---|---|---|
+| RTMP | 1-3s | 需转码 | 推流（主播→服务器） |
+| HTTP-FLV | 1-3s | flv.js（PC） | 海量 PC 直播 |
+| HLS | 5-30s | 原生支持 | 移动端/海量 |
+| WebRTC | < 500ms | TRTC/火山 SDK | 连麦/互动/数字人驱动 |
+
+### 完整代码示例
+
+```ts
+// 文件: examples/93-01-obs-digital-human-av.ts（节选：协议选型路由）
+function selectProtocol(scene: StreamScene): StreamProtocol {
+  if (scene.latency === "ultra-low") return "WebRTC";
+  if (scene.latency === "low" && scene.audience !== "mass") return "RTMP";
+  if (scene.audience === "mass" && scene.platform !== "pc") return "HLS";
+  return "HTTP-FLV";
+}
+```
+
+### 应用实践
+
+- **flv.js**：PC 端 H5 直播标配，`flvjs.createPlayer({ type: "flv", url })`，注意 `isLive: true`
+- **TRTC/火山引擎**：超低延迟互动直播，SDK 内部用 WebRTC，支持旁路推流到 CDN
+- **多码率自适应**：ABR（Adaptive Bitrate），弱网自动降码率，HLS 用 EXT-X-STREAM-INF
+
+## 93.3 数字人口型同步与驱动
+
+### 概念解析
+
+数字人驱动链路：**文本 → TTS 音频 → 音素（Phoneme）→ 口型（Viseme）→ 驱动 3D/2D 虚拟形象**。
+
+核心是**音频与口型的时间对齐**：TTS 返回每个词/音素的起止时间，前端按时间轴切换口型。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/93-01-obs-digital-human-av.ts（节选：口型时间轴）
+function generateVisemeTimeline(tts: TTSResult) {
+  return tts.words.map((w) => ({
+    viseme: charToViseme(w.text),
+    start: w.start,
+    end: w.end,
+  }));
+}
+```
+
+### 应用实践
+
+- **TTS 方案**：阿里云/火山引擎/微软 Azure 返回带时间戳的音素序列；自研用 Forced Alignment（如 Montreal Forced Aligner）
+- **口型基元**：通常 10-15 个基础口型（A/E/I/O/U/F/M/SIL 等），用 blendshape / morph target 过渡
+- **驱动方式**：
+  - Web 3D：Three.js + morph target，`mesh.morphTargetInfluences[i] = 0.8`
+  - 2D 骨骼：龙骨 / Spine / Live2D
+- **低延迟驱动**：实时对话场景用流式 TTS（边生成边播），口型随音频帧实时更新
+
+## 93.4 直播控台：多路混流与互动
+
+### 概念解析
+
+直播控台是主播/运营的操作面板，核心能力：**多路画面管理、混流布局、弹幕/礼物互动、商品挂载**。
+
+### 应用实践
+
+- **画面布局**：主画面 + 悬浮窗（数字人/摄像头/商品图），用绝对定位 + z-index 管理层级
+- **弹幕系统**：WebSocket 接收，Canvas 或 DOM 渲染，分轨道（track）防重叠，用 `requestAnimationFrame` 做横向滚动动画
+- **礼物特效**：收到礼物触发 Lottie/CSS 动画，连击（combo）累加计数
+- **商品挂载**：小黄车列表，点击商品在直播画面叠加商品卡片，调用 obs-websocket 切到商品展示场景
+
+## 93.5 音视频 QoS 监控与弱网优化
+
+### 概念解析
+
+QoS（Quality of Service）监控关注：**码率、帧率、丢包率、RTT、抖动**。弱网下需自动降级保障可用性。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/93-01-obs-digital-human-av.ts（节选：健康分）
+function avHealthScore(s: AVStats): number {
+  const bitrateScore = s.bitrate < 500 ? 30 : s.bitrate > 4000 ? 80 : 100;
+  const fpsScore = s.fps >= 24 ? 100 : s.fps >= 15 ? 70 : 30;
+  const lossScore = s.packetLoss === 0 ? 100 : s.packetLoss < 2 ? 70 : 30;
+  const rttScore = s.rtt < 100 ? 100 : s.rtt < 300 ? 70 : 30;
+  return Math.round((bitrateScore + fpsScore + lossScore + rttScore) / 4);
+}
+```
+
+### 应用实践
+
+- **WebRTC Stats**：`peerConnection.getStats()` 获取码率、丢包、RTT
+- **弱网降级策略**：降分辨率（1080p→720p→480p）→ 降帧率（30→15）→ 关摄像头保留音频
+- **FEC/重传**：WebRTC 内置 NACK（重传）、FEC（前向纠错）、PLI（关键帧请求）
+- **卡顿检测**：播放端 `video.buffered` 与 `currentTime` 差值 > 阈值则触发缓冲
+
+## 93.6 自测题
+
+<details>
+<summary>1. obs-websocket v5 的请求/响应协议格式是什么？切换场景和开关推流分别用哪个请求类型？</summary>
+
+请求格式：`{ op: 6, d: { requestType, requestData } }`，响应 `{ op: 7, d: { requestType, requestStatus: { result, code } } }`。切换场景用 `SetCurrentProgramScene`，推流开关用 `StartStopStreaming`。
+</details>
+
+<details>
+<summary>2. 直播四种协议（RTMP/HTTP-FLV/HLS/WebRTC）的延迟和适用场景分别是什么？数字人实时互动该选哪个？</summary>
+
+RTMP（1-3s，推流）、HTTP-FLV（1-3s，PC 海量播放）、HLS（5-30s，移动海量）、WebRTC（<500ms，互动连麦）。数字人实时互动选 **WebRTC**（TRTC/火山引擎），保证低延迟。
+</details>
+
+<details>
+<summary>3. 数字人口型同步的完整链路是什么？为什么需要 TTS 返回带时间戳的音素？</summary>
+
+链路：文本 → TTS 音频 → 音素（Phoneme）→ 口型（Viseme）→ 驱动虚拟形象。需要时间戳是为了让口型与音频精确对齐：每个音素在哪个时间点出现、持续多久，前端按时间轴切换口型，否则会出现"声音和嘴型对不上"。
+</details>
+
+<details>
+<summary>4. 音视频 QoS 监控看哪几个核心指标？弱网降级的顺序是什么？</summary>
+
+核心指标：码率（bitrate）、帧率（fps）、丢包率（packetLoss）、往返时延（RTT）。弱网降级顺序：降分辨率 → 降帧率 → 关摄像头保留音频，优先保证音频连通性。
+</details>
+
+## 93.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+|---|---|---|
+| obs-websocket 连接 | 连不上 OBS | 确认 OBS 工具→obs-websocket 设置里已启用，端口/密码正确 |
+| obs-websocket v4/v5 | API 调用无响应 | v28+ 内置 v5，v4 是旧插件，`requestType` 名不同（如 SetSceneItemProperties→SetSceneItemEnabled） |
+| flv.js 播放 | 直播流卡住/延迟越来越大 | 设 `isLive: true`，监听 `statisticsInfo` 延迟超阈值时 `flvPlayer.unload()` 重连 |
+| 口型同步 | 嘴型和声音对不上 | 必须用带音素时间戳的 TTS，本地用 `audio.currentTime` 驱动口型而非 setTimeout |
+| 数字人延迟高 | 对话卡顿 | 用流式 TTS + WebRTC，不用 HLS（延迟 5s+） |
+| 弹幕性能 | 弹幕多了卡顿 | 用 Canvas 渲染而非 DOM，限制同屏数量，复用对象池 |

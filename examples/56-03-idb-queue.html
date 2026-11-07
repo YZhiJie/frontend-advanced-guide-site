@@ -1,0 +1,109 @@
+<!-- 文件: examples/56-03-idb-queue.html -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>离线写队列：IndexedDB 适配器</title>
+<style>body{font:14px/1.6 system-ui,sans-serif;margin:32px}pre{background:#f5f5f5;padding:12px}button{margin-right:8px}</style>
+</head>
+<body>
+<h1>离线写队列（真实 IndexedDB 持久层）</h1>
+<button id="add">入队一条</button>
+<button id="flush">模拟上线重放</button>
+<button id="list">查看队列</button>
+<pre id="log"></pre>
+<script>
+const DB_NAME = "fag-outbox";
+const STORE = "pending";
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const store = req.result.createObjectStore(STORE, { keyPath: "id" });
+      store.createIndex("by-created", "createdAt");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function tx(db, mode) {
+  return db.transaction(STORE, mode).objectStore(STORE);
+}
+
+const queue = {
+  async enqueue(op) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const req = tx(db, "readwrite").add({ attempts: 0, createdAt: Date.now(), status: "pending", ...op });
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  },
+  async list() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const req = tx(db, "readonly").index("by-created").getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  },
+  async update(id, patch) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const store = tx(db, "readwrite");
+      const get = store.get(id);
+      get.onsuccess = () => {
+        const row = get.result;
+        if (!row) return reject(new Error("op not found"));
+        store.put({ ...row, ...patch });
+      };
+      store.transaction.oncomplete = () => resolve();
+      store.transaction.onerror = () => reject(store.transaction.error);
+    });
+  },
+  async remove(id) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const req = tx(db, "readwrite").delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  },
+};
+
+const log = (m) => (document.getElementById("log").textContent += m + "\n");
+
+document.getElementById("add").onclick = async () => {
+  const id = await queue.enqueue({ type: "order.create", payload: { sku: "A-1" }, idempotencyKey: crypto.randomUUID() });
+  log(`入队 ${id}`);
+};
+
+document.getElementById("flush").onclick = async () => {
+  const rows = await queue.list();
+  for (const row of rows) {
+    if (row.status !== "pending") continue;
+    // 真实实现：fetch 失败 → attempts+1 + 指数退避；成功 → remove
+    log(`重放 ${row.id}（第 ${row.attempts + 1} 次）`);
+    await queue.remove(row.id);
+  }
+  log(`队列剩余 ${(await queue.list()).length} 条`);
+};
+
+document.getElementById("list").onclick = async () => {
+  log(JSON.stringify(await queue.list(), null, 2));
+};
+
+// 可选：注册 Background Sync，让浏览器在恢复网络后代为唤醒
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./56-03-sw.js").then(async (reg) => {
+    if ("sync" in reg) {
+      await reg.sync.register("fag-outbox-flush");
+      log("已注册 Background Sync: fag-outbox-flush");
+    }
+  }).catch(() => log("Service Worker 注册失败（需 HTTPS/localhost）"));
+}
+</script>
+</body>
+</html>

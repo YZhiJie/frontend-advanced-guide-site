@@ -1,0 +1,5 @@
+{
+    "source": "network-only",
+    "message": "我是不进缓存的实时数据，离线请求会失败",
+    "time": "fetch 时由服务端/静态服务器返回"
+}

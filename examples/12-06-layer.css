@@ -1,0 +1,17 @@
+/* 文件: examples/12-06-layer.css —— @layer:接管"优先级战争" */
+/* 三层优先级从低到高:reset < framework < local —— 组件样式永远能覆盖框架样式 */
+@layer reset, framework, local;
+
+@layer reset {
+    * { margin: 0; box-sizing: border-box; }
+}
+
+@layer framework {
+    /* 第三方组件库的样式放这里 */
+    .btn { padding: 12px 24px; }
+}
+
+@layer local {
+    /* 业务样式无条件覆盖 framework 层,不再需要 !important */
+    .btn { padding: 8px 16px; }
+}

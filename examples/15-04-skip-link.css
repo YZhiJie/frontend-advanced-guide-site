@@ -1,0 +1,22 @@
+/* 文件: examples/15-04-skip-link.css —— 跳转主内容链接 + 焦点可见性 */
+
+/* 键盘用户每次 Tab 都要穿过整个导航才能到正文 —— skip link 一键直达 */
+.skip-link {
+    position: absolute;
+    left: -9999px;                    /* 平时隐藏 */
+}
+.skip-link:focus {
+    left: 8px;
+    top: 8px;                         /* 获得焦点时出现在左上角 */
+    background: #1890ff;
+    color: #fff;
+    padding: 8px 16px;
+    z-index: 9999;
+}
+/* 用法: <a class="skip-link" href="#main">跳到主内容</a> */
+
+/* 焦点必须可见:不要粗暴 outline: none —— 换成更精致的自定义样式 */
+:focus-visible {                      /* 只对键盘聚焦生效,鼠标点击不显示 */
+    outline: 2px solid #1890ff;
+    outline-offset: 2px;
+}

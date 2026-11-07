@@ -1,0 +1,233 @@
+[
+  {
+    "dir": "01-deep-clone-lab",
+    "title": "生产级 deepClone 实验室",
+    "desc": "手写一个覆盖常见坑位的 `deepClone`，把「基本类型、Date/RegExp/Map/Set、数组与纯对象、循环引用、Symbol 键、原型链保留、函数与不可克隆对象原样返回」逐一落地，并用真实测试锁住行为。",
+    "refs": [
+      {
+        "page": "01-javascript-advanced",
+        "anchor": "_1-8-手写高频工具函数",
+        "num": "1.8"
+      },
+      {
+        "page": "01-javascript-advanced",
+        "anchor": "_1-11-symbol-与集合类型",
+        "num": "1.11"
+      }
+    ]
+  },
+  {
+    "dir": "02-type-safe-event-bus",
+    "title": "类型安全的事件总线",
+    "desc": "用泛型 + 条件类型 + `infer` 约束一个事件总线的 API：事件名限定在 `keyof Events`，handler 参数由 `Events[K]` 推导，`emit` 的参数列表由条件类型决定（无参事件可省略实参）。",
+    "refs": [
+      {
+        "page": "02-typescript",
+        "anchor": "_2-2-泛型深入",
+        "num": "2.2"
+      },
+      {
+        "page": "02-typescript",
+        "anchor": "_2-3-条件类型与-infer",
+        "num": "2.3"
+      }
+    ]
+  },
+  {
+    "dir": "03-monorepo-toolkit",
+    "title": "最小 monorepo 工具链",
+    "desc": "不引任何第三方构建工具，只用 Node 原生能力（`node:fs`、`node:child_process`）演示 workspace 依赖编排：读根 `package.json` 的 `workspaces` 与各子包 `package.json`，构建包依赖图，做拓扑排序（含环检测），再按拓扑序执行各子包 script。",
+    "refs": [
+      {
+        "page": "03-engineering",
+        "anchor": "_3-6-monorepo-实践",
+        "num": "3.6"
+      },
+      {
+        "page": "03-engineering",
+        "anchor": "_3-7-ci-cd-与质量工具链",
+        "num": "3.7"
+      }
+    ]
+  },
+  {
+    "dir": "04-mini-framework-lab",
+    "title": "手写前端框架小工程",
+    "desc": "用 TypeScript + Node 原生模块手写一个完整的前端框架闭环：**虚拟 DOM (h/diff) → Proxy 响应式 (reactive/effect) → 优先级调度器 (high/normal/low/idle) → Fiber 协调 (beginWork/completeWork + 时间片)**。",
+    "refs": [
+      {
+        "page": "04-frameworks",
+        "anchor": "_4-1-react-架构与-fiber-原理",
+        "num": "4.1"
+      },
+      {
+        "page": "04-frameworks",
+        "anchor": "_4-4-vue-响应式系统原理",
+        "num": "4.4"
+      }
+    ]
+  },
+  {
+    "dir": "05-state-store-lab",
+    "title": "手写极简响应式状态容器",
+    "desc": "用不到 200 行 TypeScript 手写一个极简状态容器：`setState` 不可变更新（对象浅合并 + 函数式 updater）、`subscribe` 订阅与取消、`select` 记忆化选择器、`batch` 合并通知，以及包裹 `setState` 的中间件机制，对标 Zustand 的设计思想。",
+    "refs": [
+      {
+        "page": "05-state-management",
+        "anchor": "_5-1-状态管理设计思想",
+        "num": "5.1"
+      },
+      {
+        "page": "05-state-management",
+        "anchor": "_5-3-zustand-轻量方案",
+        "num": "5.3"
+      }
+    ]
+  },
+  {
+    "dir": "06-request-layer-lab",
+    "title": "手写请求层实验室",
+    "desc": "把「TTL 缓存、并发去重、指数退避重试、超时与取消、竞态最新胜出」五件事组装成一个可注入 fetcher 的请求层：`createClient` 对外只暴露 `request / invalidate / clear`，底层取数与时钟、随机、等待全部可注入，测试离线且确定。",
+    "refs": [
+      {
+        "page": "06-network",
+        "anchor": "_6-2-缓存策略详解",
+        "num": "6.2"
+      },
+      {
+        "page": "06-network",
+        "anchor": "_6-4-请求层封装实战",
+        "num": "6.4"
+      },
+      {
+        "page": "06-network",
+        "anchor": "_6-5-竞态处理与请求取消",
+        "num": "6.5"
+      }
+    ]
+  },
+  {
+    "dir": "07-xss-sanitizer-lab",
+    "title": "手写 XSS 清洗与转义工具箱",
+    "desc": "纯 TypeScript、零运行时依赖，手写一套前端 XSS 防御工具：HTML 文本/属性转义、URL 协议白名单、HTML 实体解码，以及一个极简 allowlist 清洗器，并用真实攻击向量做回归。",
+    "refs": [
+      {
+        "page": "07-security",
+        "anchor": "_7-1-xss-跨站脚本攻击",
+        "num": "7.1"
+      },
+      {
+        "page": "07-security",
+        "anchor": "_7-3-其他常见攻击与防御",
+        "num": "7.3"
+      }
+    ]
+  },
+  {
+    "dir": "08-mini-network-stack-lab",
+    "title": "迷你网络栈实验室",
+    "desc": "用 TypeScript + Node 原生模块（http、https、URL、crypto、stream）手写一个完整网络栈闭环——HTTP 报文解析、fetch 实现、EventSource / SSE 客户端，以及 HTTP 缓存策略。四个模块环环相扣：fetch 用 http.createConnection 发真实请求，回来的响应能被 http-parser 解析（反向场景测试）、被 cache.ts 装饰、被 sse.ts 消费成事件流。",
+    "refs": [
+      {
+        "page": "06-network",
+        "anchor": "_6-2-缓存策略详解",
+        "num": "6.2"
+      },
+      {
+        "page": "06-network",
+        "anchor": "_6-3-http-报文结构",
+        "num": "6.3"
+      },
+      {
+        "page": "06-network",
+        "anchor": "_6-4-请求层封装实战",
+        "num": "6.4"
+      },
+      {
+        "page": "06-network",
+        "anchor": "_6-7-sse-与-http-streaming",
+        "num": "6.7"
+      }
+    ]
+  },
+  {
+    "dir": "09-mini-test-lab",
+    "title": "手写迷你测试框架",
+    "desc": "纯 TypeScript、零运行时依赖地手写一个迷你测试框架，把「断言库 + 运行器 + mock」的原理讲透：用 describe/it 收集用例与钩子，用 expect 断言、mockFn 打桩，最后由 run() 统一执行并汇总结果。",
+    "refs": [
+      {
+        "page": "09-testing",
+        "anchor": "_9-1-测试金字塔与整体策略",
+        "num": "9.1"
+      },
+      {
+        "page": "09-testing",
+        "anchor": "_9-2-单元测试与-vitest",
+        "num": "9.2"
+      }
+    ]
+  },
+  {
+    "dir": "10-virtual-list-lab",
+    "title": "手写虚拟列表与帧调度",
+    "desc": "用纯 TypeScript（零运行时依赖、不依赖 DOM）手写虚拟列表核心算法与帧调度器：定高/变高两种模式的窗口计算、前缀和偏移表与二分定位、overscan 缓冲夹紧，以及把同一帧内多次调度合并为一次执行的注入式 rAF 调度器；所有外部依赖（帧回调等）均可注入，测试完全离线确定。",
+    "refs": [
+      {
+        "page": "10-browser-rendering",
+        "anchor": "_10-3-渲染性能优化实战",
+        "num": "10.3"
+      },
+      {
+        "page": "10-browser-rendering",
+        "anchor": "_10-4-高性能虚拟列表",
+        "num": "10.4"
+      }
+    ]
+  },
+  {
+    "dir": "11-state-machine-lab",
+    "title": "手写有限状态机",
+    "desc": "用纯 TypeScript 手写一个零依赖、类型安全的有限状态机：以「转移表」声明状态与事件，支持守卫、进入/离开钩子与动作、订阅状态转移，并让非法事件名在编译期就被拒绝，把设计模式里的「状态模式」讲透。",
+    "refs": [
+      {
+        "page": "11-patterns-architecture",
+        "anchor": "_11-1-前端常用设计模式",
+        "num": "11.1"
+      }
+    ]
+  },
+  {
+    "dir": "12-mini-browser-engine-lab",
+    "title": "手写浏览器内核小工程",
+    "desc": "用纯 TypeScript + Node 原生模块手写一个精简但闭环的浏览器内核子系统：从 CSS 源码到 AST、从 selector 解析到 DOM 匹配、从 specificity 层叠到最终样式、再从盒模型到 Flex 布局，完整串起浏览器渲染 pipeline 里 **CSSOM → Style → Layout** 这三个阶段。",
+    "refs": [
+      {
+        "page": "10-browser-rendering",
+        "anchor": "_10-1-从输入-url-到页面呈现",
+        "num": "10.1"
+      },
+      {
+        "page": "10-browser-rendering",
+        "anchor": "_10-2-渲染流程与重排重绘",
+        "num": "10.2"
+      }
+    ]
+  },
+  {
+    "dir": "13-ssr-island-lab",
+    "title": "最小 SSR 与岛屿 hydration 协议",
+    "desc": "不引 React/Vue、不依赖 DOM，用纯 Node 手写一条最小「服务端渲染 → 交付静态 HTML + 岛屿清单 → 客户端按清单 hydration」的链路：`renderToString` 递归渲染并做 HTML 转义，把 `island: true` 的子树降级为 `data-island-id` 占位节点并收集岛屿描述，`hydrateIslands` 再按清单把注册表里的组件挂载到占位节点。",
+    "refs": [
+      {
+        "page": "13-ssr-meta-frameworks",
+        "anchor": "_13-1-渲染模式全景",
+        "num": "13.1"
+      },
+      {
+        "page": "13-ssr-meta-frameworks",
+        "anchor": "_13-2-hydration-原理与疑难排查",
+        "num": "13.2"
+      }
+    ]
+  }
+]

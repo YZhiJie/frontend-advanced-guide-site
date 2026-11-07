@@ -1,0 +1,52 @@
+<!-- 文件: examples/17-18-opfs-worker.html -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>OPFS + Worker 同步句柄</title>
+<style>body{font:14px/1.6 system-ui,sans-serif;margin:32px}pre{background:#f5f5f5;padding:12px}button{margin-right:8px}</style>
+</head>
+<body>
+<h1>OPFS：主线程异步写 vs Worker 同步句柄</h1>
+<button id="main">主线程写 1024 次</button>
+<button id="worker">Worker 同步写 1024 次</button>
+<button id="read">读取文件头部</button>
+<pre id="log"></pre>
+<script>
+const log = (m) => (document.getElementById("log").textContent += m + "\n");
+
+async function getFile() {
+  const root = await navigator.storage.getDirectory();
+  const dir = await root.getDirectoryHandle("fag-opfs", { create: true });
+  return dir.getFileHandle("bench.log", { create: true });
+}
+
+document.getElementById("main").onclick = async () => {
+  const file = await getFile();
+  const start = performance.now();
+  // 每次 createWritable 都会走一次异步 IO；小写入高频调用并不划算
+  const writable = await file.createWritable();
+  for (let i = 0; i < 1024; i++) await writable.write(`line ${i}\n`);
+  await writable.close();
+  log(`主线程异步写 1024 行：${(performance.now() - start).toFixed(1)}ms`);
+};
+
+document.getElementById("worker").onclick = () => {
+  const worker = new Worker("./17-18-opfs-worker.js", { type: "module" });
+  const start = performance.now();
+  worker.onmessage = (e) => {
+    log(`Worker 同步写 1024 行：${(performance.now() - start).toFixed(1)}ms（${e.data.bytes} bytes）`);
+    worker.terminate();
+  };
+  worker.onerror = (e) => log(`Worker 失败：${e.message}（需在 secure context + 支持 OPFS 的浏览器）`);
+  worker.postMessage({ count: 1024 });
+};
+
+document.getElementById("read").onclick = async () => {
+  const file = await getFile();
+  const text = await (await file.getFile()).slice(0, 200).text();
+  log(text || "(空文件)");
+};
+</script>
+</body>
+</html>

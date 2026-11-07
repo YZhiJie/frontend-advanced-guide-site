@@ -1,0 +1,92 @@
+# 文件: examples/09-10-ci-workflow.yml —— 完整测试流水线(GitHub Actions)
+# 实际项目放到 .github/workflows/ci.yml。详见 09-testing.md 9.9 节。
+#
+# 流水线四阶段:
+# 1. unit —— 静态检查(tsc/eslint) + 单测+集成+覆盖率 + 上传构建产物
+# 2. e2e —— 4 分片并行跑 Playwright,needs: unit 前置
+# 3. merge-reports —— 合并 E2E blob 报告为 HTML,if: always() 永远跑
+# 4. lighthouse —— 性能门禁(Lighthouse CI),needs: unit 前置
+#
+# 关键设计:
+# - cache: 'pnpm' 二次跑省 1~3 分钟
+# - needs: unit 让 E2E 在单测过后才跑,避免无谓浪费
+# - fail-fast: false 单分片失败不取消其他片,跑完看完整报告
+# - if: always() 失败也上传 trace/screenshot,便于定位
+# - pnpm install --frozen-lockfile 阻止 lockfile 漂移
+
+name: CI
+on: [push, pull_request]
+
+jobs:
+  # ---- 第一阶段:静态检查 + 单测 + 集成 ----
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'                 # 缓存 pnpm store,二次跑快很多
+      - run: npm i -g pnpm && pnpm install --frozen-lockfile
+      - run: pnpm typecheck             # tsc --noEmit
+      - run: pnpm lint                  # eslint
+      - run: pnpm test:coverage         # vitest run --coverage
+      - name: 上传覆盖率报告
+        uses: codecov/codecov-action@v4
+        with: { files: ./coverage/lcov.info }
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with: { name: build, path: dist }
+
+  # ---- 第二阶段:E2E 分片并行 ----
+  e2e:
+    needs: unit                          # 单测过了才跑 E2E,避免无谓浪费
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false                   # 单片失败不取消其他片,全部跑完看报告
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: 'pnpm' }
+      - run: npm i -g pnpm && pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with: { name: build, path: dist }
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --shard=${{ matrix.shard }}/4
+      - name: 上传 blob 报告(每片一份)
+        uses: actions/upload-artifact@v4
+        if: always()                     # 失败也上传,方便定位
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: blob-report
+
+  # ---- 第三阶段:合并 E2E 报告 ----
+  merge-reports:
+    if: always()                         # 即使 E2E 失败也合并,看完整报告
+    needs: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { pattern: blob-report-*, path: all-blob-reports }
+      - run: npx playwright merge-blob-reports --reporter html ./all-blob-reports
+      - uses: actions/upload-artifact@v4
+        with: { name: html-report, path: playwright-report }
+
+  # ---- 第四阶段:性能门禁 ----
+  lighthouse:
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: 'pnpm' }
+      - run: npm i -g pnpm && pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with: { name: build, path: dist }
+      - run: npx http-server dist -p 8080 &
+      - run: npm i -g @lhci/cli && lhci autorun
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_TOKEN }}

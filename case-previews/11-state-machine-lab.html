@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>手写有限状态机 · 在线预览</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#2a2f3a;--tx:#dde1e8;--dim:#8b93a3;--brand:#5eead4;--err:#f87171;--ok:#86efac;--info:#93c5fd}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--bg);color:var(--tx);font:14px/1.6 ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;padding:16px 18px 28px}
+h1{font-size:16px;margin-bottom:2px}
+header p{color:var(--dim);font-size:12px;margin-bottom:12px}
+.sec{margin-top:16px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.sec h2{font-size:13px;margin-bottom:8px;color:var(--brand)}
+.hint{font-size:12px;color:var(--dim);margin:-4px 0 8px}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+button{font:12px/1 inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:#1f2430;color:var(--tx);cursor:pointer}
+button:hover{border-color:var(--brand);color:var(--brand)}
+button.primary{background:var(--brand);border-color:var(--brand);color:#06281f;font-weight:600}
+button.danger{border-color:#7f1d1d;color:var(--err)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.in,.ta{width:100%;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0c0e13;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.ta{resize:vertical;white-space:pre}
+.out{background:#0c0e13;border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-height:300px;overflow:auto;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
+.ln{white-space:pre-wrap;word-break:break-all}
+.ln.ok{color:var(--ok)}.ln.err{color:var(--err)}.ln.dim{color:var(--dim)}.ln.info{color:var(--info)}
+.blk{white-space:pre-wrap;word-break:break-all;color:var(--tx)}
+.blk.ok{color:var(--ok)}.blk.err{color:var(--err)}.blk.dim{color:var(--dim)}
+.tbl .tr{display:flex;gap:10px;padding:1px 0}
+.tbl code{color:var(--info);min-width:140px;flex-shrink:0}
+footer{margin-top:14px;color:var(--dim);font-size:11px}
+footer a{color:var(--brand)}
+</style>
+</head>
+<body>
+<div id="app">
+<header><h1>🎯 手写有限状态机</h1><p>实战案例在线预览 · cases/11-state-machine-lab · 完整源码见仓库 cases/11-state-machine-lab 目录（cases.md 有直达锚点）</p></header>
+</div>
+<script>(()=>{var N=new TextEncoder,B=new TextDecoder("utf-8");function C(e){return{createConnection(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)},request(){throw new Error(`demo \u4E0D\u652F\u6301\u771F\u5B9E\u7F51\u7EDC\uFF1A${e} \u5DF2\u88AB\u6D4F\u89C8\u5668 shim \u66FF\u6362\uFF08\u9884\u89C8\u8D70\u6CE8\u5165\u5F0F fetcher\uFF09`)}}}var R=C("node:http"),v=C("node:https"),U={...R,...v};function I(e){let t=new Set(e.states);if(!t.has(e.initial))throw new Error(`\u975E\u6CD5\u914D\u7F6E\uFF1A\u521D\u59CB\u72B6\u6001 "${e.initial}" \u4E0D\u5728 states \u4E2D`);let n=Object.entries(e.transitions);for(let[o,r]of n){if(!t.has(o))throw new Error(`\u975E\u6CD5\u914D\u7F6E\uFF1A\u8F6C\u79FB\u6E90\u72B6\u6001 "${o}" \u4E0D\u5728 states \u4E2D`);for(let[l,u]of Object.entries(r??{}))if(!t.has(u.target))throw new Error(`\u975E\u6CD5\u914D\u7F6E\uFF1A\u4E8B\u4EF6 "${l}" \u7684\u76EE\u6807\u72B6\u6001 "${u.target}" \u4E0D\u5728 states \u4E2D`)}}function b(e,t={}){I(e);let n=t.onInvalid??"ignore",o=e.initial,r=e.context??{},l=new Set,u=(c,f)=>e.transitions[c]?.[f];return{send:(c,f)=>{let d=o,g=u(d,c);if(!g){if(n==="throw")throw new Error(`\u975E\u6CD5\u8F6C\u79FB\uFF1A\u72B6\u6001 "${d}" \u4E0B\u4E0D\u5B58\u5728\u4E8B\u4EF6 "${c}"`);return!1}if(g.guard&&!g.guard(r,f))return!1;let y=g.target;e.exit?.[d]?.(r),g.action?.(r,f),o=y,e.enter?.[y]?.(r);let $={from:d,to:y,event:c,payload:f};for(let H of[...l])H($);return!0},can:(c,f)=>{let d=u(o,c);return d?d.guard?d.guard(r,f):!0:!1},subscribe:c=>(l.add(c),()=>{l.delete(c)}),getState:()=>o,getContext:()=>r,matches:c=>o===c}}function m(e){if(typeof e=="string")return e;if(e==null||typeof e=="number"||typeof e=="boolean")return String(e);if(e instanceof Error)return`${e.name}: ${e.message}`;if(e instanceof Date)return e.toISOString();if(e instanceof Map)return`Map(${e.size}) { ${[...e.entries()].map(([t,n])=>`${m(t)} => ${m(n)}`).join(", ")} }`;if(e instanceof Set)return`Set(${e.size}) { ${[...e].map(t=>m(t)).join(", ")} }`;try{return JSON.stringify(e,(t,n)=>typeof n=="bigint"?String(n):n,2)??String(e)}catch{return String(e)}}function w(e,t=""){let n=document.createElement("section");n.className="sec";let o=document.createElement("h2");if(o.textContent=e,n.appendChild(o),t){let r=document.createElement("p");r.className="hint",r.textContent=t,n.appendChild(r)}return document.body.querySelector("#app").appendChild(n),n}function M(e){let t=document.createElement("div");return t.className="btn-row",e.appendChild(t),t}function x(e,t,n,o=""){let r=document.createElement("button");return r.textContent=t,o&&(r.className=o),r.addEventListener("click",()=>{try{n()}catch(l){s(e,`\u2717 ${m(l)}`,"err")}}),e.appendChild(r),r}function T(e){let t=document.createElement("div");return t.className="out",e.appendChild(t),t}function k(e){if(e?.classList.contains("out"))return e;let t=e?.querySelectorAll(":scope > .out");if(t&&t.length)return t[t.length-1];let n=document.querySelectorAll("#app .out");return n[n.length-1]}function s(e,t,n=""){let o=k(e),r=document.createElement("div");r.className=`ln ${n}`,r.textContent=m(t),o.appendChild(r),o.scrollTop=o.scrollHeight}function L(e,t){let n=k(e),o=document.createElement("div");o.className="tbl";for(let[r,l]of t){let u=document.createElement("div");u.className="tr";let h=document.createElement("code");h.textContent=r;let S=document.createElement("span");S.textContent=m(l),u.append(h,S),o.appendChild(u)}return n.appendChild(o),n.scrollTop=n.scrollHeight,o}var p=w("\u4EA4\u901A\u706F\u72B6\u6001\u673A","\u89C2\u5BDF\u6BCF\u6B21\u8F6C\u79FB\u7684\u94A9\u5B50\u65F6\u5E8F\uFF1Aexit(\u65E7\u6001) \u2192 action \u2192 enter(\u65B0\u6001)\uFF1B\u5B88\u536B\u62E6\u622A\u76F4\u63A5\u56DE false"),a=T(p),i=null;function A(){return b({states:["red","green","yellow"],initial:"red",context:{cycles:0},transitions:{red:{TIMER:{target:"green",action:e=>{e.reason="\u7EA2\u706F\u7ED3\u675F"}}},green:{TIMER:{target:"yellow",guard:e=>e.cycles<3,action:e=>{e.cycles++,e.reason="\u7EFF\u706F\u8BA1\u65F6\u5230"}}},yellow:{TIMER:{target:"red",action:e=>{e.reason="\u9EC4\u706F\u95EA\u5B8C"}}}},exit:{red:()=>s(a,"  exit red","dim"),green:()=>s(a,"  exit green","dim"),yellow:()=>s(a,"  exit yellow","dim")},enter:{red:()=>s(a,"  enter red","ok"),green:()=>s(a,"  enter green","ok"),yellow:()=>s(a,"  enter yellow","ok")}})}M(p);x(p,"\u25B6 \u521B\u5EFA\u673A\u5668\uFF08\u521D\u59CB red\uFF09",()=>{a.replaceChildren(),i=A(),i.subscribe(e=>s(a,`\u8F6C\u79FB\uFF1A${e.from} --${e.event}--> ${e.to}`,"info")),s(a,`\u521D\u59CB\u72B6\u6001\uFF1A${i.getState()}\uFF0Ccycles=${i.getContext().cycles}`,"ok")});x(p,"\u25B6 send TIMER\uFF08\u6CBF red\u2192green\u2192yellow\u2192red \u5FAA\u73AF\uFF09",()=>{if(!i)return s(a,"\u5148\u521B\u5EFA\u673A\u5668","err");let e=i.send("TIMER");s(a,`send \u8FD4\u56DE ${e}\uFF1B\u5F53\u524D ${i.getState()}\uFF0Cctx=${JSON.stringify(i.getContext())}`,e?"ok":"err")});x(p,"\u25B6 \u8FDE\u53D1 3 \u6B21 TIMER\uFF08\u89E6\u53D1 guard\uFF1A3 \u8F6E\u540E\u7EFF\u706F\u62D2\u7EDD\u8F6C\u79FB\uFF09",()=>{if(!i)return s(a,"\u5148\u521B\u5EFA\u673A\u5668","err");for(let e=0;e<3;e++){let t=i.send("TIMER");s(a,`\u7B2C ${e+1} \u6B21\uFF1A${t?"\u8F6C\u79FB\u6210\u529F":"\u88AB\u5B88\u536B\u62E6\u622A\uFF08cycles\u22653\uFF09"} \u2192 ${i.getState()}`,t?"ok":"err")}});x(p,"\u25B6 can() \u9884\u5224 + RESET \u975E\u6CD5\u4E8B\u4EF6",()=>{if(!i)return s(a,"\u5148\u521B\u5EFA\u673A\u5668","err");L(a,[["can(TIMER)",i.can("TIMER")],["can(RESET)\uFF08\u8F6C\u79FB\u8868\u672A\u5B9A\u4E49\uFF09",i.can("RESET")],["send(RESET) \u8FD4\u56DE",i.send("RESET")],["\u72B6\u6001\u672A\u88AB\u975E\u6CD5\u4E8B\u4EF6\u6539\u53D8",i.getState()]])});})();
+</script>
+</body>
+</html>

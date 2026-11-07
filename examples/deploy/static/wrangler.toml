@@ -1,0 +1,10 @@
+# Cloudflare Pages 用 wrangler 直传时的最小配置（wrangler >= 3.28 / 4.x）
+# 旧版本（Pages 之前的 Workers Sites）用的是 [site] bucket，两者不要混用
+name = "frontend-advanced-guide"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "dist"
+
+# 环境变量只放公开值；密钥用 `wrangler pages secret put` 或 Dashboard 注入
+[vars]
+  VITE_API_BASE = "/api"
+  RELEASE = "dev"

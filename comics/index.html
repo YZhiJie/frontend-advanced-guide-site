@@ -1,0 +1,2082 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>进阶漫画剧场 · 霓虹墨 Neon Ink</title>
+  <link rel="icon" type="image/svg+xml" href="../logo.svg">
+  <style>
+    /* ============================================================
+   * 进阶漫画剧场 · 整合阅读器（零依赖单文件 · 运行时 fetch 版）
+   * 设计决策：
+   * 1) 内容序列来自 manifest.json，SVG 内联注入保证矢量缩放；
+   * 2) 双阅读模式：翻页（一话一屏，默认）/ 长卷（连续滚动）；
+   * 3) 讲解 MD 右侧抽屉呈现，用内置受控迷你渲染器（先转义再替换），防 XSS；
+   * 4) 进度只存「话 id + 比例」，再次打开可一键继续阅读；
+   * 5) 单话加载失败不影响整体：每话独立错误卡片 + 重试；
+   * 6) 翻页模式按需加载当前话并预取相邻话，长卷模式后台补齐全部；
+   * 7) 话目网格（⊞ / G）：关键词 + 分册筛选，卡片直接跳话，与目录共用已读/当前态。
+   * ============================================================ */
+    :root {
+      --bg: #0b1220;
+      --bg-soft: #0e1730;
+      --bg-card: #111a30;
+      --line: #223055;
+      --ink: #e2e8f0;
+      --ink-dim: #94a3b8;
+      --ink-faint: #64748b;
+      --cyan: #22d3ee;
+      --violet: #a78bfa;
+      --purple: #7c3aed;
+      --pink: #f472b6;
+      --orange: #f97316;
+      --green: #34d399;
+      --yellow: #fbbf24;
+      --sidebar-w: 300px;
+      --header-h: 60px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a {
+      color: var(--cyan);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    button {
+      font-family: inherit;
+    }
+
+    /* ---------- 顶部阅读进度条 ---------- */
+    #progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      width: 0;
+      background: linear-gradient(90deg, var(--cyan), var(--violet), var(--pink));
+      z-index: 60;
+      transition: width .12s linear;
+    }
+
+    /* ---------- 封面 ---------- */
+    #cover {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 48px 24px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #cover::before,
+    #cover::after {
+      content: '';
+      position: absolute;
+      pointer-events: none;
+    }
+
+    #cover::before {
+      top: -20%;
+      left: -10%;
+      width: 70%;
+      height: 140%;
+      background: linear-gradient(120deg, rgba(34, 211, 238, .10), transparent 60%);
+      transform: skewX(-18deg);
+    }
+
+    #cover::after {
+      bottom: -20%;
+      right: -10%;
+      width: 70%;
+      height: 140%;
+      background: linear-gradient(300deg, rgba(167, 139, 250, .10), transparent 60%);
+      transform: skewX(-18deg);
+    }
+
+    .cover-badge {
+      display: inline-block;
+      padding: 6px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--ink-dim);
+      font-size: 13px;
+      letter-spacing: .15em;
+      margin-bottom: 28px;
+    }
+
+    #cover h1 {
+      font-size: clamp(30px, 6vw, 56px);
+      line-height: 1.25;
+      margin: 0 0 16px;
+      background: linear-gradient(90deg, var(--cyan), var(--violet), var(--pink));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    #cover .sub {
+      color: var(--ink-dim);
+      font-size: clamp(14px, 2.4vw, 17px);
+      max-width: 620px;
+      margin: 0 0 40px;
+    }
+
+    .cover-meta {
+      display: flex;
+      gap: 24px;
+      color: var(--ink-faint);
+      font-size: 13px;
+      margin-bottom: 40px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .cover-meta b {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .btn-primary {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 44px;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      font-size: 17px;
+      font-weight: 700;
+      color: #0b1220;
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+      box-shadow: 0 10px 40px rgba(34, 211, 238, .25), 0 4px 14px rgba(124, 58, 237, .35);
+      transition: transform .18s ease, box-shadow .18s ease, opacity .2s;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 48px rgba(34, 211, 238, .35);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .btn-primary:disabled {
+      opacity: .65;
+      cursor: wait;
+      transform: none;
+    }
+
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 16px;
+      padding: 10px 22px;
+      border-radius: 10px;
+      cursor: pointer;
+      background: transparent;
+      color: var(--ink-dim);
+      border: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    .btn-ghost:hover {
+      color: var(--ink);
+      border-color: var(--ink-faint);
+    }
+
+    #load-status {
+      margin-top: 22px;
+      font-size: 13.5px;
+      color: var(--ink-dim);
+      min-height: 22px;
+    }
+
+    .load-bar {
+      width: 280px;
+      max-width: 70vw;
+      height: 6px;
+      border-radius: 3px;
+      background: #1a2540;
+      margin: 12px auto 0;
+      overflow: hidden;
+      display: none;
+    }
+
+    .load-bar.show {
+      display: block;
+    }
+
+    .load-bar i {
+      display: block;
+      height: 100%;
+      width: 0;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+      transition: width .2s;
+    }
+
+    .resume-card {
+      margin-top: 26px;
+      padding: 14px 22px;
+      border-radius: 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      font-size: 14px;
+      color: var(--ink-dim);
+      display: none;
+    }
+
+    .resume-card.show {
+      display: block;
+    }
+
+    .resume-card a {
+      font-weight: 700;
+    }
+
+    /* ---------- 全屏错误 ---------- */
+    .fatal {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 28px;
+      border-radius: 14px;
+      background: var(--bg-card);
+      border: 1px solid rgba(249, 115, 22, .5);
+      color: var(--ink-dim);
+      font-size: 14.5px;
+      text-align: left;
+    }
+
+    .fatal h3 {
+      color: var(--orange);
+      margin: 0 0 10px;
+      font-size: 17px;
+    }
+
+    .fatal code {
+      background: #0a0f1c;
+      padding: 2px 7px;
+      border-radius: 5px;
+      color: var(--cyan);
+      font-size: 13px;
+    }
+
+    .fatal pre {
+      background: #0a0f1c;
+      padding: 12px 14px;
+      border-radius: 8px;
+      overflow-x: auto;
+      color: var(--ink-dim);
+      font-size: 13px;
+    }
+
+    /* ---------- 阅读视图布局 ---------- */
+    #reader {
+      display: none;
+    }
+
+    #reader.show {
+      display: block;
+    }
+
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--header-h);
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 18px;
+      background: rgba(11, 18, 32, .86);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--bg-soft);
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 17px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .icon-btn:hover {
+      border-color: var(--ink-faint);
+    }
+
+    .icon-btn:disabled {
+      opacity: .35;
+      cursor: default;
+    }
+
+    .nav-arrow {
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .mode-btn {
+      width: auto;
+      padding: 0 13px;
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    #counter {
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+      color: var(--ink-dim);
+      min-width: 54px;
+      text-align: center;
+    }
+
+    .topbar-title {
+      font-weight: 700;
+      font-size: 15px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-title small {
+      color: var(--ink-faint);
+      font-weight: 400;
+      margin-left: 8px;
+    }
+
+    .topbar-right {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    /* ---------- 侧边章节导航 ---------- */
+    #toc {
+      position: fixed;
+      top: var(--header-h);
+      left: 0;
+      bottom: 0;
+      width: var(--sidebar-w);
+      background: var(--bg-soft);
+      border-right: 1px solid var(--line);
+      overflow-y: auto;
+      padding: 14px 12px 40px;
+      z-index: 40;
+    }
+
+    #toc h2 {
+      font-size: 12px;
+      color: var(--ink-faint);
+      letter-spacing: .18em;
+      margin: 8px 10px 12px;
+      font-weight: 600;
+    }
+
+    .toc-item {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      width: 100%;
+      padding: 9px 10px;
+      border-radius: 9px;
+      border: none;
+      cursor: pointer;
+      background: transparent;
+      color: var(--ink-dim);
+      font-size: 13.5px;
+      text-align: left;
+      line-height: 1.45;
+    }
+
+    .toc-item:hover {
+      background: #16223e;
+      color: var(--ink);
+    }
+
+    .toc-item .toc-ep {
+      color: var(--ink-faint);
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 11.5px;
+      flex: none;
+      width: 42px;
+    }
+
+    .toc-item.active {
+      background: linear-gradient(90deg, rgba(34, 211, 238, .14), rgba(124, 58, 237, .14));
+      color: var(--ink);
+    }
+
+    .toc-item.active .toc-ep {
+      color: var(--cyan);
+    }
+
+    .toc-item .toc-dot {
+      margin-left: auto;
+      flex: none;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: transparent;
+    }
+
+    .toc-item.read .toc-dot {
+      background: var(--green);
+    }
+
+    #toc-mask {
+      display: none;
+      position: fixed;
+      inset: var(--header-h) 0 0 0;
+      background: rgba(4, 8, 18, .55);
+      z-index: 35;
+    }
+
+    /* ---------- 全部话目网格（⊞ 关键词筛选 / 按分册跳转） ---------- */
+    #grid {
+      display: none;
+      position: fixed;
+      inset: var(--header-h) 0 0 0;
+      z-index: 56;
+      background: rgba(6, 11, 25, .97);
+      flex-direction: column;
+    }
+
+    #grid.open {
+      display: flex;
+    }
+
+    .grid-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px clamp(14px, 5vw, 40px);
+      border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
+    }
+
+    .grid-head h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .grid-head h2 span {
+      color: var(--ink-faint);
+      font-size: 12px;
+      font-weight: 400;
+      margin-left: 8px;
+    }
+
+    .grid-tools {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    #grid-search,
+    #grid-part {
+      padding: 9px 12px;
+      border-radius: 9px;
+      border: 1px solid var(--line);
+      background: var(--bg-soft);
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 13.5px;
+    }
+
+    #grid-search {
+      width: min(46vw, 240px);
+    }
+
+    #grid-part {
+      max-width: min(48vw, 280px);
+      font-size: 13px;
+    }
+
+    #grid-search:focus,
+    #grid-part:focus {
+      outline: none;
+      border-color: var(--cyan);
+    }
+
+    .grid-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px clamp(14px, 5vw, 40px) 60px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+      gap: 12px;
+      align-content: start;
+    }
+
+    .grid-card {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding: 13px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--bg-card);
+      color: var(--ink-dim);
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+      transition: transform .15s, border-color .15s;
+    }
+
+    .grid-card:hover {
+      border-color: var(--ink-faint);
+      color: var(--ink);
+      transform: translateY(-2px);
+    }
+
+    .grid-card .gc-ep {
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 11.5px;
+      color: var(--ink-faint);
+    }
+
+    .grid-card.read .gc-ep::after {
+      content: ' ✓';
+      color: var(--green);
+    }
+
+    .grid-card .gc-title {
+      font-size: 14px;
+      color: var(--ink);
+      line-height: 1.4;
+    }
+
+    .grid-card .gc-part {
+      font-size: 11.5px;
+      color: var(--ink-faint);
+    }
+
+    .grid-card.active {
+      border-color: var(--cyan);
+      background: linear-gradient(180deg, rgba(34, 211, 238, .10), rgba(124, 58, 237, .10));
+    }
+
+    .grid-empty {
+      grid-column: 1 / -1;
+      padding: 30px 0;
+      text-align: center;
+      color: var(--ink-faint);
+      font-size: 14px;
+    }
+
+    /* ---------- 正文（长卷模式：文档流连续滚动） ---------- */
+    #content {
+      margin-left: var(--sidebar-w);
+      padding: calc(var(--header-h) + 28px) clamp(16px, 5vw, 64px) 80px;
+    }
+
+    .episode {
+      max-width: 980px;
+      margin: 0 auto 56px;
+      scroll-margin-top: calc(var(--header-h) + 16px);
+    }
+
+    .episode-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+
+    .ep-chip {
+      padding: 5px 13px;
+      border-radius: 8px;
+      background: var(--purple);
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      font-family: 'SF Mono', Consolas, monospace;
+    }
+
+    .episode-head h2 {
+      margin: 0;
+      font-size: clamp(20px, 3vw, 26px);
+    }
+
+    .ep-part {
+      color: var(--ink-faint);
+      font-size: 12.5px;
+    }
+
+    .btn-doc {
+      margin-left: auto;
+      padding: 6px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: var(--bg-card);
+      color: var(--cyan);
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    .btn-doc:hover {
+      border-color: var(--cyan);
+    }
+
+    body.mode-long .btn-doc {
+      display: none;
+    }
+
+    /* 长卷模式讲解已内联，无需抽屉入口 */
+
+    .comic-frame {
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: var(--bg-soft);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
+    }
+
+    .comic-frame svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    /* ---------- 翻页模式：transform 轨道，一话一屏 ---------- */
+    body.mode-page {
+      overflow: hidden;
+    }
+
+    body.mode-page #content {
+      position: fixed;
+      top: var(--header-h);
+      right: 0;
+      bottom: 0;
+      left: var(--sidebar-w);
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    body.mode-page .track {
+      display: flex;
+      height: 100%;
+      transition: transform .38s cubic-bezier(.4, 0, .2, 1);
+      will-change: transform;
+    }
+
+    body.mode-page .episode {
+      flex: 0 0 100%;
+      min-width: 100%;
+      max-width: none;
+      height: 100%;
+      margin: 0;
+      padding: 22px clamp(16px, 4vw, 48px) 40px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      scroll-margin-top: 0;
+    }
+
+    body.mode-page .episode-head {
+      width: min(1100px, 100%);
+    }
+
+    body.mode-page .comic-frame {
+      flex: none;
+      margin: 0 auto;
+      /* 宽度同时受屏宽与屏高约束：高度预留 = 标题行约 54px + 上下内边距 62px ≈ 118px，
+         再按 1200:840 ≈ 1.43 反推；窄屏标题换行时由 .episode 自身滚动兜底 */
+      width: min(1100px, 100%, calc((100vh - var(--header-h) - 118px) * 1.43));
+    }
+
+    body.mode-page .notes {
+      display: none;
+    }
+
+    body.mode-page #to-top {
+      display: none;
+    }
+
+    /* ---------- 长卷模式：轨道回归普通文档流（必须盖掉翻页模式残留的内联 transform） ---------- */
+    body.mode-long .track {
+      display: block;
+      height: auto;
+      transform: none !important;
+      transition: none;
+    }
+
+    /* ---------- 翻页大按钮（悬停出现） ---------- */
+    .edge {
+      position: fixed;
+      top: 50%;
+      z-index: 15;
+      transform: translateY(-50%);
+      width: 46px;
+      height: 76px;
+      border-radius: 12px;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: rgba(14, 23, 48, .72);
+      color: var(--ink);
+      font-size: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity .2s ease, background .2s ease;
+    }
+
+    body.mode-page #reader:hover .edge,
+    .edge:hover,
+    .edge:focus-visible {
+      opacity: 1;
+    }
+
+    .edge:hover {
+      background: rgba(30, 42, 68, .9);
+    }
+
+    .edge:disabled {
+      opacity: 0 !important;
+      pointer-events: none;
+    }
+
+    .edge.left {
+      left: calc(var(--sidebar-w) + 14px);
+    }
+
+    .edge.right {
+      right: 14px;
+    }
+
+    body.mode-long .edge {
+      display: none;
+    }
+
+    /* ---------- Markdown 排版（话内 notes 与讲解抽屉共用） ---------- */
+    .notes {
+      margin-top: 22px;
+      padding: clamp(18px, 3.5vw, 34px);
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+
+    .md-typo {
+      font-size: 15px;
+    }
+
+    .md-typo h1 {
+      font-size: 22px;
+      margin: 0 0 8px;
+    }
+
+    .md-typo h2 {
+      font-size: 18.5px;
+      margin: 28px 0 10px;
+      color: var(--cyan);
+    }
+
+    .md-typo h3 {
+      font-size: 16px;
+      margin: 22px 0 8px;
+      color: var(--violet);
+    }
+
+    .md-typo p {
+      margin: 10px 0;
+      color: #cbd5e1;
+    }
+
+    .md-typo ul,
+    .md-typo ol {
+      padding-left: 24px;
+      margin: 10px 0;
+      color: #cbd5e1;
+    }
+
+    .md-typo li {
+      margin: 6px 0;
+    }
+
+    .md-typo blockquote {
+      margin: 0 0 18px;
+      padding: 10px 16px;
+      border-left: 3px solid var(--violet);
+      background: rgba(167, 139, 250, .07);
+      border-radius: 0 8px 8px 0;
+      color: var(--ink-dim);
+      font-size: 13.5px;
+    }
+
+    .md-typo code {
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 13px;
+      background: #0a0f1c;
+      color: var(--cyan);
+      padding: 2px 7px;
+      border-radius: 5px;
+    }
+
+    .md-typo pre {
+      background: #0a0f1c;
+      border: 1px solid #1c2847;
+      border-radius: 10px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      margin: 14px 0;
+    }
+
+    .md-typo pre code {
+      background: none;
+      padding: 0;
+      color: #a5f3fc;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .md-typo table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      font-size: 13px;
+    }
+
+    .md-typo th,
+    .md-typo td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      line-height: 1.6;
+      vertical-align: top;
+    }
+
+    .md-typo th {
+      background: #111a30;
+      color: var(--ink);
+      font-weight: bold;
+      white-space: nowrap;
+    }
+
+    .md-typo td {
+      color: var(--ink-dim);
+    }
+
+    .md-typo strong {
+      color: var(--ink);
+    }
+
+    .md-typo hr {
+      border: none;
+      border-top: 1px solid var(--line);
+      margin: 24px 0;
+    }
+
+    /* ---------- 讲解抽屉 ---------- */
+    #doc-mask {
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      background: rgba(4, 8, 18, .55);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .25s ease;
+    }
+
+    body.doc-open #doc-mask {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 71;
+      width: min(680px, 94vw);
+      background: var(--bg-soft);
+      border-left: 1px solid var(--line);
+      box-shadow: -16px 0 50px rgba(0, 0, 0, .5);
+      transform: translateX(102%);
+      transition: transform .3s cubic-bezier(.4, 0, .2, 1);
+      display: flex;
+      flex-direction: column;
+    }
+
+    body.doc-open #drawer {
+      transform: none;
+    }
+
+    .drawer-head {
+      flex: none;
+      padding: 14px 18px 12px;
+      background: linear-gradient(120deg, #16223e, #1a2540);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .drawer-head .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .drawer-title {
+      flex: 1;
+      font-size: 15.5px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .dbtn {
+      min-width: 32px;
+      height: 32px;
+      padding: 0 9px;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: var(--bg-card);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .dbtn:hover {
+      border-color: var(--ink-faint);
+    }
+
+    .dbtn:disabled {
+      opacity: .35;
+      cursor: default;
+    }
+
+    .drawer-sub {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--ink-faint);
+    }
+
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px 60px;
+    }
+
+    .doc-foot-nav {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .doc-foot-nav .dnav {
+      flex: 1;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--bg-card);
+      cursor: pointer;
+      color: var(--ink);
+      font-size: 13px;
+      text-align: left;
+      font-family: inherit;
+    }
+
+    .doc-foot-nav .dnav:hover {
+      border-color: var(--cyan);
+    }
+
+    .doc-foot-nav .dnav small {
+      display: block;
+      color: var(--ink-faint);
+      font-size: 11.5px;
+      margin-bottom: 2px;
+    }
+
+    /* ---------- 单话加载中 / 错误卡片 ---------- */
+    .ep-loading {
+      padding: 64px 20px;
+      text-align: center;
+      color: var(--ink-faint);
+      font-size: 14px;
+    }
+
+    .ep-loading::before {
+      content: '';
+      display: block;
+      width: 26px;
+      height: 26px;
+      margin: 0 auto 12px;
+      border-radius: 50%;
+      border: 3px solid var(--line);
+      border-top-color: var(--cyan);
+      animation: spin .9s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .ep-error {
+      padding: 34px 24px;
+      text-align: center;
+      border-radius: 14px;
+      background: var(--bg-card);
+      border: 1px dashed rgba(249, 115, 22, .55);
+    }
+
+    .ep-error .err-icon {
+      font-size: 30px;
+    }
+
+    .ep-error h3 {
+      margin: 10px 0 6px;
+      color: var(--orange);
+      font-size: 16.5px;
+    }
+
+    .ep-error p {
+      color: var(--ink-dim);
+      font-size: 13.5px;
+      margin: 4px 0 16px;
+    }
+
+    .btn-retry {
+      padding: 9px 24px;
+      border-radius: 9px;
+      cursor: pointer;
+      border: 1px solid var(--orange);
+      background: rgba(249, 115, 22, .12);
+      color: var(--orange);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .btn-retry:hover {
+      background: rgba(249, 115, 22, .22);
+    }
+
+    /* ---------- 回到顶部（长卷模式） ---------- */
+    #to-top {
+      position: fixed;
+      right: 26px;
+      bottom: 30px;
+      z-index: 45;
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      background: rgba(14, 23, 48, .92);
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 18px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .25s, transform .25s;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .4);
+    }
+
+    #to-top.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #to-top:hover {
+      transform: translateY(-3px);
+    }
+
+    /* ---------- 响应式：移动端目录抽屉 ---------- */
+    @media (max-width: 1023px) {
+      #toc {
+        transform: translateX(-100%);
+        transition: transform .25s ease;
+        width: min(82vw, 320px);
+        box-shadow: 12px 0 40px rgba(0, 0, 0, .5);
+      }
+
+      #toc.open {
+        transform: translateX(0);
+      }
+
+      #toc-mask.show {
+        display: block;
+      }
+
+      #content {
+        margin-left: 0;
+      }
+
+      body.mode-page #content {
+        left: 0;
+      }
+
+      .edge.left {
+        left: 10px;
+      }
+    }
+
+    @media (min-width: 1024px) {
+      #menu-btn {
+        display: none;
+      }
+
+      #toc-mask {
+        display: none !important;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .topbar {
+        padding: 0 12px;
+        gap: 8px;
+      }
+
+      .topbar-title small {
+        display: none;
+      }
+
+      .episode-head {
+        gap: 10px;
+      }
+
+      #counter {
+        min-width: 44px;
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="progress-bar"></div>
+
+  <!-- ============ 封面 ============ -->
+  <section id="cover">
+    <span class="cover-badge">NEON INK · 进阶漫画剧场</span>
+    <h1>漫画式看懂高级前端</h1>
+    <p class="sub">从闭包事件循环到 JS 高频面试题——霓虹墨风格四格漫画 + 配套知识点拆解、坑点清单与自测题，一话一个核心主题。</p>
+    <div class="cover-meta" id="cover-meta">
+      <span>共 <b id="meta-count">34</b> 话</span>
+      <span>每话 <b>SVG 原画 + 讲解</b></span>
+      <span>画布 <b>1200 × 840</b></span>
+    </div>
+    <button class="btn-primary" id="btn-open">▶ 一键打开完整漫画</button>
+    <div class="load-bar" id="load-bar"><i id="load-bar-fill"></i></div>
+    <div id="load-status"></div>
+    <div class="resume-card" id="resume-card"></div>
+    <div id="cover-error"></div>
+  </section>
+
+  <!-- ============ 阅读视图 ============ -->
+  <div id="reader">
+    <header class="topbar">
+      <button class="icon-btn" id="menu-btn" aria-label="章节目录">☰</button>
+      <div class="topbar-title" id="topbar-title">进阶漫画剧场<small id="topbar-ep"></small></div>
+      <div class="topbar-right">
+        <button class="icon-btn nav-arrow" id="btn-prev" title="上一话 (←)">‹</button>
+        <span id="counter">– / –</span>
+        <button class="icon-btn nav-arrow" id="btn-next" title="下一话 (→)">›</button>
+        <button class="icon-btn" id="btn-grid" title="全部话目 (G)" aria-label="全部话目">⊞</button>
+        <button class="icon-btn mode-btn" id="btn-mode" title="切换长卷/翻页模式 (M)">📜 长卷</button>
+        <button class="icon-btn" id="btn-reset" title="清除阅读进度并回到封面" aria-label="重置进度">⟲</button>
+      </div>
+    </header>
+
+    <nav id="toc" aria-label="章节导航">
+      <h2>章节导航</h2>
+      <div id="toc-list"></div>
+    </nav>
+    <div id="toc-mask"></div>
+
+    <!-- ============ 全部话目网格（关键词筛选 / 按分册跳转） ============ -->
+    <div id="grid" aria-hidden="true" role="dialog" aria-modal="true" aria-label="全部话目">
+      <div class="grid-head">
+        <h2>全部话目<span id="grid-count"></span></h2>
+        <div class="grid-tools">
+          <input id="grid-search" type="search" placeholder="搜索话号 / 标题…" aria-label="搜索话目" />
+          <select id="grid-part" aria-label="按分册筛选"></select>
+          <button class="dbtn" id="grid-close" title="关闭 (Esc)">✕</button>
+        </div>
+      </div>
+      <div class="grid-body" id="grid-body"></div>
+    </div>
+
+    <main id="content">
+      <div class="track" id="track"></div>
+    </main>
+
+    <button class="edge left" id="edge-prev" title="上一话">‹</button>
+    <button class="edge right" id="edge-next" title="下一话">›</button>
+
+    <button id="to-top" aria-label="回到顶部">↑</button>
+  </div>
+
+  <!-- ============ 讲解抽屉 ============ -->
+  <div id="doc-mask"></div>
+  <aside id="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <div class="row">
+        <div class="drawer-title" id="drawer-title">讲解</div>
+        <button class="dbtn" id="doc-prev" title="上一篇 (←)">‹</button>
+        <button class="dbtn" id="doc-next" title="下一篇 (→)">›</button>
+        <button class="dbtn" id="doc-raw" title="新窗口打开原始 Markdown">md</button>
+        <button class="dbtn" id="doc-close" title="关闭 (Esc)">✕</button>
+      </div>
+      <div class="drawer-sub" id="drawer-sub"></div>
+    </div>
+    <div class="drawer-body md-typo" id="drawer-body"></div>
+  </aside>
+
+  <script>
+    /* ============================================================
+     * 整合阅读器逻辑
+     * 流程：封面点击 → 读 manifest（有序话列表）→ 搭建骨架 →
+     *       翻页模式：按需加载当前话（SVG 内联 + MD 缓存）并预取相邻话
+     *       长卷模式：后台补齐全部话后连续滚动
+     * 进度：localStorage 存 {epId, ratio, updatedAt}
+     * 容错：manifest 失败 → 全屏错误；单话失败 → 话内错误卡片可重试
+     * ============================================================ */
+    (function () {
+      'use strict';
+
+      var STORE_KEY = 'neon-ink-reader-progress-v1';
+      var els = {
+        cover: document.getElementById('cover'),
+        reader: document.getElementById('reader'),
+        btnOpen: document.getElementById('btn-open'),
+        loadStatus: document.getElementById('load-status'),
+        loadBar: document.getElementById('load-bar'),
+        loadBarFill: document.getElementById('load-bar-fill'),
+        coverError: document.getElementById('cover-error'),
+        resumeCard: document.getElementById('resume-card'),
+        toc: document.getElementById('toc'),
+        tocList: document.getElementById('toc-list'),
+        tocMask: document.getElementById('toc-mask'),
+        content: document.getElementById('content'),
+        track: document.getElementById('track'),
+        progressBar: document.getElementById('progress-bar'),
+        topbarEp: document.getElementById('topbar-ep'),
+        counter: document.getElementById('counter'),
+        btnPrev: document.getElementById('btn-prev'),
+        btnNext: document.getElementById('btn-next'),
+        modeBtn: document.getElementById('btn-mode'),
+        btnReset: document.getElementById('btn-reset'),
+        toTop: document.getElementById('to-top'),
+        menuBtn: document.getElementById('menu-btn'),
+        edgePrev: document.getElementById('edge-prev'),
+        edgeNext: document.getElementById('edge-next'),
+        docMask: document.getElementById('doc-mask'),
+        drawer: document.getElementById('drawer'),
+        drawerTitle: document.getElementById('drawer-title'),
+        drawerSub: document.getElementById('drawer-sub'),
+        drawerBody: document.getElementById('drawer-body'),
+        docPrev: document.getElementById('doc-prev'),
+        docNext: document.getElementById('doc-next'),
+        docRaw: document.getElementById('doc-raw'),
+        docClose: document.getElementById('doc-close'),
+        btnGrid: document.getElementById('btn-grid'),
+        grid: document.getElementById('grid'),
+        gridBody: document.getElementById('grid-body'),
+        gridSearch: document.getElementById('grid-search'),
+        gridPart: document.getElementById('grid-part'),
+        gridClose: document.getElementById('grid-close'),
+        gridCount: document.getElementById('grid-count')
+      };
+
+      var episodes = [];          // manifest 话列表
+      var sections = {};          // ep -> section 元素
+      var epState = {};           // ep -> {loaded, promise, md}
+      var rendered = {};          // ep -> true（已成功渲染，用于已读点）
+      var mode = 'page';          // 'page' 翻页（默认） | 'long' 长卷
+      var cur = 0;                // 当前话下标
+      var currentEp = null;       // 当前话号（长卷 scrollspy 用）
+      var docEp = null;           // 抽屉中打开的话对象
+      var readerReady = false;
+      var partsMeta = [];         // manifest.parts：分册文件 → 展示名（网格按分册筛选/跳转用）
+      var gridCards = {};         // ep -> 网格卡片节点（buildGrid 重建，供已读/当前态回填）
+
+      /* ---------- 工具 ---------- */
+      function $(tag, cls, text) {
+        var n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text != null) n.textContent = text;
+        return n;
+      }
+      function pad(n) { return String(n).padStart(2, '0'); }
+      function escapeHtml(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      }
+      function safeHref(url) {
+        // 只允许相对路径与 http(s)，挡掉 javascript: 等伪协议
+        if (/^(https?:|\/|\.\/|\.\.|#|[^/:?#]+)/i.test(url) && !/^\s*javascript:/i.test(url)) return url;
+        return '#';
+      }
+      function indexOfEp(epNum) {
+        for (var i = 0; i < episodes.length; i++) if (episodes[i].ep === epNum) return i;
+        return -1;
+      }
+
+      /* ---------- 受控 Markdown 迷你渲染器 ----------
+       * 先整体转义，再用占位符保护行内代码，最后替换加粗/链接。
+       * 支持：h1-h3、blockquote、ul/ol、围栏代码块、管道表格、段落、hr、行内 code/strong/link */
+      function splitRow(row) {
+        /* 管道行 → 单元格数组;行首行尾竖线剥离,按 | 切分(受控渲染器约定:单元格代码内不放裸 |) */
+        return row.trim().replace(/^\|/, '').replace(/\|\s*$/, '').split('|').map(function (s) { return s.trim(); });
+      }
+      function renderInline(text) {
+        var codes = [];
+        text = text.replace(/`([^`]+)`/g, function (_, c) {
+          codes.push(c);
+          return '\u0000' + (codes.length - 1) + '\u0000';
+        });
+        text = escapeHtml(text);
+        text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, t, u) {
+          return '<a href="' + safeHref(u) + '" target="_blank" rel="noopener">' + t + '</a>';
+        });
+        text = text.replace(/\u0000(\d+)\u0000/g, function (_, i) {
+          return '<code>' + escapeHtml(codes[+i]) + '</code>';
+        });
+        return text;
+      }
+
+      function renderMarkdown(md) {
+        var lines = md.replace(/\r\n?/g, '\n').split('\n');
+        var html = [];
+        var i = 0;
+
+        function listBlock(ordered) {
+          var items = [];
+          var re = ordered ? /^\s*\d+\.\s+(.*)$/ : /^\s*-\s+(.*)$/;
+          while (i < lines.length && re.test(lines[i])) {
+            items.push(lines[i].replace(re, '$1'));
+            i++;
+          }
+          var tag = ordered ? 'ol' : 'ul';
+          html.push('<' + tag + '>' + items.map(function (it) {
+            return '<li>' + renderInline(it) + '</li>';
+          }).join('') + '</' + tag + '>');
+        }
+
+        while (i < lines.length) {
+          var line = lines[i];
+
+          if (/^```/.test(line)) {
+            var buf = [];
+            i++;
+            while (i < lines.length && !/^```/.test(lines[i])) { buf.push(lines[i]); i++; }
+            i++; // 吃掉结束围栏
+            html.push('<pre><code>' + escapeHtml(buf.join('\n')) + '</code></pre>');
+            continue;
+          }
+          if (/^###\s+/.test(line)) { html.push('<h3>' + renderInline(line.replace(/^###\s+/, '')) + '</h3>'); i++; continue; }
+          if (/^##\s+/.test(line)) { html.push('<h2>' + renderInline(line.replace(/^##\s+/, '')) + '</h2>'); i++; continue; }
+          if (/^#\s+/.test(line)) { html.push('<h1>' + renderInline(line.replace(/^#\s+/, '')) + '</h1>'); i++; continue; }
+          if (/^>\s?/.test(line)) {
+            var q = [];
+            while (i < lines.length && /^>\s?/.test(lines[i])) { q.push(lines[i].replace(/^>\s?/, '')); i++; }
+            html.push('<blockquote>' + q.map(renderInline).join('<br>') + '</blockquote>');
+            continue;
+          }
+          if (/^\s*-\s+/.test(line)) { listBlock(false); continue; }
+          if (/^\s*\d+\.\s+/.test(line)) { listBlock(true); continue; }
+          if (/^---+\s*$/.test(line)) { html.push('<hr>'); i++; continue; }
+          /* 管道表格:表头行 + 分隔行(---),之后连续管道行都算表体;单元格走 renderInline 防注入 */
+          if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|\-]+\|\s*$/.test(lines[i + 1])) {
+            var head = splitRow(line);
+            i += 2;
+            var body = [];
+            while (i < lines.length && /^\s*\|/.test(lines[i])) { body.push(splitRow(lines[i])); i++; }
+            html.push('<table><thead><tr>' + head.map(function (c) {
+              return '<th>' + renderInline(c) + '</th>';
+            }).join('') + '</tr></thead><tbody>' + body.map(function (r) {
+              return '<tr>' + r.map(function (c) { return '<td>' + renderInline(c) + '</td>'; }).join('') + '</tr>';
+            }).join('') + '</tbody></table>');
+            continue;
+          }
+          if (/^\s*$/.test(line)) { i++; continue; }
+
+          var para = [line];
+          i++;
+          while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^(#{1,3}\s|>\s?|-\s|\d+\.\s|```)/.test(lines[i])) {
+            para.push(lines[i]); i++;
+          }
+          html.push('<p>' + renderInline(para.join(' ')) + '</p>');
+        }
+        return html.join('\n');
+      }
+
+      /* ---------- 进度记忆 ---------- */
+      function loadProgress() {
+        try { return JSON.parse(localStorage.getItem(STORE_KEY)) || null; }
+        catch (e) { return null; }
+      }
+      var saveTimer = null;
+      function saveProgress(epId, ratio) {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(function () {
+          try {
+            localStorage.setItem(STORE_KEY, JSON.stringify({ epId: epId, ratio: ratio, updatedAt: Date.now() }));
+          } catch (e) { /* 隐私模式等场景静默降级 */ }
+        }, 250);
+      }
+      function setProgress(r) {
+        els.progressBar.style.width = (Math.max(0, Math.min(1, r)) * 100).toFixed(2) + '%';
+      }
+
+      /* ---------- file:// 友好提示（fetch 会被 CORS 拦） ---------- */
+      function fileProtocolTip() {
+        var tip = $('div', 'fatal');
+        tip.innerHTML =
+          '<h3>需要通过本地服务器打开</h3>' +
+          '<p>阅读器需要用 <code>fetch</code> 合并漫画资源，<code>file://</code> 直开协议会被浏览器拦截。请在项目根目录启动一个静态服务器：</p>' +
+          '<pre>cd frontend-advanced-guide\npython3 -m http.server 8899</pre>' +
+          '<p>然后访问 <code>http://127.0.0.1:8899/comics/index.html</code></p>';
+        return tip;
+      }
+
+      /* ---------- 拉取 manifest ---------- */
+      function fetchManifest() {
+        return fetch('manifest.json', { cache: 'no-cache' })
+          .then(function (r) {
+            if (!r.ok) throw new Error('manifest.json HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (data) {
+            if (!data.episodes || !data.episodes.length) throw new Error('manifest 中没有 episodes');
+            return data; // 返回完整清单：episodes 渲染用，parts 供网格按分册筛选
+          });
+      }
+
+      /* ---------- 拉取单话资源（svg 文本 + md 文本） ---------- */
+      function fetchEpisode(ep) {
+        return Promise.all([
+          fetch(ep.slug + '.svg', { cache: 'no-cache' }).then(function (r) {
+            if (!r.ok) throw new Error('SVG HTTP ' + r.status);
+            return r.text();
+          }),
+          fetch(ep.slug + '.md', { cache: 'no-cache' }).then(function (r) {
+            if (!r.ok) throw new Error('MD HTTP ' + r.status);
+            return r.text();
+          })
+        ]);
+      }
+
+      function injectSvg(container, svgText) {
+        var doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+        var svg = doc.documentElement;
+        if (!svg || svg.nodeName.toLowerCase() !== 'svg' ||
+          svg.getElementsByTagName('parsererror').length) {
+          throw new Error('SVG 解析失败');
+        }
+        svg.removeAttribute('width');
+        svg.removeAttribute('height');
+        container.appendChild(svg);
+      }
+
+      /* ---------- 构建单话 DOM（骨架先行，内容按需填充） ---------- */
+      function buildEpisodeSection(ep) {
+        var section = $('section', 'episode');
+        section.id = 'ep-' + ep.ep;
+        section.dataset.ep = ep.ep;
+
+        var head = $('div', 'episode-head');
+        head.appendChild($('span', 'ep-chip', 'EP.' + pad(ep.ep)));
+        head.appendChild($('h2', null, ep.title));
+        head.appendChild($('span', 'ep-part', '对应正文：' + ep.part));
+        var docBtn = $('button', 'btn-doc', '📖 讲解');
+        docBtn.dataset.ep = ep.ep;
+        docBtn.setAttribute('aria-label', '打开 EP.' + pad(ep.ep) + ' 讲解');
+        head.appendChild(docBtn);
+        section.appendChild(head);
+
+        var frame = $('div', 'comic-frame');
+        section.appendChild(frame);
+
+        var notes = $('article', 'notes md-typo');
+        section.appendChild(notes);
+
+        section.frame = frame;
+        section.notes = notes;
+        return section;
+      }
+
+      /* ---------- 按需加载单话（幂等：loaded / 在途 promise 直接复用） ---------- */
+      function ensureEpisode(ep) {
+        var st = epState[ep.ep];
+        if (!st) st = epState[ep.ep] = { loaded: false, promise: null, md: null };
+        if (st.loaded) return Promise.resolve();
+        if (st.promise) return st.promise;
+
+        var sec = sections[ep.ep];
+        sec.frame.innerHTML = '';
+        sec.frame.appendChild($('div', 'ep-loading', '正在加载 EP.' + pad(ep.ep) + ' …'));
+
+        st.promise = fetchEpisode(ep).then(function (res) {
+          sec.frame.innerHTML = '';
+          injectSvg(sec.frame, res[0]);
+          sec.notes.innerHTML = renderMarkdown(res[1]);
+          st.md = res[1];
+          st.loaded = true;
+          rendered[ep.ep] = true;
+          markTocRead(ep);
+        }).catch(function (err) {
+          st.promise = null; // 允许重试
+          showEpisodeError(sec, ep);
+          throw err;
+        });
+        return st.promise;
+      }
+
+      function showEpisodeError(section, ep) {
+        section.frame.innerHTML = '';
+        var box = $('div', 'ep-error');
+        box.innerHTML =
+          '<div class="err-icon">⚠️</div>' +
+          '<h3>EP.' + pad(ep.ep) + '「' + escapeHtml(ep.title) + '」加载失败</h3>' +
+          '<p>可能是网络波动或本地服务器未启动，其他话不受影响。</p>';
+        var btn = $('button', 'btn-retry', '重新加载本话');
+        btn.addEventListener('click', function () {
+          // ensureEpisode 会清空 frame、展示加载态；失败时本错误卡片会被重建
+          ensureEpisode(ep).catch(function () { });
+        });
+        box.appendChild(btn);
+        section.frame.appendChild(box);
+      }
+
+      /* ---------- 目录 ---------- */
+      function buildToc() {
+        els.tocList.innerHTML = '';
+        episodes.forEach(function (ep, idx) {
+          var item = $('button', 'toc-item');
+          item.dataset.ep = ep.ep;
+          item.innerHTML =
+            '<span class="toc-ep">EP.' + pad(ep.ep) + '</span>' +
+            '<span class="toc-title">' + escapeHtml(ep.title) + '</span>' +
+            '<span class="toc-dot"></span>';
+          item.addEventListener('click', function () {
+            go(idx);
+            closeToc();
+          });
+          els.tocList.appendChild(item);
+        });
+      }
+      function markTocRead(ep) {
+        var item = els.tocList.querySelector('.toc-item[data-ep="' + ep.ep + '"]');
+        if (item) item.classList.add('read');
+        var gc = gridCards[ep.ep];
+        if (gc) gc.classList.add('read');
+      }
+      function setActiveToc(epNum) {
+        var curItem = els.tocList.querySelector('.toc-item.active');
+        if (curItem) curItem.classList.remove('active');
+        var item = els.tocList.querySelector('.toc-item[data-ep="' + epNum + '"]');
+        if (item) {
+          item.classList.add('active');
+          // 侧边栏内自动滚动到当前话
+          var top = item.offsetTop - els.toc.clientHeight / 2 + item.clientHeight / 2;
+          els.toc.scrollTop = top;
+        }
+        // 网格当前话高亮同步（网格未构建时 gridCards 为空，安全跳过）
+        var prevGc = els.gridBody.querySelector('.grid-card.active');
+        if (prevGc) prevGc.classList.remove('active');
+        var gc = gridCards[epNum];
+        if (gc) gc.classList.add('active');
+        els.topbarEp.textContent = 'EP.' + pad(epNum);
+      }
+
+      /* ---------- 全部话目网格：关键词筛选 + 按分册跳转 ---------- */
+      function buildGrid() {
+        els.gridBody.innerHTML = '';
+        gridCards = {};
+        var partTitle = {};
+        partsMeta.forEach(function (p) { partTitle[p.file] = p.label || p.file; });
+
+        // 分册下拉：全部分册 + 各分册（按 manifest 首次出现顺序）
+        els.gridPart.innerHTML = '';
+        var all = document.createElement('option');
+        all.value = '__all__';
+        all.textContent = '全部分册';
+        els.gridPart.appendChild(all);
+        var seen = {};
+        episodes.forEach(function (ep) {
+          if (seen[ep.part]) return;
+          seen[ep.part] = true;
+          var o = document.createElement('option');
+          o.value = ep.part;
+          o.textContent = partTitle[ep.part] || ep.part.replace(/\.md$/, '');
+          els.gridPart.appendChild(o);
+        });
+
+        episodes.forEach(function (ep, idx) {
+          var card = $('button', 'grid-card');
+          card.dataset.ep = ep.ep;
+          card.dataset.part = ep.part;
+          // 检索串：话号（03 / ep3）+ 标题，命中任一即可
+          card.dataset.search = (pad(ep.ep) + ' ep' + ep.ep + ' ' + ep.title).toLowerCase();
+          card.innerHTML =
+            '<span class="gc-ep">EP.' + pad(ep.ep) + '</span>' +
+            '<span class="gc-title">' + escapeHtml(ep.title) + '</span>' +
+            '<span class="gc-part">' + escapeHtml(partTitle[ep.part] || ep.part) + '</span>';
+          card.addEventListener('click', function () { go(idx); closeGrid(); });
+          gridCards[ep.ep] = card;
+          els.gridBody.appendChild(card);
+        });
+
+        // 回填「已读」与「当前话」状态
+        for (var k in rendered) if (rendered[k]) markTocRead({ ep: +k });
+        if (currentEp != null && gridCards[currentEp]) gridCards[currentEp].classList.add('active');
+        renderGrid();
+      }
+
+      function renderGrid() {
+        var q = (els.gridSearch.value || '').trim().toLowerCase();
+        var part = els.gridPart.value || '__all__';
+        var shown = 0;
+        episodes.forEach(function (ep) {
+          var card = gridCards[ep.ep];
+          if (!card) return;
+          var show = (part === '__all__' || ep.part === part) &&
+            (!q || card.dataset.search.indexOf(q) >= 0);
+          card.style.display = show ? '' : 'none';
+          if (show) shown++;
+        });
+        els.gridCount.textContent = shown + ' / ' + episodes.length + ' 话';
+        var empty = els.gridBody.querySelector('.grid-empty');
+        if (!shown) {
+          if (!empty) {
+            empty = $('div', 'grid-empty', '没有匹配的话目，换个关键词或分册试试。');
+            els.gridBody.appendChild(empty);
+          }
+        } else if (empty) {
+          empty.remove();
+        }
+      }
+
+      function gridOpen() { return els.grid.classList.contains('open'); }
+      function openGrid() {
+        if (!readerReady) return;
+        buildGrid(); // 重建以反映最新已读/当前态
+        closeToc();
+        els.grid.classList.add('open');
+        els.grid.setAttribute('aria-hidden', 'false');
+        setTimeout(function () { els.gridSearch.focus(); }, 30);
+      }
+      function closeGrid() {
+        els.grid.classList.remove('open');
+        els.grid.setAttribute('aria-hidden', 'true');
+      }
+
+      function updateNav() {
+        els.counter.textContent = (cur + 1) + ' / ' + episodes.length;
+        els.btnPrev.disabled = cur <= 0;
+        els.btnNext.disabled = cur >= episodes.length - 1;
+        els.edgePrev.disabled = cur <= 0;
+        els.edgeNext.disabled = cur >= episodes.length - 1;
+      }
+
+      function jumpTo(epNum) {
+        var node = document.getElementById('ep-' + epNum);
+        if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      function openToc() { els.toc.classList.add('open'); els.tocMask.classList.add('show'); }
+      function closeToc() { els.toc.classList.remove('open'); els.tocMask.classList.remove('show'); }
+
+      function renderPageTransform() {
+        els.track.style.transform = mode === 'page' ? 'translateX(' + (-cur * 100) + '%)' : '';
+      }
+
+      /* ---------- 切话（两种模式共用入口） ---------- */
+      function go(i) {
+        if (!episodes.length) return;
+        cur = Math.max(0, Math.min(episodes.length - 1, i));
+        var ep = episodes[cur];
+        currentEp = ep.ep;
+        try { history.replaceState(null, '', '#ep-' + ep.ep); } catch (e) { }
+        setActiveToc(ep.ep);
+        updateNav();
+        if (mode === 'page') {
+          renderPageTransform();
+          var sec = sections[ep.ep];
+          if (sec) sec.scrollTop = 0;
+          // 按需加载当前话，并预取相邻话保证翻页无加载感
+          ensureEpisode(ep).catch(function () { });
+          if (cur + 1 < episodes.length) ensureEpisode(episodes[cur + 1]).catch(function () { });
+          if (cur - 1 >= 0) ensureEpisode(episodes[cur - 1]).catch(function () { });
+          setProgress((cur + 1) / episodes.length);
+          saveProgress(ep.ep, (cur + 1) / episodes.length);
+        } else {
+          jumpTo(ep.ep);
+        }
+      }
+
+      /* ---------- 模式切换 ---------- */
+      function setMode(next) {
+        if (next === mode || !episodes.length) return;
+        mode = next;
+        document.body.classList.toggle('mode-long', next === 'long');
+        document.body.classList.toggle('mode-page', next === 'page');
+        els.modeBtn.textContent = next === 'long' ? '📖 翻页' : '📜 长卷';
+        els.modeBtn.title = next === 'long' ? '切换到翻页模式 (M)' : '切换到长卷模式 (M)';
+        if (next === 'long') {
+          // 关键：翻页模式在轨道上留过内联 translateX，必须清除，否则整条轨道被平移出视口
+          els.track.style.transform = '';
+          els.track.style.transition = 'none';
+          // 后台顺序补齐未加载的话，完成后定位到当前话
+          var chain = Promise.resolve();
+          episodes.forEach(function (ep) {
+            chain = chain.then(function () { return ensureEpisode(ep).catch(function () { }); });
+          });
+          chain.then(function () {
+            var node = document.getElementById('ep-' + episodes[cur].ep);
+            if (node) node.scrollIntoView({ block: 'start' });
+          });
+        } else {
+          window.scrollTo(0, 0);
+          els.track.style.transition = '';
+          renderPageTransform();
+          ensureEpisode(episodes[cur]).catch(function () { });
+          setProgress((cur + 1) / episodes.length);
+        }
+      }
+
+      /* ---------- 长卷模式：当前话观察 + 进度条 + 存档 ---------- */
+      function observeEpisodes() {
+        var io = new IntersectionObserver(function (entries) {
+          if (mode !== 'long') return;
+          // 取与视口交叉面积最大的一话
+          var best = null;
+          entries.forEach(function (en) {
+            if (en.isIntersecting && (!best || en.intersectionRatio > best.intersectionRatio)) best = en;
+          });
+          if (best) {
+            var epNum = +best.target.dataset.ep;
+            if (epNum !== currentEp) {
+              currentEp = epNum;
+              cur = indexOfEp(epNum);
+              setActiveToc(epNum);
+              updateNav();
+            }
+          }
+        }, { rootMargin: '-20% 0px -60% 0px', threshold: [0, .25, .5, 1] });
+        episodes.forEach(function (ep) {
+          var node = document.getElementById('ep-' + ep.ep);
+          if (node) io.observe(node);
+        });
+      }
+
+      var scrollRaf = 0;
+      window.addEventListener('scroll', function () {
+        if (!readerReady || mode !== 'long') return;
+        if (scrollRaf) return;
+        scrollRaf = requestAnimationFrame(function () {
+          scrollRaf = 0;
+          var doc = document.documentElement;
+          var max = doc.scrollHeight - window.innerHeight;
+          var ratio = max > 0 ? window.scrollY / max : 0;
+          setProgress(ratio);
+          els.toTop.classList.toggle('show', window.scrollY > 600);
+          if (currentEp != null) saveProgress(currentEp, ratio);
+        });
+      }, { passive: true });
+
+      /* ---------- 讲解抽屉 ---------- */
+      function docFootNav(idx) {
+        var html = '<div class="doc-foot-nav">';
+        if (idx > 0) {
+          var p = episodes[idx - 1];
+          html += '<button class="dnav" data-docgo="' + (idx - 1) + '"><small>‹ 上一篇</small>EP.' + pad(p.ep) + ' ' + escapeHtml(p.title) + '</button>';
+        } else html += '<span></span>';
+        if (idx < episodes.length - 1) {
+          var n = episodes[idx + 1];
+          html += '<button class="dnav" style="text-align:right" data-docgo="' + (idx + 1) + '"><small>下一篇 ›</small>EP.' + pad(n.ep) + ' ' + escapeHtml(n.title) + '</button>';
+        } else html += '<span></span>';
+        return html + '</div>';
+      }
+
+      function renderDrawer(idx) {
+        var ep = episodes[idx];
+        els.drawerBody.innerHTML = renderMarkdown(epState[ep.ep].md) + docFootNav(idx);
+        els.drawerBody.scrollTop = 0;
+      }
+
+      function openDoc(ep) {
+        if (!ep) return;
+        docEp = ep;
+        var idx = episodes.indexOf(ep);
+        els.drawerTitle.textContent = 'EP.' + pad(ep.ep) + ' ' + ep.title;
+        els.drawerSub.textContent = '对应正文：' + ep.part + '　｜　Esc 关闭 · ←/→ 切换上下篇';
+        els.docPrev.disabled = idx <= 0;
+        els.docNext.disabled = idx >= episodes.length - 1;
+        document.body.classList.add('doc-open');
+        els.drawer.setAttribute('aria-hidden', 'false');
+
+        var st = epState[ep.ep];
+        if (st && st.loaded && st.md) { renderDrawer(idx); return; }
+
+        els.drawerBody.innerHTML = '<div class="ep-loading">正在加载讲解…</div>';
+        ensureEpisode(ep).then(function () {
+          if (docEp === ep) renderDrawer(idx);
+        }).catch(function () {
+          if (docEp !== ep) return;
+          els.drawerBody.innerHTML = '';
+          var box = $('div', 'ep-error');
+          box.innerHTML =
+            '<div class="err-icon">⚠️</div>' +
+            '<h3>讲解加载失败</h3>' +
+            '<p>请检查网络或本地服务器后重试。</p>';
+          var b = $('button', 'btn-retry', '重新加载');
+          b.addEventListener('click', function () { openDoc(ep); });
+          box.appendChild(b);
+          els.drawerBody.appendChild(box);
+        });
+      }
+
+      function closeDoc() {
+        docEp = null;
+        document.body.classList.remove('doc-open');
+        els.drawer.setAttribute('aria-hidden', 'true');
+      }
+
+      /* ---------- 主流程：一键打开 ---------- */
+      function setLoading(done, total, text) {
+        els.loadStatus.textContent = text || '';
+        if (total) {
+          els.loadBar.classList.add('show');
+          els.loadBarFill.style.width = (done / total * 100).toFixed(1) + '%';
+        }
+      }
+
+      function startOpen(targetEpId) {
+        if (location.protocol === 'file:') {
+          els.coverError.innerHTML = '';
+          els.coverError.appendChild(fileProtocolTip());
+          return;
+        }
+        els.btnOpen.disabled = true;
+        els.coverError.innerHTML = '';
+        setLoading(0, 1, '正在读取漫画清单…');
+
+        fetchManifest().then(function (data) {
+          episodes = data.episodes;
+          partsMeta = data.parts || [];
+          // 先搭骨架（目录 + 网格 + 空 section），翻页模式按需填充，长卷模式后台补齐
+          els.track.innerHTML = '';
+          buildToc();
+          buildGrid();
+          episodes.forEach(function (ep) {
+            var s = buildEpisodeSection(ep);
+            sections[ep.ep] = s;
+            els.track.appendChild(s);
+          });
+
+          els.cover.style.display = 'none';
+          els.reader.classList.add('show');
+          document.body.classList.add('mode-page'); // 默认翻页模式
+          readerReady = true;
+          observeEpisodes();
+
+          setLoading(1, 1, '漫画骨架已就绪');
+          setTimeout(function () {
+            els.loadBar.classList.remove('show');
+            els.loadStatus.textContent = '';
+          }, 500);
+
+          // 打开后定位：URL hash > 指定目标（继续阅读）
+          var want = null;
+          var h = (location.hash || '').match(/ep-(\d+)/);
+          if (h) want = +h[1];
+          else if (targetEpId) want = targetEpId;
+          var idx = want != null ? indexOfEp(want) : 0;
+          if (idx < 0) idx = 0;
+          go(idx);
+        }).catch(function (err) {
+          els.btnOpen.disabled = false;
+          setLoading(0, 0, '');
+          els.loadBar.classList.remove('show');
+          var fatal = $('div', 'fatal');
+          fatal.innerHTML =
+            '<h3>漫画清单加载失败</h3>' +
+            '<p>无法读取 <code>manifest.json</code>：' + escapeHtml(err.message || String(err)) + '</p>' +
+            '<p>请确认通过本地服务器访问（而非 file:// 直开），且文件未被移动。</p>';
+          var retry = $('button', 'btn-retry', '重新尝试');
+          retry.style.borderColor = 'var(--cyan)';
+          retry.style.color = 'var(--cyan)';
+          retry.style.background = 'rgba(34,211,238,.1)';
+          retry.addEventListener('click', function () {
+            fatal.remove();
+            startOpen(targetEpId);
+          });
+          fatal.appendChild(retry);
+          els.coverError.appendChild(fatal);
+        });
+      }
+
+      /* ---------- 继续阅读卡片 ---------- */
+      function showResume() {
+        var p = loadProgress();
+        // 无论有无进度，都用 manifest 校准封面话数
+        fetchManifest().then(function (data) {
+          var list = data.episodes;
+          var mc = document.getElementById('meta-count');
+          if (mc) mc.textContent = list.length;
+          if (!p || !p.epId) return;
+          var ep = list.filter(function (x) { return x.ep === p.epId; })[0];
+          var pct = Math.round((p.ratio || 0) * 100);
+          els.resumeCard.classList.add('show');
+          els.resumeCard.innerHTML =
+            '上次读到 <b style="color:var(--ink)">EP.' + pad(p.epId) +
+            (ep ? ' · ' + escapeHtml(ep.title) : '') + '</b>（约 ' + pct + '%），' +
+            '<a href="#ep-' + p.epId + '" id="resume-link">点这里继续阅读 →</a>';
+          document.getElementById('resume-link').addEventListener('click', function (e) {
+            e.preventDefault();
+            startOpen(p.epId);
+          });
+        }).catch(function () { /* 清单不可用时静默，不影响「从头打开」 */ });
+      }
+
+      /* ---------- 事件绑定 ---------- */
+      els.btnOpen.addEventListener('click', function () { startOpen(null); });
+      els.menuBtn.addEventListener('click', function () {
+        els.toc.classList.contains('open') ? closeToc() : openToc();
+      });
+      els.tocMask.addEventListener('click', closeToc);
+      els.toTop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+      els.btnReset.addEventListener('click', function () {
+        if (!confirm('确定清除阅读进度并返回封面吗？')) return;
+        try { localStorage.removeItem(STORE_KEY); } catch (e) { }
+        location.hash = '';
+        location.reload();
+      });
+      els.btnPrev.addEventListener('click', function () { go(cur - 1); });
+      els.btnNext.addEventListener('click', function () { go(cur + 1); });
+      els.edgePrev.addEventListener('click', function () { go(cur - 1); });
+      els.edgeNext.addEventListener('click', function () { go(cur + 1); });
+      els.modeBtn.addEventListener('click', function () {
+        setMode(mode === 'page' ? 'long' : 'page');
+      });
+      els.btnGrid.addEventListener('click', function () {
+        gridOpen() ? closeGrid() : openGrid();
+      });
+      els.gridClose.addEventListener('click', closeGrid);
+      els.gridSearch.addEventListener('input', renderGrid);
+      els.gridPart.addEventListener('change', renderGrid);
+
+      // 每话头部「📖 讲解」按钮（事件委托）
+      els.content.addEventListener('click', function (e) {
+        var t = e.target.closest ? e.target.closest('.btn-doc') : null;
+        if (!t) return;
+        var idx = indexOfEp(+t.dataset.ep);
+        if (idx >= 0) openDoc(episodes[idx]);
+      });
+
+      // 抽屉
+      els.docClose.addEventListener('click', closeDoc);
+      els.docMask.addEventListener('click', closeDoc);
+      els.docPrev.addEventListener('click', function () {
+        var i = episodes.indexOf(docEp);
+        if (i > 0) openDoc(episodes[i - 1]);
+      });
+      els.docNext.addEventListener('click', function () {
+        var i = episodes.indexOf(docEp);
+        if (i >= 0 && i < episodes.length - 1) openDoc(episodes[i + 1]);
+      });
+      els.docRaw.addEventListener('click', function () {
+        if (docEp) window.open(docEp.slug + '.md', '_blank', 'noopener');
+      });
+      els.drawerBody.addEventListener('click', function (e) {
+        var t = e.target.closest ? e.target.closest('[data-docgo]') : null;
+        if (t) openDoc(episodes[+t.dataset.docgo]);
+      });
+
+      // 键盘：←/→ 翻话（抽屉打开时切换讲解上下篇），M 切模式，G 开合话目网格，Esc 关抽屉/网格/目录
+      document.addEventListener('keydown', function (e) {
+        if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+        if (!readerReady) return;
+        if (e.key === 'Escape') {
+          if (docEp) closeDoc();
+          else if (gridOpen()) closeGrid();
+          else closeToc();
+          return;
+        }
+        if (docEp) {
+          if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+            var di = episodes.indexOf(docEp) + (e.key === 'ArrowRight' ? 1 : -1);
+            if (di >= 0 && di < episodes.length) openDoc(episodes[di]);
+            e.preventDefault();
+          }
+          return; // 抽屉打开时其余按键不翻漫画
+        }
+        if (e.key === 'ArrowRight' || e.key === 'PageDown') { go(cur + 1); e.preventDefault(); }
+        else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { go(cur - 1); e.preventDefault(); }
+        else if (e.key === 'Home') { go(0); e.preventDefault(); }
+        else if (e.key === 'End') { go(episodes.length - 1); e.preventDefault(); }
+        else if (e.key === 'm' || e.key === 'M') { setMode(mode === 'page' ? 'long' : 'page'); }
+        else if (e.key === 'g' || e.key === 'G') { gridOpen() ? closeGrid() : openGrid(); }
+      });
+
+      window.addEventListener('hashchange', function () {
+        var h = (location.hash || '').match(/ep-(\d+)/);
+        if (h && readerReady) {
+          var idx = indexOfEp(+h[1]);
+          if (idx >= 0 && idx !== cur) go(idx);
+        }
+      });
+
+      /* ---------- 启动 ---------- */
+      // 深链直达：URL 带 #ep-N（如文档站点/漫画目录的链接）时跳过封面，直接打开对应话；
+      // 否则展示封面与「继续阅读」卡片。file:// 下无法 fetch 清单，仍走封面分支。
+      var deepLink = (location.hash || '').match(/ep-(\d+)/);
+      if (deepLink && location.protocol !== 'file:') {
+        startOpen(+deepLink[1]);
+      } else {
+        showResume();
+      }
+    })();
+  </script>
+</body>
+
+</html>

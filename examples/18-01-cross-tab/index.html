@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>18-01 跨 Tab 通信（BroadcastChannel + storage 双通道）</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+        button { padding: 8px 16px; margin: 4px 8px 4px 0; cursor: pointer; }
+        #log { margin-top: 16px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; height: 260px; overflow: auto; font-size: 13px; background: #f8fafc; }
+        .row { line-height: 1.8; }
+        .tag { display: inline-block; min-width: 96px; color: #2563eb; }
+        html[data-theme='dark'] { background: #0f172a; color: #e2e8f0; }
+        html[data-theme='dark'] #log { background: #1e293b; border-color: #334155; }
+    </style>
+</head>
+<body>
+    <h2>跨 Tab 同步演示</h2>
+    <p class="row">当前 Tab 标识：<b id="self"></b>（请用浏览器再开一个本页窗口对照）</p>
+    <p class="row">共享计数：<b id="count">0</b>　主题：<b id="theme">light</b></p>
+    <p>
+        <button id="inc">计数 +1（广播）</button>
+        <button id="toggle">切换主题（广播）</button>
+    </p>
+    <p style="color:#64748b;font-size:13px">
+        验证方法：在 A 窗口点按钮，观察 B 窗口实时变化；新窗口打开时自动读取最后状态（localStorage 持久化）。
+    </p>
+    <div id="log"></div>
+
+    <script src="./app.js"></script>
+</body>
+</html>

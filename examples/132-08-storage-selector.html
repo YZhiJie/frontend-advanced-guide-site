@@ -1,0 +1,79 @@
+<!-- 文件: examples/132-08-storage-selector.html -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>浏览器存储选型器</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.7 system-ui, sans-serif; max-width: 880px; margin: 40px auto; padding: 0 20px; }
+  fieldset { border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 12px; margin: 20px 0; padding: 16px 20px; }
+  label { display: block; margin: 8px 0; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th, td { border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding: 8px 10px; text-align: left; vertical-align: top; }
+  .win { outline: 2px solid #2e9e5b; }
+  code { background: color-mix(in srgb, currentColor 8%, transparent); padding: 2px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>浏览器存储选型器</h1>
+<p>勾选你的约束，表格会高亮最匹配的介质。选型不是“谁最强”，而是“谁的成本最低”。</p>
+
+<fieldset>
+  <legend>约束</legend>
+  <label><input type="checkbox" data-k="large" /> 单条数据 &gt; 1MB 或总量 &gt; 5MB</label>
+  <label><input type="checkbox" data-k="query" /> 需要按字段查询 / 索引 / 排序</label>
+  <label><input type="checkbox" data-k="tx" /> 需要事务与失败回滚</label>
+  <label><input type="checkbox" data-k="binary" /> 二进制 / 顺序大文件</label>
+  <label><input type="checkbox" data-k="sync" /> 需要同步读（极低延迟）</label>
+  <label><input type="checkbox" data-k="cross" /> 需要跨标签页实时同步</label>
+  <label><input type="checkbox" data-k="http" /> 缓存的是 HTTP 响应</label>
+  <label><input type="checkbox" data-k="server" /> 需要服务端也能读到</label>
+</fieldset>
+
+<table>
+  <thead><tr><th>介质</th><th>适合</th><th>关键边界</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<script>
+const options = [
+  { name: "Cookie", tags: ["server", "cross"], fit: "会话凭证、需随请求发送的小标记", limit: "4KB/条；每次请求都带；SameSite/HttpOnly" },
+  { name: "localStorage", tags: ["sync"], fit: "小体量配置、主题、非敏感偏好", limit: "每源约 5MB；同步阻塞；只存字符串" },
+  { name: "sessionStorage", tags: ["sync"], fit: "单标签页临时状态、OAuth state", limit: "不跨标签页；关闭标签即清" },
+  { name: "IndexedDB", tags: ["large", "query", "tx"], fit: "业务数据、离线队列、结构化列表", limit: "异步；版本迁移；配额整站共享" },
+  { name: "Cache Storage", tags: ["http", "large"], fit: "静态资源、离线壳、HTTP 响应", limit: "按 Request/Response 存；不适合业务查询" },
+  { name: "OPFS", tags: ["binary", "large"], fit: "大文件、日志、音视频帧、WASM 数据库文件", limit: "按源隔离；Worker 才有同步句柄" },
+  { name: "WebSQL（已废弃）", tags: [], fit: "不要再选", limit: "已被移除，仅历史项目存在" },
+];
+
+const state = new Set();
+const rows = document.getElementById("rows");
+
+function render() {
+  rows.innerHTML = "";
+  const scored = options.map((o) => {
+    const hit = o.tags.filter((t) => state.has(t)).length;
+    const miss = [...state].filter((t) => !o.tags.includes(t)).length;
+    return { ...o, score: hit * 2 - miss };
+  }).sort((a, b) => b.score - a.score);
+
+  for (const o of scored) {
+    const tr = document.createElement("tr");
+    if (o.score > 0 && o.score === scored[0].score) tr.className = "win";
+    tr.innerHTML = `<td><code>${o.name}</code></td><td>${o.fit}</td><td>${o.limit}</td>`;
+    rows.appendChild(tr);
+  }
+}
+
+document.querySelectorAll("input[type=checkbox]").forEach((el) => {
+  el.addEventListener("change", () => {
+    const key = el.dataset.k;
+    el.checked ? state.add(key) : state.delete(key);
+    render();
+  });
+});
+render();
+</script>
+</body>
+</html>

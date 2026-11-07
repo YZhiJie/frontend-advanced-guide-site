@@ -1,0 +1,277 @@
+<!-- 文件: examples/45-04-css-tricks.html -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>45-04 CSS 实用技巧实验台</title>
+<style>
+  /* 1) light-dark()：一行声明两套主题色，跟随系统/color-scheme 切换 */
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f8fafc, #0b1220);
+    --card: light-dark(#ffffff, #111827);
+    --text: light-dark(#0f172a, #e5e7eb);
+    --muted: light-dark(#64748b, #94a3b8);
+    --line: light-dark(#e2e8f0, #1f2937);
+    --brand: light-dark(#0f766e, #5eead4);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 32px 20px 80px;
+    font: 15px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  main { max-width: 880px; margin: 0 auto; }
+
+  /* 2) text-wrap: balance：标题两行时自动均衡，避免“孤字”落单 */
+  h1 {
+    font-size: 26px;
+    text-wrap: balance;
+    margin: 0 0 6px;
+  }
+
+  .lead { color: var(--muted); margin: 0 0 28px; }
+
+  section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 18px;
+    break-inside: avoid; /* 打印时不把一张卡片劈成两页 */
+  }
+
+  h2 { font-size: 16px; margin: 0 0 4px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+
+  /* 3) CSS Anchor Positioning：浮层自动贴在锚点下方；不支持的浏览器走 @supports 降级 */
+  .anchor-demo { position: relative; display: inline-block; }
+
+  .anchor-btn {
+    anchor-name: --invite; /* 给这个元素起一个锚点名字 */
+    padding: 7px 14px;
+    border: 1px solid var(--brand);
+    border-radius: 8px;
+    color: var(--brand);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .tip {
+    position: absolute;
+    position-anchor: --invite;
+    top: anchor(bottom);
+    left: anchor(left);
+    margin-top: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--card);
+    background: var(--text);
+    border-radius: 6px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.15s;
+    pointer-events: none;
+  }
+
+  .anchor-demo:hover .tip,
+  .anchor-demo:focus-within .tip { opacity: 1; }
+
+  /* 降级：不支持 anchor-name 时按普通绝对定位贴在按钮下方 */
+  @supports not (position-anchor: --invite) {
+    .tip {
+      top: calc(100% + 8px);
+      left: 0;
+      margin-top: 0;
+    }
+  }
+
+  /* 4) @scope：样式只作用于组件内部，不再靠 BEM 长类名防串味 */
+  .scope-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    margin-top: 6px;
+  }
+  .scope-card .badge { color: var(--muted); }
+
+  @scope (.scope-card) {
+    .badge {
+      display: inline-block;
+      padding: 1px 8px;
+      font-size: 11px;
+      color: var(--brand);
+      border: 1px solid var(--brand);
+      border-radius: 999px;
+    }
+    :scope {
+      border-color: color-mix(in oklab, var(--brand) 35%, var(--line));
+    }
+  }
+
+  /* 5) field-sizing: content：textarea 随内容长高，不再写 JS 量 scrollHeight */
+  textarea {
+    width: 100%;
+    min-height: 2.6em;
+    max-height: 10em;
+    padding: 8px 10px;
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    resize: vertical;
+    field-sizing: content;
+  }
+  @supports not (field-sizing: content) {
+    textarea { height: 4.6em; }
+  }
+
+  /* 6) content-visibility：屏外长列表跳过渲染，首屏只支付可见部分的成本 */
+  .cv-list {
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    max-height: 300px;
+    overflow: auto;
+    border-top: 1px solid var(--line);
+  }
+  .cv-list li {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 44px;
+    padding: 10px 4px;
+    border-bottom: 1px dashed var(--line);
+    font-size: 13px;
+  }
+
+  /* 7) 打印：隐藏交互控件、避免卡片断页、把链接地址展开成可读文本 */
+  .print-actions { margin-top: 12px; }
+  .print-actions button {
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--brand);
+    background: transparent;
+    border: 1px solid var(--brand);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  @media print {
+    @page { margin: 12mm; }
+    body { padding: 0; background: #fff; color: #000; }
+    .no-print { display: none !important; }
+    section, .print-card { break-inside: avoid; }
+    a[href^="http"]::after {
+      content: " (" attr(href) ")";
+      font-size: 10pt;
+      color: #555;
+    }
+  }
+
+  /* 8) 动效降级：尊重系统“减少动态效果”，不要用动画惩罚前庭敏感用户 */
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>CSS 实用技巧实验台：锚点定位、作用域、自适应输入与打印</h1>
+  <p class="lead">
+    这个页面不依赖任何框架，直接双击打开即可。把窗口调窄可以观察容器行为；
+    用“打印预览”观察最后一张卡片的断页与链接展开效果。
+  </p>
+
+  <section class="no-print">
+    <h2>1. Anchor Positioning</h2>
+    <p class="hint">
+      悬停或聚焦按钮：浮层通过 <code>anchor-name</code> / <code>position-anchor</code>
+      自动对齐，不再依赖 JS 计算坐标；不支持时由 <code>@supports</code> 降级为普通绝对定位。
+    </p>
+    <div class="anchor-demo">
+      <button class="anchor-btn" type="button">邀请成员</button>
+      <span class="tip" role="tooltip">复制邀请链接发给同事</span>
+    </div>
+  </section>
+
+  <section class="no-print">
+    <h2>2. @scope 与 light-dark()</h2>
+    <p class="hint">
+      同一个 <code>.badge</code> 只要放进卡片内部就自动变成品牌色胶囊，外部样式不受影响；
+      主题色由 <code>light-dark()</code> 跟随系统深浅色。
+    </p>
+    <div class="scope-card">
+      <span class="badge">组件内 badge</span>
+      <p class="hint" style="margin: 8px 0 0">卡片边框颜色由 <code>:scope</code> 基于品牌色混合得到。</p>
+    </div>
+    <p><span class="badge">外部 badge 不受影响</span></p>
+  </section>
+
+  <section class="no-print">
+    <h2>3. field-sizing: content</h2>
+    <p class="hint">输入多行文字，textarea 自动长高到上限，不需要 JS 监听 input 再改 height。</p>
+    <textarea placeholder="输入几行内容试试，例如：&#10;第一行&#10;第二行&#10;第三行"></textarea>
+  </section>
+
+  <section class="no-print">
+    <h2>4. hidden="until-found"</h2>
+    <p class="hint">
+      隐藏内容仍可被浏览器“页内查找”命中；命中前触发 <code>beforematch</code>，
+      适合折叠的帮助说明与 FAQ。
+    </p>
+    <button class="anchor-btn" type="button" id="revealBtn">手动展开 / 收起</button>
+    <p id="secret" hidden="until-found">
+      这段文字默认不可见。用 Ctrl/Cmd + F 搜索“前庭敏感”会触发 beforematch，
+      浏览器会自动把它展开并滚动到匹配位置。
+    </p>
+  </section>
+
+  <section>
+    <h2>5. content-visibility 长列表</h2>
+    <p class="hint">下面 80 行中，屏外行跳过渲染；滚动到附近时才布局，首屏更轻。</p>
+    <ul class="cv-list" id="cvList"></ul>
+  </section>
+
+  <section class="print-card">
+    <h2>6. 打印样式</h2>
+    <p class="hint">
+      点击打印预览：导航与按钮隐藏，卡片不会被分页劈开，外链地址会自动展开。
+      了解详情可访问 <a href="https://developer.mozilla.org/zh-CN/docs/Web/CSS/@media">MDN 的 @media 文档</a>。
+    </p>
+    <div class="print-actions no-print">
+      <button type="button" onclick="window.print()">打印本页</button>
+    </div>
+  </section>
+</main>
+
+<script>
+  // 生成 80 行长列表，专门喂给 content-visibility
+  const list = document.getElementById("cvList");
+  const fragment = document.createDocumentFragment();
+  for (let i = 1; i <= 80; i++) {
+    const li = document.createElement("li");
+    li.textContent = "第 " + i + " 行：屏外内容不参与首屏布局与绘制";
+    fragment.appendChild(li);
+  }
+  list.appendChild(fragment);
+
+  // hidden="until-found"：页内查找命中隐藏内容时，浏览器派发 beforematch
+  const secret = document.getElementById("secret");
+  secret.addEventListener("beforematch", () => {
+    console.log("[beforematch] 页内查找命中了隐藏内容，准备展开");
+    secret.hidden = false;
+  });
+  document.getElementById("revealBtn").addEventListener("click", () => {
+    secret.hidden = !secret.hidden;
+  });
+</script>
+</body>
+</html>

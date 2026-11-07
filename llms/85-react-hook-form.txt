@@ -1,0 +1,307 @@
+# 第八十五部分 · React Hook Form 表单工程（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/85-react-hook-form
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第八十五部分 · React Hook Form 表单工程
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第八十四部分 · shadcn/ui 与 Radix UI](./84-shadcn-radix-ui.md)｜关联章节：[第三十八部分 · 低代码表单引擎](./38-lowcode-form-engine.md) · [第三十三部分 · Zod 运行时校验](./33-zod.md) · [第十九部分 · 业务功能代码片段](./19-business-snippets.md)
+
+> 💡 **本章特色**：JD 技术栈要求 React Hook Form（RHF）。RHF 的核心竞争力是**非受控 + 按需订阅**，表单性能远优于把所有字段放进 state 的受控方案。本章讲清：**RHF 的核心模型**（register/handleSubmit/formState）、**校验模式**（onSubmit/onBlur/onChange）、**与 Zod 集成**（Schema 单一事实来源）、**复杂表单**（数组字段 useFieldArray、嵌套、动态表单）。配套示例 [85-01-form-field-model.ts](./examples/85-01-form-field-model.ts) 用纯 TS 演示 RHF 内部的字段注册、错误收集、touched 机制、Zod Schema 校验集成。
+
+## 本部分内容
+
+- [85.1 React Hook Form 的核心：非受控 + 按需订阅](#_85-1-react-hook-form-的核心-非受控-按需订阅)
+- [85.2 字段注册与校验模式](#_85-2-字段注册与校验模式)
+- [85.3 与 Zod 集成：Schema 驱动校验](#_85-3-与-zod-集成-schema-驱动校验)
+- [85.4 复杂表单：数组字段、嵌套与动态表单](#_85-4-复杂表单-数组字段、嵌套与动态表单)
+- [85.5 自测题](#_85-5-自测题)
+- [85.6 本章避坑清单](#_85-6-本章避坑清单)
+
+---
+
+## 85.1 React Hook Form 的核心：非受控 + 按需订阅
+
+### 概念解析
+
+React Hook Form 和传统受控表单（每个字段 `useState`）的本质区别：
+
+| 维度 | 受控表单（useState） | React Hook Form |
+| --- | --- | --- |
+| 状态管理 | 每个字段一个 state，输入时 setState 触发重渲染 | 字段值存在 ref 里，输入不触发重渲染 |
+| 重渲染范围 | 整个表单组件重渲染 | 只有订阅了该字段的组件重渲染 |
+| 性能 | 字段多时卡顿 | 100+ 字段也流畅 |
+| 开发体验 | 简单直接 | 需要理解 register/subscribe 模型 |
+
+RHF 的性能来自两个设计：
+
+1. **非受控**：`register("name")` 把 input 的 `name/ref/onChange/onBlur` 绑到 DOM，值直接从 DOM 读，不经过 React state；
+2. **按需订阅**：`formState.errors` 只在错误变化时通知订阅了它的组件，其他字段值的变化不触发重渲染。
+
+### 完整代码示例
+
+```tsx
+// 最简 RHF 用法
+import { useForm } from "react-hook-form";
+
+function LoginForm() {
+  const { register, handleSubmit, formState: { errors } } = useForm<{ email: string; password: string }>();
+
+  const onSubmit = (data) => console.log(data);
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)}>
+      <input {...register("email", { required: "邮箱必填" })} />
+      {errors.email && <p>{errors.email.message}</p>}
+
+      <input type="password" {...register("password", { required: "密码必填", minLength: { value: 6, message: "至少 6 位" } })} />
+      {errors.password && <p>{errors.password.message}</p>}
+
+      <button type="submit">登录</button>
+    </form>
+  );
+}
+```
+
+> 配套示例 `examples/85-01-form-field-model.ts` 用纯 TS **手写**字段注册、错误收集、touched 机制与迷你 Schema 校验，用来演示 RHF 的内部原理，**并不 import `react-hook-form`**，不能当作真实用法照抄。真实 RHF 用法见 85.1 的 `useForm` 示例与 85.4 的 `useFieldArray` 示例——它们是 React/JSX 代码，需在 React 工程内运行（`npm i react-hook-form zod @hookform/resolvers`，或粘贴到 StackBlitz 的 React 模板）；本节纯 TS 示例可实跑：`npx tsx examples/85-01-form-field-model.ts`。
+
+### 应用实践
+
+- **大表单必须用 RHF**：字段超过 20 个的表单，受控方案会明显卡顿，RHF 的非受控模式是刚需；
+- **不要把 RHF 的值同步到外部 state**：`watch` 会订阅整个表单导致重渲染。只在需要时 `watch("specificField")` 订阅单个字段；
+- **`useFormContext` 跨组件共享表单**：复杂表单拆成多个子组件时，用 `FormProvider` + `useFormContext` 共享 form 实例，不用层层传 props。
+
+---
+
+## 85.2 字段注册与校验模式
+
+### 概念解析
+
+`register(name, options)` 是 RHF 的核心 API，返回 `{ name, ref, onChange, onBlur }`，解构到 input 上即可。
+
+校验模式（`mode`）决定什么时候触发校验：
+
+| 模式 | 触发时机 | 适用场景 |
+| --- | --- | --- |
+| `onSubmit`（默认） | 提交时校验所有字段 | 简单表单，提交时一次性报错 |
+| `onBlur` | 字段失焦时校验该字段 | 登录/注册，用户离开输入框才提示 |
+| `onChange` | 字段值变化时校验 | 实时校验，如密码强度、用户名查重 |
+| `onTouched` | 失焦后开始，之后每次变化都校验 | 折中方案，失焦后实时反馈 |
+| `all` | onBlur + onChange 都触发 | 最严格的实时校验 |
+
+**`touched` 机制**：RHF 跟踪每个字段是否被触碰过。默认只在字段被触碰后才显示错误——用户还没填的字段不应该一上来就标红，否则体验很差。
+
+### 完整代码示例
+
+```tsx
+// onBlur 模式：失焦后校验，未触碰不报错
+const { register, formState: { errors, touchedFields } } = useForm({ mode: "onBlur" });
+
+// 只在字段被触碰且有错误时显示
+{touchedFields.email && errors.email && <p>{errors.email.message}</p>}
+```
+
+### 应用实践
+
+- **登录表单用 `onBlur`**：用户正在输入时不打断，离开输入框才校验；
+- **注册表单的"用户名是否已存在"用 `onChange` + debounce**：输入停顿 300ms 后发请求查重，不要每次按键都请求；
+- **提交时统一校验兜底**：不管用什么 mode，`handleSubmit` 都会在提交时校验所有字段，未通过的不调用 onSubmit。
+
+---
+
+## 85.3 与 Zod 集成：Schema 驱动校验
+
+### 概念解析
+
+RHF 内置校验（`required`、`minLength`）适合简单场景。复杂表单（条件必填、跨字段校验、类型转换）推荐用 **Zod + `@hookform/resolvers`**，让 Schema 成为校验的唯一事实来源：
+
+```tsx
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+
+const schema = z.object({
+  email: z.string().email("邮箱格式不正确"),
+  password: z.string().min(6, "至少 6 位"),
+  confirm: z.string(),
+}).refine((data) => data.password === data.confirm, {
+  message: "两次密码不一致",
+  path: ["confirm"],
+});
+
+const { register, handleSubmit, formState: { errors } } = useForm({
+  resolver: zodResolver(schema),
+});
+```
+
+Zod Schema 的优势：
+
+- **前后端共享**：同一份 Schema 可以给前端表单和后端 API 校验用（见 [33 册 Zod](./33-zod.md)）；
+- **类型推导**：`z.infer<typeof schema>` 直接得到表单数据的 TypeScript 类型；
+- **表达力强**：条件校验、交叉字段校验、自定义校验都能写。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/85-01-form-field-model.ts（节选：Schema → 表单错误；纯 TS 原理演示，非真实 RHF）
+export function schemaToFormErrors<T extends Record<string, unknown>>(
+  values: T,
+  schema: Record<keyof T, ZString>,
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const key of Object.keys(schema) as (keyof T)[]) {
+    const result = schema[key].safeParse(values[key]);
+    if (!result.success) errors[key as string] = result.error!;
+  }
+  return errors;
+}
+```
+
+### 应用实践
+
+- **Schema 放单独文件**：`schemas/auth.ts`，前端表单和后端 API 都 import 同一份，保证契约一致；
+- **错误路径映射**：Zod 的 `path` 数组（如 `["confirm"]`）要映射到 RHF 的 `errors.confirm`，`@hookform/resolvers` 已经处理好了；
+- **异步校验放 Schema 外**：Zod 的 `.refine` 支持异步，但表单里的异步校验（查重）最好单独处理，避免阻塞整个表单校验。
+
+---
+
+## 85.4 复杂表单：数组字段、嵌套与动态表单
+
+### 概念解析
+
+复杂表单的三个典型场景：
+
+1. **数组字段**（`useFieldArray`）：动态增减的列表，如"添加多个联系人"、"多行明细"；
+2. **嵌套字段**：`address.city` 这种点路径，RHF 支持嵌套对象；
+3. **动态表单**：根据条件显示/隐藏字段，或根据后端返回的 Schema 渲染。
+
+`useFieldArray` 是数组字段的核心 API，提供 `append`、`remove`、`insert`、`move` 等操作，内部维护字段的 key 和注册。
+
+```tsx
+import { useFieldArray } from "react-hook-form";
+
+function ContactsForm() {
+  const { control, register } = useForm({ defaultValues: { contacts: [{ name: "", phone: "" }] } });
+  const { fields, append, remove } = useFieldArray({ control, name: "contacts" });
+
+  return (
+    <div>
+      {fields.map((field, index) => (
+        <div key={field.id}>
+          <input {...register(`contacts.${index}.name`)} />
+          <input {...register(`contacts.${index}.phone`)} />
+          <button onClick={() => remove(index)}>删除</button>
+        </div>
+      ))}
+      <button onClick={() => append({ name: "", phone: "" })}>添加联系人</button>
+    </div>
+  );
+}
+```
+
+### 应用实践
+
+- **数组字段用 `field.id` 做 key**：不要用 index，删除中间项时 index 变化会导致输入框错位。RHF 的 `field.id` 是稳定的；
+- **嵌套字段用点路径**：`register("address.city")` 会自动创建嵌套对象，提交时 `data.address.city` 直接可用；
+- **动态表单结合低代码引擎**：根据后端返回的字段 Schema 动态渲染表单，可以复用 [38 册低代码表单引擎](./38-lowcode-form-engine.md) 的 Schema 渲染层，校验交给 RHF + Zod。
+
+---
+
+## 85.5 自测题
+
+<details>
+<summary><b>1. 【基础】React Hook Form 为什么比受控表单性能好？</b></summary>
+
+两个核心设计：① 非受控——字段值存在 ref 里，输入时直接操作 DOM，不触发 React 重渲染；② 按需订阅——`formState.errors` 只通知订阅了它的组件，其他字段值的变化不触发重渲染。受控表单每个字段一个 useState，输入时整个表单组件重渲染，字段多时卡顿。
+</details>
+
+<details>
+<summary><b>2. 【进阶】`touched` 机制解决什么问题？</b></summary>
+
+解决"表单一加载就全标红"的糟糕体验。用户还没填的字段不应该一开始就报错。RHF 跟踪每个字段是否被触碰过（focus + blur），默认只在字段被触碰后才显示错误。`mode: "onBlur"` 就是这个机制的典型应用。
+</details>
+
+<details>
+<summary><b>3. 【进阶】为什么推荐 Zod + RHF 而不是 RHF 内置校验？</b></summary>
+
+三个原因：① Schema 是唯一事实来源，前端表单和后端 API 校验用同一份 Zod Schema，保证契约一致；② 表达力强——条件必填、跨字段校验、类型转换都能写，RHF 内置校验难以表达；③ 类型推导——`z.infer` 直接得到表单数据的 TS 类型，不用手写 interface。
+</details>
+
+<details>
+<summary><b>4. 【挑战】`useFieldArray` 为什么用 `field.id` 做 key 而不是 index？</b></summary>
+
+数组字段动态增删时，index 会变化。如果用 index 做 key，删除中间项后，后面的输入框会和错误的 field 绑定，导致输入值错位或校验错误串位。RHF 给每个 field 生成稳定的 `id`，用它做 key 能保证 React 正确复用 DOM 节点，删除中间项不影响其他项。
+</details>
+
+---
+
+## 85.6 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 大表单卡顿 | 每个字段 useState，输入时全表单重渲染 | 用 RHF 非受控模式，值存 ref，按需订阅 |
+| watch 全表单 | `watch()` 不带参数，任何字段变化都重渲染 | 只 `watch("specificField")` 订阅需要的字段 |
+| 表单一加载全标红 | 没用到 touched 机制，初始就显示错误 | 用 `mode: "onBlur"`，只对 touched 字段显示错误 |
+| 校验分散 | 前端一套规则、后端一套规则，不一致 | 用 Zod Schema 做唯一事实来源，前后端共享 |
+| 数组字段 key 用 index | 删除中间项后输入框值错位 | 用 RHF 提供的 `field.id` 做 key，不用 index |
+| 异步校验阻塞 | 查重请求阻塞整个表单校验 | 异步校验单独处理，不放在 Schema 的 refine 里 |
+| 跨组件传 form | 层层传递 form props，子组件难维护 | 用 `FormProvider` + `useFormContext` 共享表单实例 |
+
+---
+
+## 85.7 面试问答
+
+<details>
+<summary><b>【L2】React Hook Form 为什么性能好？核心设计是什么？</b></summary>
+
+**回答框架**：两个核心设计——① 非受控：字段值存在 ref 里，输入时直接操作 DOM，不触发 React 重渲染；② 按需订阅：formState.errors 只通知订阅了它的组件，其他字段变化不触发重渲染。对比受控表单每个字段一个 useState，输入时整个表单重渲染。
+
+**评分要点**：知道非受控（值存 ref）；知道按需订阅；能对比受控表单的问题。
+
+**加分项**：提到 watch 不带参数会订阅全表单；提到 useFormContext 跨组件共享。
+</details>
+
+<details>
+<summary><b>【L2】为什么表单校验推荐 Zod + RHF 而不是 RHF 内置校验？</b></summary>
+
+**回答框架**：① Schema 是唯一事实来源——前端表单和后端 API 校验用同一份 Zod Schema，保证契约一致；② 表达力强——条件必填、跨字段校验、类型转换都能写，RHF 内置校验难以表达；③ 类型推导——z.infer 直接得到表单数据的 TS 类型。
+
+**评分要点**：知道前后端共享 Schema；知道 Zod 表达力更强；知道类型推导。
+
+**加分项**：提到 @hookform/resolvers 的 zodResolver；提到异步校验不放在 Schema 里。
+</details>
+
+<details>
+<summary><b>【L3】一个表单有 50 个字段，其中 10 个是动态增减的数组字段，怎么用 RHF 实现并保证性能？</b></summary>
+
+**回答框架**：① 用 RHF 非受控模式，50 个字段输入不触发全表单重渲染；② 动态数组字段用 useFieldArray，key 用 field.id 不用 index；③ 用 FormProvider + useFormContext 拆分组件，每个子组件只订阅自己关心的字段；④ watch 只订阅需要的字段，不 watch() 全表单；⑤ 校验用 Zod + zodResolver，提交时统一校验。
+
+**评分要点**：知道非受控模式保证性能；知道 useFieldArray 和 field.id；知道 FormProvider 拆分。
+
+**加分项**：提到用 useWatch 替代 watch 做细粒度订阅；提到大表单可以拆分多个 useForm；提到虚拟列表渲染大量字段。
+</details>
+
+<details>
+<summary><b>【L3】表单提交时发现后端校验失败（如用户名已存在），前端怎么把错误展示到对应字段？</b></summary>
+
+**回答框架**：① handleSubmit 的 onSubmit 里发请求，后端返回 400 + 字段级错误；② 用 setError("username", { type: "server", message: "用户名已存在" }) 把后端错误塞回 RHF 的 errors；③ 表单会自动展示该字段的错误；④ 如果是全局错误（非字段级），用 setError("root.serverError", ...) 放在表单顶部。
+
+**评分要点**：知道 setError 把后端错误塞回 RHF；知道字段级和全局错误的区别。
+
+**加分项**：提到提交失败后要把 isSubmitting 设回 false；提到错误要在用户修改该字段后自动清除；提到 422 响应的错误结构约定。
+</details>
+
+---
+
+## 85.8 代码审查清单
+
+| 审查项 | 关注点 | 常见问题 | 建议 |
+| --- | --- | --- | --- |
+| 非受控模式 | 是否用 register 而非 useState | 每个字段 useState 导致重渲染 | 用 register 绑定，值存 ref |
+| watch 范围 | 是否 watch 全表单 | watch() 导致任意变化重渲染 | 只 watch("field") 订阅需要的 |
+| touched 机制 | 是否用 onBlur 模式 | 表单一加载全标红 | mode: "onBlur"，只对 touched 报错 |
+| 校验来源 | 是否用 Zod Schema | 前端后端各一套规则 | Zod Schema 前后端共享 |
+| 数组字段 key | 是否用 field.id | 用 index 导致删项错位 | 用 field.id 做 key |
+| 异步校验 | 是否阻塞表单校验 | 查重放在 Schema refine 里 | 异步校验单独处理 |
+| 跨组件共享 | 是否用 FormProvider | 层层传 form props | FormProvider + useFormContext |
+| 后端错误展示 | 是否用 setError | 后端错误不展示到字段 | setError 把 400 错误塞回 RHF |
+| 提交状态 | isSubmitting 是否正确复位 | 请求失败按钮一直 loading | 失败时 catch 里复位 |
+| 默认值 | 是否设 defaultValues | 编辑表单初始值为空 | useForm 传 defaultValues |

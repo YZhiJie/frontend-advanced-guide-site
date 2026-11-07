@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg56" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#101a33"/>
+    </linearGradient>
+    <linearGradient id="titleGrad56" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <marker id="arrow56" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="840" fill="url(#bg56)"/>
+  <polygon points="980,0 1060,0 760,840 680,840" fill="#f472b6" opacity="0.04"/>
+  <polygon points="150,0 220,0 1040,840 970,840" fill="#34d399" opacity="0.03"/>
+
+  <rect x="20" y="14" width="92" height="36" rx="9" fill="#7C3AED"/>
+  <text x="66" y="38" text-anchor="middle" font-size="18" font-weight="bold" fill="#ffffff">EP.56</text>
+  <text x="126" y="40" font-size="26" font-weight="bold" fill="url(#titleGrad56)">路由那道门卫</text>
+  <text x="1180" y="38" text-anchor="end" font-size="13" fill="#64748b">进阶漫画剧场 · 霓虹墨 NEON INK</text>
+  <rect x="20" y="62" width="1160" height="2" rx="1" fill="url(#titleGrad56)" opacity="0.6"/>
+
+  
+  <g transform="translate(20,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#22d3ee" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#22d3ee"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">1</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">困境：刷新就 404</text>
+    <g transform="translate(52,120)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#a78bfa"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-4 Q-8,-16 0,-4 Q8,-16 16,-4 Q8,-8 0,-4 Q-8,-8 -16,-4 Z" fill="#22d3ee"/>
+      <path d="M0,-16 L0,-4" stroke="#22d3ee" stroke-width="3"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+      <rect x="-14" y="12" width="28" height="18" rx="4" fill="#7C3AED"/>
+      <text x="0" y="25" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">{"}"}</text>
+    </g>
+    <polygon points="88,110 74,116 88,122" fill="#f8fafc"/>
+    <rect x="88" y="86" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="110" font-size="15" fill="#0b1220">登录后直接输 /system/role，</text>
+    <text x="102" y="132" font-size="15" fill="#0b1220">刷新页面直接跳到 404？</text>
+    <rect x="24" y="162" width="524" height="82" rx="8" fill="#0a0f1c" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="38" y="184" font-size="12.5" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">// 路由注册顺序错了</text>
+    <text x="38" y="206" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">router.addRoute({ path: '/:pathMatch(.*)*',</text>
+    <text x="38" y="226" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">  redirect: '/404' })</text>
+    <text x="38" y="246" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">// ← 动态路由还没注册就先命中它了</text>
+    <rect x="24" y="254" width="524" height="88" rx="8" fill="#111a30" stroke="#1e2a44"/>
+    <rect x="24" y="254" width="4" height="88" rx="2" fill="#f97316"/>
+    <text x="40" y="278" font-size="13.5" fill="#e2e8f0">404 通配路由必须最后注册</text>
+    <text x="40" y="298" font-size="13.5" fill="#94a3b8">否则动态路由还没 addRoute，刷新就被截走</text>
+    <text x="40" y="318" font-size="13.5" fill="#f97316">← 顺序是关键</text>
+  </g>
+
+  
+  <g transform="translate(608,84)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#a78bfa" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#a78bfa"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">2</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">揭秘：守卫三态纯函数</text>
+    <g transform="translate(52,120)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,110 74,116 88,122" fill="#f8fafc"/>
+    <rect x="88" y="86" width="440" height="58" rx="10" fill="#f8fafc"/>
+    <text x="102" y="110" font-size="15" fill="#0b1220">守卫只返回三种结果，</text>
+    <text x="102" y="132" font-size="15" fill="#0b1220">框架层负责翻译成行为。</text>
+    <rect x="24" y="162" width="524" height="180" rx="8" fill="#0a0f1c" stroke="#a78bfa" stroke-opacity="0.35"/>
+    <rect x="40" y="178" width="156" height="60" rx="8" fill="#111a30" stroke="#34d399" stroke-opacity="0.4"/>
+    <text x="118" y="202" text-anchor="middle" font-size="14" font-weight="bold" fill="#34d399">allow</text>
+    <text x="118" y="222" text-anchor="middle" font-size="11" fill="#94a3b8">登录 + 有权限 → 放行</text>
+    <rect x="208" y="178" width="156" height="60" rx="8" fill="#111a30" stroke="#fbbf24" stroke-opacity="0.4"/>
+    <text x="286" y="202" text-anchor="middle" font-size="14" font-weight="bold" fill="#fbbf24">redirect</text>
+    <text x="286" y="222" text-anchor="middle" font-size="11" fill="#94a3b8">未登录 → 跳登录+redirect</text>
+    <rect x="376" y="178" width="156" height="60" rx="8" fill="#111a30" stroke="#f472b6" stroke-opacity="0.4"/>
+    <text x="454" y="202" text-anchor="middle" font-size="14" font-weight="bold" fill="#f472b6">forbidden</text>
+    <text x="454" y="222" text-anchor="middle" font-size="11" fill="#94a3b8">登录但无权限 → 403</text>
+    <text x="286" y="266" text-anchor="middle" font-size="12.5" fill="#e2e8f0">守卫写成纯函数，不调用 router API</text>
+    <text x="286" y="286" text-anchor="middle" font-size="12.5" fill="#e2e8f0">Vue beforeEach / React loader 各调一次</text>
+    <text x="286" y="312" text-anchor="middle" font-size="12" fill="#fbbf24">返回值 = 事实，框架只做翻译</text>
+    <text x="286" y="330" text-anchor="middle" font-size="12" fill="#94a3b8">避免 Vue/React 各写一份逻辑分叉</text>
+  </g>
+
+  
+  <g transform="translate(20,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="380,0 450,0 120,361 50,361" fill="#f472b6" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f472b6"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">3</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">实证：方案 A 静态路由+过滤</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#1d4ed8"/>
+      <path d="M-5,18 L5,18 L3.5,27 L0,29 L-3.5,27 Z" fill="#f97316"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 L-11,-13 L-6,-4 L0,-14 L6,-4 L11,-13 L16,-2 Q0,-11 -16,-2 Z" fill="#f97316"/>
+      <circle cx="-5" cy="0" r="1.7" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.7" fill="#0b1220"/>
+      <path d="M-3,5 q3,3 6,0" stroke="#0b1220" stroke-width="1.3" fill="none"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="50" rx="10" fill="#f8fafc"/>
+    <text x="102" y="98" font-size="15" fill="#0b1220">前端维护全量路由表，</text>
+    <text x="102" y="118" font-size="15" fill="#0b1220">后端只返回权限码。</text>
+    <rect x="24" y="142" width="524" height="198" rx="8" fill="#0a0f1c" stroke="#f472b6" stroke-opacity="0.35"/>
+    <text x="38" y="164" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">// 方案 A：前端静态路由表 + 权限过滤</text>
+    <text x="38" y="186" font-size="12.5" fill="#f472b6" font-family="'SF Mono',Consolas,monospace">filterRoutes(allRoutes, permissionCodes)</text>
+    <text x="38" y="206" font-size="12.5" fill="#7dd3fc" font-family="'SF Mono',Consolas,monospace">  → 只保留有权限的路由，再 addRoute</text>
+    <text x="38" y="232" font-size="12.5" fill="#22d3ee" font-family="'SF Mono',Consolas,monospace">// 方案 B（不推荐）：后端下发 componentKey</text>
+    <text x="38" y="252" font-size="12.5" fill="#f97316" font-family="'SF Mono',Consolas,monospace">componentMap[key] → 后端加菜单前端必改</text>
+    <text x="38" y="278" font-size="12" fill="#34d399" font-family="'SF Mono',Consolas,monospace">✓ 方案 A：组件映射在前端，新增菜单前端加一条</text>
+    <text x="38" y="298" font-size="12" fill="#34d399" font-family="'SF Mono',Consolas,monospace">✓ 新增角色 → 只改后端 角色-权限 表，前端零改</text>
+    <text x="38" y="322" font-size="12" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">路由 name 必须唯一且稳定</text>
+    <text x="38" y="340" font-size="12" fill="#fbbf24" font-family="'SF Mono',Consolas,monospace">后端用 name 控可见性，别用 path（path 会变）</text>
+  </g>
+
+  
+  <g transform="translate(608,462)">
+    <rect width="572" height="361" rx="14" fill="#0e1730" stroke="#223055"/>
+    <polygon points="420,0 480,0 150,361 90,361" fill="#f97316" opacity="0.04"/>
+    <rect x="14" y="13" width="26" height="20" rx="6" fill="#f97316"/>
+    <text x="27" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b1220">4</text>
+    <text x="50" y="29" font-size="17" font-weight="bold" fill="#e2e8f0">结案：注册顺序是命门</text>
+    <g transform="translate(52,110)">
+      <rect x="-19" y="14" width="38" height="22" rx="9" fill="#cbd5e1"/>
+      <circle cx="0" cy="-2" r="16" fill="#ffd9b3"/>
+      <path d="M-16,-2 a16,16 0 0 1 32,0 q-3,-12 -16,-12 q-13,0 -16,12 z" fill="#e2e8f0"/>
+      <circle cx="-5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="5" cy="0" r="4" fill="none" stroke="#94a3b8" stroke-width="1.4"/>
+      <path d="M-1,0 L1,0" stroke="#94a3b8" stroke-width="1.4"/>
+      <circle cx="-5" cy="0" r="1.4" fill="#0b1220"/>
+      <circle cx="5" cy="0" r="1.4" fill="#0b1220"/>
+      <path d="M-8,5 q8,7 16,0 q-2,7 -8,7 q-6,0 -8,-7 z" fill="#e2e8f0"/>
+    </g>
+    <polygon points="88,100 74,106 88,112" fill="#f8fafc"/>
+    <rect x="88" y="76" width="440" height="50" rx="10" fill="#f8fafc"/>
+    <text x="102" y="98" font-size="15" fill="#0b1220">动态路由 → 404，顺序不能反。</text>
+    <text x="102" y="118" font-size="15" fill="#0b1220">守卫放 beforeEach 里判断是否已注册。</text>
+    <rect x="24" y="142" width="524" height="70" rx="8" fill="#0a0f1c" stroke="#f97316" stroke-opacity="0.35"/>
+    <rect x="24" y="142" width="4" height="70" rx="2" fill="#f97316"/>
+    <text x="38" y="166" font-size="13.5" font-weight="bold" fill="#f97316">⚠ 坑点：404 路由注册太早</text>
+    <text x="38" y="186" font-size="12.5" fill="#e2e8f0">动态路由还没 addRoute，刷新先命中 /:pathMatch(*)</text>
+    <text x="38" y="204" font-size="12.5" fill="#94a3b8">正确：动态路由全注册完，最后再 addRoute 404</text>
+    <rect x="24" y="224" width="524" height="118" rx="8" fill="#111a30" stroke="#34d399" stroke-opacity="0.3"/>
+    <text x="40" y="248" font-size="13.5" font-weight="bold" fill="#34d399">✓ 注册时机</text>
+    <text x="40" y="270" font-size="12.5" fill="#e2e8f0">beforeEach 里判断「动态路由是否已注册」</text>
+    <text x="40" y="290" font-size="12.5" fill="#e2e8f0">未注册 → 拉权限 → filterRoutes → addRoute</text>
+    <text x="40" y="310" font-size="12.5" fill="#e2e8f0">→ next({ ...to, replace: true }) 重新跳转</text>
+    <text x="40" y="332" font-size="12" fill="#64748b">码叔：守卫是门卫，不是装修队——只管放行不放行。</text>
+  </g>
+</svg>

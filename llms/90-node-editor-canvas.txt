@@ -1,0 +1,222 @@
+# 第九十部分 · 可视化画布与节点编辑器（分册全文）
+
+> 来源：高级前端进阶指南（v1.92.0）· 在线阅读 https://yzhijie.github.io/frontend-advanced-guide-site/90-node-editor-canvas
+> 本文件由 scripts/build-llms.mjs 自动生成，整包见 https://yzhijie.github.io/frontend-advanced-guide-site/llms-full.txt
+# 第九十部分 · 可视化画布与节点编辑器
+
+> 🧭 [返回总目录](./README.md)｜上一篇：[第八十九部分 · RAG 知识库前端](./89-rag-knowledge-base.md)｜关联章节：[第四十二部分 · 工作流与审批引擎](./42-workflow-approval.md) · [第五十八部分 · 可视化实战](./58-visualization-practice.md) · [第七十九部分 · AI Agent 执行编排](./79-agent-execution-orchestration.md)
+
+> 💡 **本章特色**：B 端 AI SaaS JD 明确要求"工作流编排与可视化画布，React Flow 或同类工具，节点连线、拖拽缩放"；Vue3+AI JD 要求"ECharts/G6/X6 可视化"。可视化画布（node editor）是 AI 工作流、低代码、流程编排的核心交互。本章讲清五件事：**图数据模型**（node/edge）、**DAG 校验**（环检测）、**连线合法性**（自连/重复/input-output 规则）、**自动布局**（dagre 分层）、**拖拽与缩放**。配套示例 [90-01-node-editor-canvas.ts](./examples/90-01-node-editor-canvas.ts) 跑通图模型、环检测、连线校验、自动布局、拖拽。
+
+## 本部分内容
+
+- [90.1 可视化画布的核心：图数据模型](#_90-1-可视化画布的核心-图数据模型)
+- [90.2 DAG 校验与连线规则](#_90-2-dag-校验与连线规则)
+- [90.3 自动布局：dagre 分层算法](#_90-3-自动布局-dagre-分层算法)
+- [90.4 拖拽、缩放与视口管理](#_90-4-拖拽、缩放与视口管理)
+- [90.5 React Flow / G6 / X6 选型](#_90-5-react-flow-g6-x6-选型)
+- [90.6 自测题](#_90-6-自测题)
+- [90.7 本章避坑清单](#_90-7-本章避坑清单)
+
+---
+
+## 90.1 可视化画布的核心：图数据模型
+
+### 概念解析
+
+可视化画布的本质是一个**图（Graph）**：节点（Node）+ 边（Edge）。
+
+```ts
+interface Node {
+  id: string;
+  type: "input" | "process" | "condition" | "output";
+  label: string;
+  position: { x: number; y: number };
+  data: Record<string, unknown>; // 节点配置
+}
+interface Edge {
+  id: string;
+  source: string;
+  target: string;
+  label?: string; // 条件分支标签
+}
+```
+
+节点有类型：`input`（开始/输入）、`process`（处理/AI 调用）、`condition`（条件分支）、`output`（结束/输出）。边连接节点，表示执行顺序或数据流。
+
+### 应用实践
+
+- **节点和边分离存储**：不要在节点里存边信息，边独立存储，方便增删和校验；
+- **节点 id 全局唯一**：用 uuid 或雪花 id，不要用序号（删除节点后序号会冲突）；
+- **节点 data 存配置**：每个节点的参数（如 AI 调用的 prompt、工具名）存在 `data` 里，执行时读取。
+
+---
+
+## 90.2 DAG 校验与连线规则
+
+### 概念解析
+
+工作流画布通常是 **DAG（有向无环图）**——不能有环，否则会无限循环。连线时要做校验：
+
+| 规则 | 说明 |
+| --- | --- |
+| 不能自连 | source !== target |
+| 不能重复连线 | 同 source→target 只能一条（条件分支除外） |
+| 不能成环 | 连线后用 DFS 检测环 |
+| output 无出边 | 输出节点不能再连出去 |
+| input 无入边 | 输入节点不能被连入 |
+
+环检测用 **DFS + 递归栈**：遍历节点时维护当前递归路径上的节点集合，如果遇到已在路径中的节点，说明有环。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/90-01-node-editor-canvas.ts（节选：环检测 + 连线校验）
+export function hasCycle(graph: Graph): boolean {
+  const inStack = new Set<string>();
+  function dfs(node: string): boolean {
+    inStack.add(node);
+    for (const next of adj.get(node) || []) {
+      if (inStack.has(next) || (!visited.has(next) && dfs(next))) return true;
+    }
+    inStack.delete(node);
+    return false;
+  }
+  // ...
+}
+
+export function canConnect(graph: Graph, source: string, target: string) {
+  if (source === target) return { ok: false, reason: "不能自连" };
+  if (srcNode.type === "output") return { ok: false, reason: "output 不能有出边" };
+  if (tgtNode.type === "input") return { ok: false, reason: "input 不能有入边" };
+  if (hasCycle(testGraph)) return { ok: false, reason: "会形成环" };
+  return { ok: true };
+}
+```
+
+> 运行方式：`npx tsx examples/90-01-node-editor-canvas.ts`
+
+### 应用实践
+
+- **连线时实时校验**：用户拖拽连线时，合法目标高亮绿色，非法目标标红或不响应；
+- **条件分支允许多出边**：condition 节点可以连多条边（是/否分支），但每条边要有 label 区分；
+- **删除节点要级联删边**：删除节点时，所有关联的边都要删除，否则会有悬空边。
+
+---
+
+## 90.3 自动布局：dagre 分层算法
+
+### 概念解析
+
+用户手动拖拽布局容易乱，**自动布局**能一键整理。最常用的是 **dagre** 库的分层布局：
+
+1. 计算每个节点的**层级**（从 input 节点的最长路径长度）；
+2. 同层节点水平排列，层间垂直排列；
+3. 尽量减少边的交叉（dagre 内部优化）。
+
+对于 AI 工作流，层级 = 执行顺序，分层布局让用户一眼看出执行流程。
+
+### 完整代码示例
+
+```ts
+// 文件: examples/90-01-node-editor-canvas.ts（节选：自动布局）
+export function autoLayout(graph: Graph): Graph {
+  // 1. 计算层级（最长路径）
+  function getLevel(id: string): number {
+    const incoming = graph.edges.filter((e) => e.target === id);
+    if (incoming.length === 0) return 0;
+    return Math.max(...incoming.map((e) => getLevel(e.source))) + 1;
+  }
+  // 2. 按层分组，水平排列
+  // 3. 返回每个节点的 position
+}
+```
+
+### 应用实践
+
+- **布局后允许用户微调**：自动布局是起点，用户可以拖拽调整，不要强制锁定位置；
+- **大画布用虚拟渲染**：节点超过 100 个时，只渲染视口内的节点，否则卡顿；
+- **保存和恢复布局**：用户调整后的位置要持久化，下次打开恢复，不要每次都重新自动布局。
+
+---
+
+## 90.4 拖拽、缩放与视口管理
+
+### 概念解析
+
+画布交互的三件套：
+
+1. **拖拽节点**：mousedown 记录起始位置，mousemove 更新节点 position，mouseup 结束；
+2. **缩放画布**：鼠标滚轮缩放，以鼠标位置为中心缩放（不是画布中心）；
+3. **平移画布**：空白处拖拽平移，通常配合空格或中键。
+
+React Flow、G6、X6 都内置了这些交互，不用自己造轮子，但要理解原理。
+
+### 应用实践
+
+- **拖拽节点时边要实时跟随**：节点移动时，关联的边要重新计算路径，用 SVG path 实时更新；
+- **缩放要有范围限制**：min 0.2、max 2，不能无限缩小或放大；
+- **小地图（minimap）**：节点多时，右下角小地图帮助用户定位，React Flow 有 `<MiniMap>` 组件；
+- **撤销/重做**：画布操作（增删节点、连线、移动）要支持 undo/redo，用命令模式实现。
+
+---
+
+## 90.5 React Flow / G6 / X6 选型
+
+| 库 | 技术栈 | 特点 | 适用场景 |
+| --- | --- | --- | --- |
+| **React Flow** | React | 声明式、API 简洁、社区活跃、渲染性能好 | React 技术栈、AI 工作流、低代码 |
+| **G6** | 框架无关 | 图分析能力强、布局算法丰富、AntV 生态 | 关系图谱、复杂图分析、数据可视化 |
+| **X6** | 框架无关 | 流程图编辑能力强、AntV 生态、中文文档好 | 流程图、BPMN、ER 图编辑 |
+
+**选型建议**：React 技术栈选 **React Flow**（声明式、和 React 状态管理天然契合）；需要图分析（最短路径、社区发现）选 **G6**；需要专业流程图编辑（BPMN、泳道）选 **X6**。
+
+### 应用实践
+
+- **React Flow 的节点是 React 组件**：自定义节点直接写 React 组件，传 data props，比 G6/X6 的模板方式更灵活；
+- **大量节点用 G6/X6 的 Canvas 渲染**：React Flow 默认 SVG，节点超过 200 个会卡，G6/X6 支持 Canvas 渲染万级节点；
+- **边的交互用默认实现**：React Flow 的 `<Background>`、`<Controls>`、`<MiniMap>` 开箱即用，不用自己写。
+
+---
+
+## 90.6 自测题
+
+<details>
+<summary><b>1. 【基础】可视化画布为什么要做 DAG 环检测？</b></summary>
+
+工作流是按顺序执行的，如果图中有环（A→B→C→A），执行会无限循环。所以连线时必须检测是否形成环，禁止会成环的连线。环检测用 DFS + 递归栈，遇到已在当前路径中的节点就说明有环。
+</details>
+
+<details>
+<summary><b>2. 【进阶】连线校验有哪些规则？为什么 output 不能有出边？</b></summary>
+
+规则：不能自连、不能重复连线、不能成环、output 不能有出边、input 不能有入边。output 是工作流的终点，执行到 output 就结束了，不应该再连出去。input 是起点，不应该有前驱。
+</details>
+
+<details>
+<summary><b>3. 【进阶】React Flow、G6、X6 怎么选？</b></summary>
+
+React 技术栈选 React Flow（声明式、灵活）；需要图分析选 G6；需要专业流程图编辑选 X6。核心区别：React Flow 是 React 组件化，G6/X6 是命令式 + Canvas，性能更好但开发体验略重。
+</details>
+
+<details>
+<summary><b>4. 【挑战】画布有 500 个节点，怎么优化性能？</b></summary>
+
+① 虚拟渲染：只渲染视口内的节点；② 用 Canvas 代替 SVG（G6/X6 支持）；③ 边用简化路径（折线代替贝塞尔曲线）；④ 防抖重渲染（拖拽时用 rAF 合并）；⑤ 小地图用缩略图不用实时渲染。
+</details>
+
+---
+
+## 90.7 本章避坑清单
+
+| 场景 | 高频坑 | 一句话避法 |
+| --- | --- | --- |
+| 成环 | 连线不检测环，工作流无限循环 | 连线时 DFS 检测环，禁止成环连线 |
+| 自连/重复连 | 缺少连线校验 | 校验自连、重复、input/output 规则 |
+| 删节点留悬空边 | 删节点不删关联边 | 删除节点级联删除所有关联边 |
+| 布局混乱 | 用户手动拖拽后越来越乱 | 提供自动布局按钮（dagre），允许一键整理 |
+| 拖拽边不跟随 | 节点移动时边路径不更新 | 节点 position 变化时重算边的 SVG path |
+| 缩放无限制 | 无限缩小/放大导致异常 | 限制 min 0.2 / max 2 |
+| 大量节点卡顿 | 500+ 节点 SVG 渲染掉帧 | 虚拟渲染 + Canvas（G6/X6）+ 简化边路径 |
+| 无撤销重做 | 误操作无法回退 | 用命令模式实现 undo/redo |
+| 布局不持久化 | 刷新后恢复默认布局 | 保存用户调整后的 position，刷新恢复 |

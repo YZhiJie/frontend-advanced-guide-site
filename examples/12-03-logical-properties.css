@@ -1,0 +1,10 @@
+/* 文件: examples/12-03-logical-properties.css —— 逻辑属性:RTL 国际化的基石 */
+/* ❌ 物理属性:切到阿拉伯语(RTL)后图标会贴错边 */
+.bad-icon { margin-left: 8px; text-align: left; }
+
+/* ✅ 逻辑属性:RTL 环境下自动镜像为右侧/右对齐 */
+.icon {
+    margin-inline-start: 8px;  /* "阅读起始方向"的外边距 */
+    padding-block: 4px;        /* 块方向(上下)内边距 */
+    inset-inline-end: 0;       /* 定位也支持逻辑方向 */
+}
